@@ -45,15 +45,7 @@ function PresentationMode({ html, title, onClose }) {
             </p>
           </div>
         </div>
-        <button
-          onClick={onClose}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-white/20 text-gray-300 hover:text-white hover:border-white/50 text-sm transition-colors"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-          <span className="hidden sm:inline">Exit</span>
-        </button>
+        <kbd className="px-2 py-1 bg-white/10 rounded text-gray-300 text-xs font-mono">Esc</kbd>
       </div>
 
       {/* Document content */}
@@ -64,10 +56,6 @@ function PresentationMode({ html, title, onClose }) {
         />
       </div>
 
-      {/* Footer */}
-      <div className="bg-church-navy/10 border-t border-church-gold/20 text-center py-2">
-        <p className="text-xs text-gray-400">Press <kbd className="px-1.5 py-0.5 bg-gray-200 rounded text-gray-600 text-xs font-mono">Esc</kbd> to exit</p>
-      </div>
     </div>
   );
 }
