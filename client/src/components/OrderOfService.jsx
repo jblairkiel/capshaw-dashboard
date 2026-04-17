@@ -45,7 +45,6 @@ function PresentationMode({ html, title, onClose }) {
             </p>
           </div>
         </div>
-        <kbd className="px-2 py-1 bg-white/10 rounded text-gray-300 text-xs font-mono">Esc</kbd>
       </div>
 
       {/* Document content */}
