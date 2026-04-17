@@ -34,7 +34,7 @@
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 
-/* Word doc viewer styles */
+/* ── Normal doc viewer ─────────────────────────────────────────────────────── */
 .docx-content h1 { @apply text-2xl font-bold mb-3 text-church-navy; }
 .docx-content h2 { @apply text-xl font-semibold mb-2 text-church-navy; }
 .docx-content h3 { @apply text-lg font-semibold mb-2; }
@@ -46,3 +46,101 @@
   @apply border border-gray-300 px-3 py-2 text-sm;
 }
 .docx-content th { @apply bg-church-navy text-white; }
+
+/* ── Presentation mode ─────────────────────────────────────────────────────── */
+.presentation-content {
+  font-family: Georgia, "Times New Roman", serif;
+  color: #1a2744;
+  line-height: 1.8;
+}
+
+/* Document title (h1) */
+.presentation-content h1 {
+  font-size: 2rem;
+  font-weight: 700;
+  text-align: center;
+  color: #1a2744;
+  margin-bottom: 0.25rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 3px solid #c9a84c;
+}
+
+/* Section headers (h2) */
+.presentation-content h2 {
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: #1a2744;
+  margin-top: 2rem;
+  margin-bottom: 0.5rem;
+  padding-left: 0.75rem;
+  border-left: 4px solid #c9a84c;
+}
+
+/* Sub-sections (h3) */
+.presentation-content h3 {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: #1a2744;
+  margin-top: 1.25rem;
+  margin-bottom: 0.35rem;
+}
+
+/* Body paragraphs */
+.presentation-content p {
+  font-size: 1.1rem;
+  margin-bottom: 0.75rem;
+  color: #2d3748;
+}
+
+/* Bold text (item names, speaker names) */
+.presentation-content strong {
+  color: #1a2744;
+  font-weight: 700;
+}
+
+/* Italics (scripture refs, instructions) */
+.presentation-content em {
+  color: #5c3d2e;
+}
+
+/* Lists */
+.presentation-content ul,
+.presentation-content ol {
+  padding-left: 1.75rem;
+  margin-bottom: 1rem;
+}
+.presentation-content li {
+  font-size: 1.1rem;
+  margin-bottom: 0.4rem;
+}
+
+/* Tables (e.g. two-column order of service) */
+.presentation-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1.5rem;
+  font-size: 1.05rem;
+}
+.presentation-content th {
+  background: #1a2744;
+  color: #c9a84c;
+  font-weight: 600;
+  text-align: left;
+  padding: 0.6rem 1rem;
+}
+.presentation-content td {
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid #e8e0d0;
+  vertical-align: top;
+}
+.presentation-content tr:nth-child(even) td {
+  background: rgba(201, 168, 76, 0.06);
+}
+
+/* Horizontal rules as gold dividers */
+.presentation-content hr {
+  border: none;
+  border-top: 2px solid #c9a84c;
+  margin: 1.5rem 0;
+  opacity: 0.4;
+}
