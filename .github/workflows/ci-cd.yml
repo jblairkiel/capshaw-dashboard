@@ -1,0 +1,69 @@
+name: CI / CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Tests ────────────────────────────────────────────────────────────────────
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 18
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install root deps
+        run: npm ci
+
+      - name: Install client deps
+        run: cd client && npm ci
+
+      - name: Server tests (Jest)
+        run: npm test
+
+      - name: Client tests (Vitest)
+        run: npm run test:client
+
+  # ── Deploy ───────────────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to capshaw.jblairkiel.com
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DO_HOST }}
+          username: ${{ secrets.DO_USER }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          script: |
+            set -e
+            cd /var/www/capshaw-dashboard
+
+            git pull origin main
+
+            # Server deps (production only)
+            npm ci --omit=dev
+
+            # Build React
+            cd client
+            npm ci
+            npm run build
+            cd ..
+
+            # Restart app
+            pm2 restart ecosystem.config.js --env production
+            pm2 save

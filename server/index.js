@@ -16,7 +16,13 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'] }));
+const isProd = process.env.NODE_ENV === 'production';
+
+app.use(cors({
+  origin: isProd
+    ? ['https://capshaw.jblairkiel.com']
+    : ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'],
+}));
 app.use(express.json());
 
 app.use('/api/scraper', scraperRoutes);
@@ -26,6 +32,15 @@ app.use('/api/documents', documentRoutes);
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
+
+// Serve React build in production
+if (isProd) {
+  const clientDist = path.join(__dirname, '../client/dist');
+  app.use(express.static(clientDist));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(clientDist, 'index.html'));
+  });
+}
 
 const SCRAPE_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 
