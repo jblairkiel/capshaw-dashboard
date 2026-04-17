@@ -221,6 +221,55 @@ function parseVisitors(html) {
   return visitors;
 }
 
+// Anniversaries: table rows are either [month] or [MM/DD, names]
+function parseAnniversaries(html) {
+  const tables = extractTables(html);
+  const main   = tables.sort((a, b) => b.length - a.length)[0] || [];
+  const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const entries = [];
+  let currentMonth = '';
+  for (const row of main) {
+    if (row.length === 1 && MONTHS.includes(row[0])) {
+      currentMonth = row[0];
+    } else if (row.length === 2 && currentMonth && row[0].match(/^\d+\/\d+/)) {
+      const [m, d] = row[0].split('/').map(Number);
+      entries.push({ month: currentMonth, date: row[0], names: row[1], monthNum: m, day: d });
+    }
+  }
+  return entries;
+}
+
+// Deacons: <strong>Name</strong> followed by <li> duties until next <strong>
+function parseDeacons(html) {
+  const SKIP = new Set(['Our Deacons', 'Their Duties', 'Deacons', 'Capshaw', 'Sunday', 'Wednesday', 'YouTube', 'Menu']);
+  const deacons = [];
+  // Isolate body content (after the title heading)
+  const bodyStart = html.indexOf('Our Deacons');
+  const bodyContent = bodyStart > -1 ? html.slice(bodyStart) : html;
+  // Split on <strong> tags to find name sections
+  const parts = bodyContent.split(/<strong[^>]*>/i);
+  for (const part of parts) {
+    const nameMatch = part.match(/^([^<]{4,50})<\/strong>/i);
+    if (!nameMatch) continue;
+    const name = stripTags(nameMatch[1]);
+    if (!name || SKIP.has(name) || name.includes('Duties') || name.includes('shepherds') || name.length > 50) continue;
+    // Collect <li> items after this name, before the next potential name block
+    const duties = [...part.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)]
+      .map(m => stripTags(m[1]))
+      .filter(d => d.length > 5 && d.length < 120 && !d.includes('Bible Study') && !d.includes('YouTube'));
+    if (duties.length > 0) deacons.push({ name, duties });
+  }
+  return deacons;
+}
+
+// Bulletins: extract PDF links from dashboard
+function parseBulletins(html) {
+  const section = html.match(/Capshaw Bulletin([\s\S]*?)(?:Member News|<h[1-4])/i)?.[1] || '';
+  return [...section.matchAll(/href="([^"]+\.pdf[^"]*)"[^>]*>\s*([^<]+)/gi)]
+    .map(m => ({ url: m[1], label: stripTags(m[2]).trim() }))
+    .filter(b => b.label && b.label.length > 3);
+}
+
 // ─── File persistence ─────────────────────────────────────────────────────────
 
 function readData() {
@@ -258,11 +307,14 @@ async function runUpdate() {
     _sessionExpiry  = 0;
     _loginPromise   = null;
 
-    const [jaPage, attPage, serPage, visPage] = await Promise.all([
+    const [jaPage, attPage, serPage, visPage, annPage, deaPage, dashPage] = await Promise.all([
       fetchPage('/members/job-assignments'),
       fetchPage('/members/attendance'),
       fetchPage('/members/sermons'),
       fetchPage('/members/visitor-tracker'),
+      fetchPage('/members/anniversaries-members-non-members'),
+      fetchPage('/members/deacons'),
+      fetchPage('/members'),
     ]);
 
     if (jaPage.url.includes('login') || attPage.url.includes('login')) {
@@ -275,6 +327,9 @@ async function runUpdate() {
       attendance:     parseAttendance(attPage.body),
       sermons:        parseSermons(serPage.body),
       visitors:       parseVisitors(visPage.body),
+      anniversaries:  parseAnniversaries(annPage.body),
+      deacons:        parseDeacons(deaPage.body),
+      bulletins:      parseBulletins(dashPage.body),
     };
 
     saveData(data);

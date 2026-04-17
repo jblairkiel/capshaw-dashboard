@@ -6,16 +6,20 @@ import JobAssignments from './components/JobAssignments';
 import AttendanceView from './components/AttendanceView';
 import SermonsView from './components/SermonsView';
 import VisitorTracker from './components/VisitorTracker';
+import AnniversariesView from './components/AnniversariesView';
+import LeadershipView from './components/LeadershipView';
 
 const API = '/api/members';
 
 const TABS = [
-  { id: 'assignments', label: 'Job Assignments' },
-  { id: 'attendance',  label: 'Attendance' },
-  { id: 'sermons',     label: 'Sermons' },
-  { id: 'visitors',    label: 'Visitors' },
-  { id: 'order',       label: 'Order of Service' },
-  { id: 'calendar',    label: 'Calendar' },
+  { id: 'assignments',   label: 'Job Assignments' },
+  { id: 'attendance',    label: 'Attendance' },
+  { id: 'sermons',       label: 'Sermons' },
+  { id: 'visitors',      label: 'Visitors' },
+  { id: 'anniversaries', label: 'Anniversaries' },
+  { id: 'leadership',    label: 'Leadership' },
+  { id: 'order',         label: 'Order of Service' },
+  { id: 'calendar',      label: 'Calendar' },
 ];
 
 export default function App() {
@@ -156,8 +160,10 @@ export default function App() {
           {activeTab === 'assignments' && <JobAssignments data={siteData.jobAssignments} />}
           {activeTab === 'attendance'  && <AttendanceView data={siteData.attendance} />}
           {activeTab === 'sermons'     && <SermonsView data={siteData.sermons} />}
-          {activeTab === 'visitors'    && <VisitorTracker data={siteData.visitors} />}
-          {activeTab === 'order'       && <OrderOfService />}
+          {activeTab === 'visitors'      && <VisitorTracker data={siteData.visitors} />}
+          {activeTab === 'anniversaries' && <AnniversariesView data={siteData.anniversaries} />}
+          {activeTab === 'leadership'    && <LeadershipView deacons={siteData.deacons} bulletins={siteData.bulletins} />}
+          {activeTab === 'order'         && <OrderOfService />}
           {activeTab === 'calendar'    && <CalendarView />}
         </main>
       )}
