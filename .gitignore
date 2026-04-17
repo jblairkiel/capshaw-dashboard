@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+client/node_modules/
+
+# Environment — contains credentials, never commit
+.env
+.env.local
+.env.*.local
+
+# Scraped data — regenerated at runtime, no need to track
+server/data/members.json
+
+# Build output
+client/dist/
+client/dist-ssr/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/

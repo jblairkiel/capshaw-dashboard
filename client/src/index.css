@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-church-cream text-gray-800 font-sans m-0;
+  }
+
+  h1, h2, h3 {
+    @apply font-serif;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white rounded-xl shadow-md border border-gray-100 p-6;
+  }
+
+  .btn-primary {
+    @apply bg-church-navy text-white px-4 py-2 rounded-lg hover:bg-opacity-90 transition-colors cursor-pointer border-0;
+  }
+
+  .btn-gold {
+    @apply bg-church-gold text-white px-4 py-2 rounded-lg hover:bg-opacity-90 transition-colors cursor-pointer border-0;
+  }
+
+  .section-heading {
+    @apply text-xl font-serif font-semibold text-church-navy border-b-2 border-church-gold pb-2 mb-4;
+  }
+}
+
+/* Word doc viewer styles */
+.docx-content h1 { @apply text-2xl font-bold mb-3 text-church-navy; }
+.docx-content h2 { @apply text-xl font-semibold mb-2 text-church-navy; }
+.docx-content h3 { @apply text-lg font-semibold mb-2; }
+.docx-content p  { @apply mb-2 leading-relaxed; }
+.docx-content ul { @apply list-disc pl-6 mb-2; }
+.docx-content ol { @apply list-decimal pl-6 mb-2; }
+.docx-content table { @apply w-full border-collapse mb-4; }
+.docx-content td, .docx-content th {
+  @apply border border-gray-300 px-3 py-2 text-sm;
+}
+.docx-content th { @apply bg-church-navy text-white; }
