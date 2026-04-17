@@ -100,11 +100,11 @@ export default function JobAssignments({ data }) {
         />
       </div>
 
-      {/* Two-column layout */}
-      <div className="flex gap-6 items-start">
+      {/* Two-column layout: stacks on mobile, side-by-side on lg+ */}
+      <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 items-start">
 
         {/* Left: main assignments, scrollable */}
-        <div className="flex-1 min-w-0 space-y-4 overflow-y-auto max-h-[75vh] pr-1">
+        <div className="flex-1 min-w-0 space-y-4 overflow-y-auto max-h-[75vh] pr-1 w-full">
           {Object.entries(filtered).map(([date, rows]) => (
             <div key={date} className="card p-0 overflow-hidden">
               <div className="bg-church-navy px-4 py-2">
@@ -138,8 +138,8 @@ export default function JobAssignments({ data }) {
           )}
         </div>
 
-        {/* Right: AV Operator rotation, sticky */}
-        <div className="w-72 shrink-0 sticky top-4">
+        {/* Right: AV Operator rotation — full width on mobile, fixed sidebar on lg+ */}
+        <div className="w-full lg:w-72 lg:shrink-0 lg:sticky lg:top-16">
           <AVColumn assignments={all} />
         </div>
 

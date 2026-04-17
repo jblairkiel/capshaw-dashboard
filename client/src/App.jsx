@@ -62,15 +62,17 @@ export default function App() {
     <div className="min-h-screen bg-church-cream flex flex-col">
       <Header />
 
-      {/* Tab nav + Update button */}
-      <div className="bg-church-navy shadow-md">
+      {/* Tab nav + Update button — sticky so it stays visible while scrolling */}
+      <div className="bg-church-navy shadow-md sticky top-0 z-10">
         <div className="max-w-6xl mx-auto flex items-center">
-          <div className="flex flex-wrap flex-1">
+
+          {/* Tabs — horizontally scrollable on mobile, no wrap */}
+          <div className="flex overflow-x-auto scrollbar-hide flex-1 min-w-0">
             {TABS.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`px-5 py-3 text-sm font-medium transition-colors border-b-2 ${
+                className={`shrink-0 px-4 py-3 text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
                   activeTab === tab.id
                     ? 'border-church-gold text-church-gold'
                     : 'border-transparent text-gray-300 hover:text-white'
@@ -81,38 +83,34 @@ export default function App() {
             ))}
           </div>
 
-          {/* Update Site control */}
-          <div className="flex items-center gap-3 px-4 border-l border-white/10 shrink-0">
+          {/* Update control — icon-only on small screens */}
+          <div className="flex items-center gap-2 px-3 border-l border-white/10 shrink-0">
             {lastUpdated && (
-              <span className="text-xs text-gray-400 hidden sm:block">
+              <span className="text-xs text-gray-400 hidden lg:block">
                 Updated {lastUpdated}
               </span>
             )}
             <button
               onClick={handleUpdate}
               disabled={updating}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors border ${
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors border ${
                 updating
                   ? 'border-gray-600 text-gray-500 cursor-not-allowed'
                   : 'border-church-gold text-church-gold hover:bg-church-gold hover:text-church-navy'
               }`}
             >
               {updating ? (
-                <>
-                  <span className="animate-spin inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full" />
-                  Updating…
-                </>
+                <span className="animate-spin inline-block w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full" />
               ) : (
-                <>
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  Update Site
-                </>
+                <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
               )}
+              <span className="hidden sm:inline">{updating ? 'Updating…' : 'Update'}</span>
             </button>
           </div>
+
         </div>
       </div>
 
@@ -156,7 +154,7 @@ export default function App() {
 
       {/* Tab content — only shown when data exists and not actively updating */}
       {siteData && !updating && (
-        <main className="max-w-6xl mx-auto px-4 py-8 flex-1">
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           {activeTab === 'assignments' && <JobAssignments data={siteData.jobAssignments} />}
           {activeTab === 'attendance'  && <AttendanceView data={siteData.attendance} />}
           {activeTab === 'sermons'     && <SermonsView data={siteData.sermons} />}

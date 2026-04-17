@@ -14,7 +14,7 @@
 
 @layer components {
   .card {
-    @apply bg-white rounded-xl shadow-md border border-gray-100 p-6;
+    @apply bg-white rounded-xl shadow-md border border-gray-100 p-4 sm:p-6;
   }
 
   .btn-primary {
@@ -29,6 +29,10 @@
     @apply text-xl font-serif font-semibold text-church-navy border-b-2 border-church-gold pb-2 mb-4;
   }
 }
+
+/* Hide scrollbar while keeping scroll behavior */
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
 
 /* Word doc viewer styles */
 .docx-content h1 { @apply text-2xl font-bold mb-3 text-church-navy; }
