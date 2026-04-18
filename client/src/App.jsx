@@ -8,6 +8,7 @@ import SermonsView from './components/SermonsView';
 import VisitorTracker from './components/VisitorTracker';
 import AnniversariesView from './components/AnniversariesView';
 import LeadershipView from './components/LeadershipView';
+import BibleClassView from './components/BibleClassView';
 
 const API = '/api/members';
 
@@ -18,6 +19,7 @@ const TABS = [
   { id: 'visitors',      label: 'Visitors' },
   { id: 'anniversaries', label: 'Anniversaries' },
   { id: 'leadership',    label: 'Leadership' },
+  { id: 'bible-class',   label: 'Bible Class' },
   { id: 'order',         label: 'Order of Service' },
   { id: 'calendar',      label: 'Calendar' },
 ];
@@ -152,17 +154,32 @@ export default function App() {
         </div>
       )}
 
-      {/* Tab content — only shown when data exists and not actively updating */}
-      {siteData && !updating && (
+      {/* Tabs that don't need scraped data — always accessible */}
+      {!updating && activeTab === 'bible-class' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
-          {activeTab === 'assignments' && <JobAssignments data={siteData.jobAssignments} />}
-          {activeTab === 'attendance'  && <AttendanceView data={siteData.attendance} />}
-          {activeTab === 'sermons'     && <SermonsView data={siteData.sermons} />}
+          <BibleClassView />
+        </main>
+      )}
+      {!updating && activeTab === 'order' && (
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <OrderOfService />
+        </main>
+      )}
+      {!updating && activeTab === 'calendar' && (
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <CalendarView />
+        </main>
+      )}
+
+      {/* Tabs that require scraped data */}
+      {siteData && !updating && !['bible-class','order','calendar'].includes(activeTab) && (
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          {activeTab === 'assignments'   && <JobAssignments data={siteData.jobAssignments} />}
+          {activeTab === 'attendance'    && <AttendanceView data={siteData.attendance} />}
+          {activeTab === 'sermons'       && <SermonsView data={siteData.sermons} />}
           {activeTab === 'visitors'      && <VisitorTracker data={siteData.visitors} />}
           {activeTab === 'anniversaries' && <AnniversariesView data={siteData.anniversaries} />}
           {activeTab === 'leadership'    && <LeadershipView deacons={siteData.deacons} bulletins={siteData.bulletins} />}
-          {activeTab === 'order'         && <OrderOfService />}
-          {activeTab === 'calendar'    && <CalendarView />}
         </main>
       )}
 

@@ -5,7 +5,8 @@ const path = require('path');
 const fs = require('fs');
 
 const { router: scraperRoutes, runUpdate, readData } = require('./routes/scraper');
-const documentRoutes = require('./routes/documents');
+const documentRoutes   = require('./routes/documents');
+const bibleClassRoutes = require('./routes/bibleClass');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -27,7 +28,8 @@ app.use(express.json());
 
 app.use('/api/scraper', scraperRoutes);
 app.use('/api/members', scraperRoutes);
-app.use('/api/documents', documentRoutes);
+app.use('/api/documents',   documentRoutes);
+app.use('/api/bible-class', bibleClassRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

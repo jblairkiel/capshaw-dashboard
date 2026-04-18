@@ -13,6 +13,7 @@
     "test:client": "cd client && npm test"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.90.0",
     "axios": "^1.6.0",
     "cheerio": "^1.0.0",
     "concurrently": "^8.2.2",
