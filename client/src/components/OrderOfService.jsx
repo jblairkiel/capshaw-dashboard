@@ -27,7 +27,7 @@ function PresentationMode({ html, title, onClose }) {
     .replace(/_/g, ' ') || 'Order of Service';
 
   return (
-    <div className="fixed inset-0 z-50 overflow-auto bg-church-cream flex flex-col">
+    <div className="fixed inset-0 z-50 overflow-auto flex flex-col" style={{ backgroundColor: '#f9f6f0' }}>
 
       {/* Top bar */}
       <div className="bg-church-navy sticky top-0 z-10 px-6 py-3 flex items-center justify-between shadow-lg">
