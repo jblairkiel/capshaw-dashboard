@@ -1,6 +1,7 @@
 const express  = require('express');
 const router    = express.Router();
 const Anthropic = require('@anthropic-ai/sdk');
+const db        = require('../db');
 
 const GRADE_DESCRIPTIONS = {
   'preschool':        'preschool children ages 3–5. Use very simple language, yes/no questions, and focus on basic story facts like names and simple actions.',
@@ -79,6 +80,72 @@ Return ONLY a valid JSON array — no markdown fences, no explanation. Schema:
     console.error('[bible-class] error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// ─── Library: save a generated set ───────────────────────────────────────────
+
+router.post('/questions/save', (req, res) => {
+  const { passage, gradeLevel, questions } = req.body;
+  if (!passage?.trim() || !gradeLevel || !Array.isArray(questions) || !questions.length)
+    return res.status(400).json({ success: false, error: 'passage, gradeLevel, and questions required' });
+
+  const save = db.transaction(() => {
+    const { lastInsertRowid: setId } = db
+      .prepare('INSERT INTO question_sets (passage, grade) VALUES (?, ?)')
+      .run(passage.trim(), gradeLevel);
+
+    const insertQ = db.prepare(
+      'INSERT INTO questions (set_id, question, answer, type, hint) VALUES (?, ?, ?, ?, ?)'
+    );
+    for (const q of questions)
+      insertQ.run(setId, q.question, q.answer, q.type, q.hint || '');
+
+    return setId;
+  });
+
+  try {
+    res.json({ success: true, setId: save() });
+  } catch (err) {
+    console.error('[bible-class] save error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── Library: search / list saved sets ───────────────────────────────────────
+
+router.get('/questions', (req, res) => {
+  const { search = '', grade = '' } = req.query;
+
+  const conditions = ['1=1'];
+  const params     = [];
+
+  if (grade)  { conditions.push('s.grade = ?');                                              params.push(grade); }
+  if (search) { conditions.push('(s.passage LIKE ? OR q.question LIKE ? OR q.answer LIKE ?)'); params.push(...Array(3).fill(`%${search}%`)); }
+
+  const rows = db.prepare(`
+    SELECT s.id AS set_id, s.passage, s.grade, s.created_at,
+           q.id, q.question, q.answer, q.type, q.hint
+    FROM   question_sets s
+    JOIN   questions q ON q.set_id = s.id
+    WHERE  ${conditions.join(' AND ')}
+    ORDER  BY s.created_at DESC, q.id ASC
+  `).all(...params);
+
+  const map = new Map();
+  for (const r of rows) {
+    if (!map.has(r.set_id))
+      map.set(r.set_id, { id: r.set_id, passage: r.passage, grade: r.grade, createdAt: r.created_at, questions: [] });
+    map.get(r.set_id).questions.push({ id: r.id, question: r.question, answer: r.answer, type: r.type, hint: r.hint });
+  }
+
+  res.json({ success: true, sets: [...map.values()] });
+});
+
+// ─── Library: delete a set (cascades to questions) ────────────────────────────
+
+router.delete('/questions/set/:id', (req, res) => {
+  db.prepare('DELETE FROM question_sets WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
 });
 
 module.exports = router;

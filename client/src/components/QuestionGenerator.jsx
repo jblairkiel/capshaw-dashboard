@@ -69,10 +69,10 @@ export default function QuestionGenerator() {
   const [grade,     setGrade]     = useState('upper-elementary');
   const [count,     setCount]     = useState(10);
   const [types,     setTypes]     = useState(['comprehension', 'application', 'discussion']);
-  const [questions, setQuestions] = useState([]);
-  const [loading,   setLoading]   = useState(false);
-  const [error,     setError]     = useState('');
-  const [revealed,  setRevealed]  = useState({});
+  const [questions,  setQuestions]  = useState([]);
+  const [loading,    setLoading]    = useState(false);
+  const [error,      setError]      = useState('');
+  const [revealed,   setRevealed]   = useState({});
 
   const toggleType = t =>
     setTypes(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
@@ -93,6 +93,11 @@ export default function QuestionGenerator() {
       const json = await res.json();
       if (!json.success) throw new Error(json.error);
       setQuestions(json.questions);
+      fetch('/api/bible-class/questions/save', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ passage, gradeLevel: grade, questions: json.questions }),
+      }).catch(() => {});
     } catch (e) {
       setError(e.message || 'Generation failed.');
     } finally {
@@ -225,7 +230,7 @@ export default function QuestionGenerator() {
         <div className="space-y-3">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <h3 className="section-heading mb-0">{questions.length} Questions</h3>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <button
                 onClick={copyAll}
                 className="flex items-center gap-1.5 text-sm border border-gray-300 px-3 py-1.5 rounded-lg text-church-navy hover:border-church-gold hover:text-church-gold transition-colors"

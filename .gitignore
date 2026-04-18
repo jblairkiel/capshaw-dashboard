@@ -10,6 +10,11 @@ client/node_modules/
 # Scraped data — regenerated at runtime, no need to track
 server/data/members.json
 
+# SQLite database — persisted on server, not tracked in git
+server/data/bible_questions.db
+server/data/bible_questions.db-shm
+server/data/bible_questions.db-wal
+
 # Build output
 client/dist/
 client/dist-ssr/
