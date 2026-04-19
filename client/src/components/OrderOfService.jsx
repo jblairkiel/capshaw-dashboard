@@ -59,6 +59,84 @@ function PresentationMode({ html, title, onClose }) {
   );
 }
 
+// ─── Job-assignment helpers ───────────────────────────────────────────────────
+
+const JOB_TERM_OVERRIDES = {
+  Communion: ['communion', 'lord', 'supper'],
+  Usher:     ['usher'],
+  Visuals:   ['visual', 'powerpoint', 'slides'],
+  Speaker:   ['sermon', 'speaker', 'message'],
+  Sermon:    ['sermon', 'speaker', 'message'],
+};
+
+function jobTerms(name) {
+  return JOB_TERM_OVERRIDES[name]
+    ?? name.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean);
+}
+
+function groupJobs(assignments) {
+  const map = new Map();
+  for (const a of assignments) {
+    let key = a.job;
+    if (/^communion/i.test(key)) key = 'Communion';
+    else if (/^usher/i.test(key))   key = 'Usher';
+    else if (/^visual/i.test(key))  key = 'Visuals';
+    if (!map.has(key)) map.set(key, { terms: jobTerms(key), names: [] });
+    map.get(key).names.push(a.name);
+  }
+  return [...map.values()];
+}
+
+function fuzzyScore(terms, text) {
+  const t = text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+  return terms.filter(w => t.includes(w)).length / terms.length;
+}
+
+const _MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+function nearestSundayDate(ja) {
+  const [mon, yr] = ja.month.split(' ');
+  const mi = _MONTHS.indexOf(mon);
+  if (mi < 0) return null;
+  const today = new Date();
+  const sundays = [...new Set(
+    ja.assignments.filter(a => a.service === 'Sunday Worship').map(a => a.date)
+  )];
+  let best = null, bestDiff = Infinity;
+  for (const ds of sundays) {
+    const day = parseInt(ds.match(/(\d+)\s*$/)?.[1] ?? 0);
+    if (!day) continue;
+    const diff = Math.abs(new Date(parseInt(yr), mi, day) - today);
+    if (diff < bestDiff) { bestDiff = diff; best = ds; }
+  }
+  return best;
+}
+
+function applyAssignments(htmlString, groups) {
+  const doc = new DOMParser().parseFromString(htmlString, 'text/html');
+  const els = [...doc.querySelectorAll('p, li, td, h1, h2, h3, h4, h5')]
+    .filter(el => el.textContent.trim().length >= 3);
+  const used = new Set();
+  let hits = 0;
+  for (const g of groups) {
+    let best = null, top = 0;
+    for (const el of els) {
+      if (used.has(el)) continue;
+      const s = fuzzyScore(g.terms, el.textContent);
+      if (s > top) { top = s; best = el; }
+    }
+    if (best && top >= 0.5) {
+      used.add(best); hits++;
+      const sp = doc.createElement('span');
+      sp.dataset.jobAssignment = '';
+      sp.style.cssText = 'color:#1a2744;font-weight:600;margin-left:.5em;font-style:normal';
+      sp.textContent = '\u2014 ' + g.names.join(', ');
+      best.appendChild(sp);
+    }
+  }
+  return { html: doc.body.innerHTML, hits, total: groups.length };
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function OrderOfService() {
@@ -68,8 +146,35 @@ export default function OrderOfService() {
   const [loading, setLoading]         = useState(false);
   const [error, setError]             = useState('');
   const [listLoaded, setListLoaded]   = useState(false);
-  const [presenting, setPresenting]   = useState(false);
+  const [presenting,   setPresenting]   = useState(false);
+  const [annotated,    setAnnotated]    = useState('');
+  const [annotating,   setAnnotating]   = useState(false);
+  const [annotateInfo, setAnnotateInfo] = useState('');
   const fileRef = useRef();
+
+  useEffect(() => { setAnnotated(''); setAnnotateInfo(''); }, [html]);
+
+  async function handleAssignJobs() {
+    setAnnotating(true);
+    setAnnotateInfo('');
+    try {
+      const { data } = await axios.get('/api/members/data');
+      const ja = data.data.jobAssignments;
+      const dateStr = nearestSundayDate(ja);
+      if (!dateStr) { setAnnotateInfo('No Sunday Worship assignments found.'); return; }
+      const forService = ja.assignments.filter(
+        a => (a.date === dateStr && a.service === 'Sunday Worship') || a.service === 'All Month'
+      );
+      const groups = groupJobs(forService);
+      const { html: newHtml, hits, total } = applyAssignments(html, groups);
+      setAnnotated(newHtml);
+      setAnnotateInfo(`${dateStr} \u00b7 ${hits}/${total} matched`);
+    } catch {
+      setAnnotateInfo('Could not load assignments.');
+    } finally {
+      setAnnotating(false);
+    }
+  }
 
   const loadDocList = useCallback(async () => {
     try {
@@ -141,7 +246,7 @@ export default function OrderOfService() {
     <>
       {presenting && (
         <PresentationMode
-          html={html}
+          html={annotated || html}
           title={currentDoc}
           onClose={() => setPresenting(false)}
         />
@@ -232,7 +337,36 @@ export default function OrderOfService() {
               <>
                 <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
                   <h2 className="section-heading mb-0 min-w-0 truncate">{displayName}</h2>
-                  <div className="flex gap-2 shrink-0">
+                  <div className="flex items-start gap-2 shrink-0 flex-wrap justify-end">
+                    {!annotated ? (
+                      <button
+                        onClick={handleAssignJobs}
+                        disabled={annotating}
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-gray-300 text-church-navy hover:border-church-gold hover:text-church-gold transition-colors disabled:opacity-50"
+                      >
+                        {annotating
+                          ? <span className="animate-spin inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
+                          : <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                                d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                        }
+                        {annotating ? 'Assigning\u2026' : 'Assign Jobs'}
+                      </button>
+                    ) : (
+                      <div className="flex flex-col items-end gap-0.5">
+                        <button
+                          onClick={() => { setAnnotated(''); setAnnotateInfo(''); }}
+                          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium border border-gray-300 text-gray-500 hover:border-red-300 hover:text-red-500 transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                          Clear
+                        </button>
+                        {annotateInfo && <p className="text-xs text-gray-400">{annotateInfo}</p>}
+                      </div>
+                    )}
                     <button
                       onClick={() => setPresenting(true)}
                       className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-church-navy text-church-gold border border-church-gold/40 hover:bg-church-gold hover:text-church-navy transition-colors"
@@ -250,7 +384,7 @@ export default function OrderOfService() {
                 </div>
                 <div
                   className="docx-content prose max-w-none"
-                  dangerouslySetInnerHTML={{ __html: html }}
+                  dangerouslySetInnerHTML={{ __html: annotated || html }}
                 />
               </>
             )}
