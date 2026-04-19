@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import QuestionGenerator from './QuestionGenerator';
 import QuestionLibrary from './QuestionLibrary';
+import LessonPlanner from './LessonPlanner';
+import StadiumGame from './StadiumGame';
 
 // ─── App registry ─────────────────────────────────────────────────────────────
 
@@ -35,7 +37,8 @@ const APPS = [
     id:          'lesson-planner',
     title:       'Lesson Planner',
     description: 'Build a structured lesson plan — objectives, activities, and discussion points — around any scripture.',
-    available:   false,
+    component:   LessonPlanner,
+    available:   true,
     icon: (
       <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
@@ -64,6 +67,19 @@ const APPS = [
       <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
           d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+      </svg>
+    ),
+  },
+  {
+    id:          'stadium-game',
+    title:       'Bible Bowl Stadium',
+    description: 'Race your team around the stadium by answering Bible trivia! First to 3 laps wins.',
+    component:   StadiumGame,
+    available:   true,
+    icon: (
+      <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
+          d="M3 12l9-9 9 9M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9" />
       </svg>
     ),
   },

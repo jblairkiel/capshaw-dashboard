@@ -9,6 +9,7 @@ import VisitorTracker from './components/VisitorTracker';
 import AnniversariesView from './components/AnniversariesView';
 import LeadershipView from './components/LeadershipView';
 import BibleClassView from './components/BibleClassView';
+import AnnouncementsView from './components/AnnouncementsView';
 
 const API = '/api/members';
 
@@ -19,7 +20,8 @@ const TABS = [
   { id: 'visitors',      label: 'Visitors' },
   { id: 'anniversaries', label: 'Anniversaries' },
   { id: 'leadership',    label: 'Leadership' },
-  { id: 'bible-class',   label: 'Bible Class' },
+  { id: 'bible-class',    label: 'Bible Class' },
+  { id: 'announcements', label: 'Announcements' },
   { id: 'order',         label: 'Order of Service' },
   { id: 'calendar',      label: 'Calendar' },
 ];
@@ -170,9 +172,14 @@ export default function App() {
           <CalendarView />
         </main>
       )}
+      {!updating && activeTab === 'announcements' && (
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <AnnouncementsView />
+        </main>
+      )}
 
       {/* Tabs that require scraped data */}
-      {siteData && !updating && !['bible-class','order','calendar'].includes(activeTab) && (
+      {siteData && !updating && !['bible-class','order','calendar','announcements'].includes(activeTab) && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           {activeTab === 'assignments'   && <JobAssignments data={siteData.jobAssignments} />}
           {activeTab === 'attendance'    && <AttendanceView data={siteData.attendance} />}

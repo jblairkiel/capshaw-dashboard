@@ -5,8 +5,11 @@ const path = require('path');
 const fs = require('fs');
 
 const { router: scraperRoutes, runUpdate, readData } = require('./routes/scraper');
-const documentRoutes   = require('./routes/documents');
-const bibleClassRoutes = require('./routes/bibleClass');
+const documentRoutes      = require('./routes/documents');
+const bibleClassRoutes    = require('./routes/bibleClass');
+const gameQuestionRoutes  = require('./routes/gameQuestions');
+const lessonPlannerRoutes  = require('./routes/lessonPlanner');
+const announcementRoutes   = require('./routes/announcements');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -28,8 +31,11 @@ app.use(express.json());
 
 app.use('/api/scraper', scraperRoutes);
 app.use('/api/members', scraperRoutes);
-app.use('/api/documents',   documentRoutes);
-app.use('/api/bible-class', bibleClassRoutes);
+app.use('/api/documents',    documentRoutes);
+app.use('/api/bible-class',  bibleClassRoutes);
+app.use('/api/game-questions',  gameQuestionRoutes);
+app.use('/api/lesson-planner',  lessonPlannerRoutes);
+app.use('/api/announcements',   announcementRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
