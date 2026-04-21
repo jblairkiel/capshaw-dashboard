@@ -61,6 +61,19 @@ db.exec(`
     created_at TEXT    NOT NULL DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS users (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider    TEXT    NOT NULL,
+    provider_id TEXT    NOT NULL,
+    email       TEXT,
+    name        TEXT    NOT NULL,
+    photo       TEXT,
+    role        TEXT    NOT NULL DEFAULT 'pending',
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    last_login  TEXT,
+    UNIQUE(provider, provider_id)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_questions_set  ON questions(set_id);
   CREATE INDEX IF NOT EXISTS idx_sets_grade     ON question_sets(grade);
 `);

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Header from './components/Header';
 import OrderOfService from './components/OrderOfService';
 import CalendarView from './components/CalendarView';
@@ -10,10 +11,13 @@ import AnniversariesView from './components/AnniversariesView';
 import LeadershipView from './components/LeadershipView';
 import BibleClassView from './components/BibleClassView';
 import AnnouncementsView from './components/AnnouncementsView';
+import AnnouncementsDisplay from './components/AnnouncementsDisplay';
+import LoginPage from './components/LoginPage';
+import UsersView from './components/UsersView';
 
 const API = '/api/members';
 
-const TABS = [
+const BASE_TABS = [
   { id: 'assignments',   label: 'Job Assignments' },
   { id: 'attendance',    label: 'Attendance' },
   { id: 'sermons',       label: 'Sermons' },
@@ -26,29 +30,43 @@ const TABS = [
   { id: 'calendar',      label: 'Calendar' },
 ];
 
-export default function App() {
-  const [activeTab,  setActiveTab]  = useState('assignments');
-  const [siteData,   setSiteData]   = useState(null);   // persisted scraped data
-  const [updating,   setUpdating]   = useState(false);
-  const [updateError, setUpdateError] = useState('');
+const STANDALONE_TABS = new Set(['bible-class', 'announcements', 'order', 'calendar', 'users']);
 
-  // Load stored data on mount
+function MainApp() {
+  const [activeTab,   setActiveTab]   = useState('assignments');
+  const [siteData,    setSiteData]    = useState(null);
+  const [updating,    setUpdating]    = useState(false);
+  const [updateError,    setUpdateError]    = useState('');
+  const [updateWarnings, setUpdateWarnings] = useState([]);
+  const [user,        setUser]        = useState(undefined); // undefined=loading, null=not authed
+
+  // Load current auth session
   useEffect(() => {
-    fetch(`${API}/data`)
+    fetch('/api/auth/me')
+      .then(r => r.ok ? r.json() : null)
+      .then(j => setUser(j?.user ?? null))
+      .catch(() => setUser(null));
+  }, []);
+
+  // Load scraped data
+  useEffect(() => {
+    if (!user) return;
+    fetch(`${API}/data`, { credentials: 'include' })
       .then(r => r.json())
       .then(j => { if (j.success && j.data) setSiteData(j.data); })
       .catch(() => {});
-  }, []);
+  }, [user]);
 
   const handleUpdate = useCallback(async () => {
     setUpdating(true);
     setUpdateError('');
+    setUpdateWarnings([]);
     try {
-      const res  = await fetch(`${API}/update`, { method: 'POST' });
+      const res  = await fetch(`${API}/update`, { method: 'POST', credentials: 'include' });
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Update failed');
-      // Re-fetch stored data
-      const dataRes  = await fetch(`${API}/data`);
+      if (json.warnings?.length) setUpdateWarnings(json.warnings);
+      const dataRes  = await fetch(`${API}/data`, { credentials: 'include' });
       const dataJson = await dataRes.json();
       if (dataJson.success && dataJson.data) setSiteData(dataJson.data);
     } catch (e) {
@@ -58,19 +76,48 @@ export default function App() {
     }
   }, []);
 
+  // Auth loading
+  if (user === undefined) {
+    return (
+      <div className="min-h-screen bg-church-cream flex items-center justify-center">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-church-gold" />
+      </div>
+    );
+  }
+
+  // Not logged in
+  if (user === null) {
+    return <LoginPage />;
+  }
+
+  const canWrite = user.role === 'approved' || user.role === 'admin';
+  const TABS = user.role === 'admin'
+    ? [...BASE_TABS, { id: 'users', label: 'Users' }]
+    : BASE_TABS;
+
   const lastUpdated = siteData?.lastUpdated
     ? new Date(siteData.lastUpdated).toLocaleString()
     : null;
 
   return (
     <div className="min-h-screen bg-church-cream flex flex-col">
-      <Header />
+      <Header user={user} onLogout={() => setUser(null)} />
 
-      {/* Tab nav + Update button — sticky so it stays visible while scrolling */}
+      {/* Pending approval banner */}
+      {user.role === 'pending' && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2.5 text-sm text-amber-800 flex items-center gap-2">
+          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+          </svg>
+          <span>
+            <strong>Your account is pending approval.</strong> You can view everything, but creating and editing content requires approval from an admin.
+          </span>
+        </div>
+      )}
+
+      {/* Tab nav */}
       <div className="bg-church-navy shadow-md sticky top-0 z-10">
         <div className="max-w-6xl mx-auto flex items-center">
-
-          {/* Tabs — horizontally scrollable on mobile, no wrap */}
           <div className="flex overflow-x-auto scrollbar-hide flex-1 min-w-0">
             {TABS.map((tab) => (
               <button
@@ -87,34 +134,35 @@ export default function App() {
             ))}
           </div>
 
-          {/* Update control — icon-only on small screens */}
+          {/* Update button */}
           <div className="flex items-center gap-2 px-3 border-l border-white/10 shrink-0">
             {lastUpdated && (
               <span className="text-xs text-gray-400 hidden lg:block">
                 Updated {lastUpdated}
               </span>
             )}
-            <button
-              onClick={handleUpdate}
-              disabled={updating}
-              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors border ${
-                updating
-                  ? 'border-gray-600 text-gray-500 cursor-not-allowed'
-                  : 'border-church-gold text-church-gold hover:bg-church-gold hover:text-church-navy'
-              }`}
-            >
-              {updating ? (
-                <span className="animate-spin inline-block w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full" />
-              ) : (
-                <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                    d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-              )}
-              <span className="hidden sm:inline">{updating ? 'Updating…' : 'Update'}</span>
-            </button>
+            {canWrite && (
+              <button
+                onClick={handleUpdate}
+                disabled={updating}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors border ${
+                  updating
+                    ? 'border-gray-600 text-gray-500 cursor-not-allowed'
+                    : 'border-church-gold text-church-gold hover:bg-church-gold hover:text-church-navy'
+                }`}
+              >
+                {updating ? (
+                  <span className="animate-spin inline-block w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full" />
+                ) : (
+                  <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                )}
+                <span className="hidden sm:inline">{updating ? 'Updating…' : 'Update'}</span>
+              </button>
+            )}
           </div>
-
         </div>
       </div>
 
@@ -126,8 +174,21 @@ export default function App() {
         </div>
       )}
 
-      {/* No data yet */}
-      {!siteData && !updating && (
+      {/* Warnings banner */}
+      {updateWarnings.length > 0 && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-sm text-amber-800">
+          <div className="max-w-6xl mx-auto flex items-start gap-2">
+            <span className="font-medium shrink-0">Update warnings:</span>
+            <ul className="list-disc list-inside space-y-0.5 flex-1">
+              {updateWarnings.map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+            <button onClick={() => setUpdateWarnings([])} className="ml-3 underline shrink-0">dismiss</button>
+          </div>
+        </div>
+      )}
+
+      {/* No data yet (only for data-dependent tabs) */}
+      {!siteData && !updating && !STANDALONE_TABS.has(activeTab) && (
         <div className="max-w-6xl mx-auto px-4 py-16 text-center">
           <div className="inline-block bg-white rounded-xl shadow p-8 border border-gray-100">
             <svg className="w-12 h-12 text-church-gold mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -136,16 +197,16 @@ export default function App() {
             </svg>
             <h2 className="text-lg font-semibold text-church-navy mb-2">No data yet</h2>
             <p className="text-gray-500 text-sm mb-4">
-              Click <strong>Update Site</strong> to pull the latest data from capshawchurch.org.
+              Click <strong>Update</strong> to pull the latest data from capshawchurch.org.
             </p>
-            <button onClick={handleUpdate} className="btn-primary">
-              Update Site
-            </button>
+            {canWrite && (
+              <button onClick={handleUpdate} className="btn-primary">Update Site</button>
+            )}
           </div>
         </div>
       )}
 
-      {/* Loading overlay during update */}
+      {/* Loading overlay */}
       {updating && (
         <div className="max-w-6xl mx-auto px-4 py-16 text-center">
           <div className="inline-block bg-white rounded-xl shadow p-8 border border-gray-100">
@@ -156,10 +217,15 @@ export default function App() {
         </div>
       )}
 
-      {/* Tabs that don't need scraped data — always accessible */}
+      {/* Standalone tabs (no scraped data needed) */}
       {!updating && activeTab === 'bible-class' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
-          <BibleClassView />
+          <BibleClassView user={user} />
+        </main>
+      )}
+      {!updating && activeTab === 'announcements' && (
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <AnnouncementsView user={user} />
         </main>
       )}
       {!updating && activeTab === 'order' && (
@@ -172,14 +238,14 @@ export default function App() {
           <CalendarView />
         </main>
       )}
-      {!updating && activeTab === 'announcements' && (
+      {!updating && activeTab === 'users' && user.role === 'admin' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
-          <AnnouncementsView />
+          <UsersView currentUser={user} />
         </main>
       )}
 
-      {/* Tabs that require scraped data */}
-      {siteData && !updating && !['bible-class','order','calendar','announcements'].includes(activeTab) && (
+      {/* Data-dependent tabs */}
+      {siteData && !updating && !STANDALONE_TABS.has(activeTab) && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           {activeTab === 'assignments'   && <JobAssignments data={siteData.jobAssignments} />}
           {activeTab === 'attendance'    && <AttendanceView data={siteData.attendance} />}
@@ -194,5 +260,16 @@ export default function App() {
         Capshaw Church of Christ &mdash; Internal Worship Dashboard
       </footer>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/display" element={<AnnouncementsDisplay />} />
+        <Route path="/*" element={<MainApp />} />
+      </Routes>
+    </BrowserRouter>
   );
 }

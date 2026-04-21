@@ -2,6 +2,7 @@ const express  = require('express');
 const router    = express.Router();
 const Anthropic = require('@anthropic-ai/sdk');
 const db        = require('../db');
+const { requireAuth, requireApproved } = require('../middleware/auth');
 
 const GRADE_DESCRIPTIONS = {
   'preschool':        'preschool children ages 3–5. Use very simple language, yes/no questions, and focus on basic story facts like names and simple actions.',
@@ -12,7 +13,7 @@ const GRADE_DESCRIPTIONS = {
   'adult':            'adults. Include full theological depth, application to daily life, and rich discussion questions.',
 };
 
-router.post('/generate-questions', async (req, res) => {
+router.post('/generate-questions', requireAuth, requireApproved, async (req, res) => {
   const {
     passage,
     gradeLevel,
@@ -84,7 +85,7 @@ Return ONLY a valid JSON array — no markdown fences, no explanation. Schema:
 
 // ─── Library: save a generated set ───────────────────────────────────────────
 
-router.post('/questions/save', (req, res) => {
+router.post('/questions/save', requireAuth, requireApproved, (req, res) => {
   const { passage, gradeLevel, questions } = req.body;
   if (!passage?.trim() || !gradeLevel || !Array.isArray(questions) || !questions.length)
     return res.status(400).json({ success: false, error: 'passage, gradeLevel, and questions required' });
@@ -113,7 +114,7 @@ router.post('/questions/save', (req, res) => {
 
 // ─── Library: search / list saved sets ───────────────────────────────────────
 
-router.get('/questions', (req, res) => {
+router.get('/questions', requireAuth, (req, res) => {
   const { search = '', grade = '' } = req.query;
 
   const conditions = ['1=1'];
@@ -143,7 +144,7 @@ router.get('/questions', (req, res) => {
 
 // ─── Library: delete a set (cascades to questions) ────────────────────────────
 
-router.delete('/questions/set/:id', (req, res) => {
+router.delete('/questions/set/:id', requireAuth, requireApproved, (req, res) => {
   db.prepare('DELETE FROM question_sets WHERE id = ?').run(req.params.id);
   res.json({ success: true });
 });

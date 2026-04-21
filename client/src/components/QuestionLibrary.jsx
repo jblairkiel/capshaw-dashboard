@@ -53,7 +53,7 @@ function QuestionRow({ q }) {
 
 // ─── Set card ─────────────────────────────────────────────────────────────────
 
-function SetCard({ set, onDelete }) {
+function SetCard({ set, onDelete, canWrite }) {
   const [expanded, setExpanded] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -99,7 +99,7 @@ function SetCard({ set, onDelete }) {
           </div>
         </button>
 
-        <button
+        {canWrite && <button
           onClick={handleDelete}
           disabled={deleting}
           className="shrink-0 p-1.5 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
@@ -114,7 +114,7 @@ function SetCard({ set, onDelete }) {
               </svg>
             )
           }
-        </button>
+        </button>}
       </div>
 
       {/* Questions */}
@@ -131,7 +131,8 @@ function SetCard({ set, onDelete }) {
 
 const GRADES = Object.entries(GRADE_LABELS).map(([value, label]) => ({ value, label }));
 
-export default function QuestionLibrary() {
+export default function QuestionLibrary({ user }) {
+  const canWrite = user?.role === 'approved' || user?.role === 'admin';
   const [sets,    setSets]    = useState([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState('');
@@ -244,7 +245,7 @@ export default function QuestionLibrary() {
         <div className="space-y-3">
           <p className="text-sm text-gray-400">{sets.length} set{sets.length !== 1 ? 's' : ''} found</p>
           {sets.map(set => (
-            <SetCard key={set.id} set={set} onDelete={handleDelete} />
+            <SetCard key={set.id} set={set} onDelete={handleDelete} canWrite={canWrite} />
           ))}
         </div>
       )}

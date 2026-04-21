@@ -1,8 +1,10 @@
 require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const path = require('path');
-const fs = require('fs');
+const express  = require('express');
+const cors     = require('cors');
+const path     = require('path');
+const fs       = require('fs');
+const session  = require('express-session');
+const passport = require('passport');
 
 const { router: scraperRoutes, runUpdate, readData } = require('./routes/scraper');
 const documentRoutes      = require('./routes/documents');
@@ -10,6 +12,7 @@ const bibleClassRoutes    = require('./routes/bibleClass');
 const gameQuestionRoutes  = require('./routes/gameQuestions');
 const lessonPlannerRoutes  = require('./routes/lessonPlanner');
 const announcementRoutes   = require('./routes/announcements');
+const authRoutes           = require('./routes/auth');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -26,9 +29,25 @@ app.use(cors({
   origin: isProd
     ? ['https://capshaw.jblairkiel.com']
     : ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'],
+  credentials: true,
 }));
 app.use(express.json());
 
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'dev-secret-change-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    secure: isProd,
+    sameSite: 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  },
+}));
+app.use(passport.initialize());
+app.use(passport.session());
+
+app.use('/api/auth', authRoutes);
 app.use('/api/scraper', scraperRoutes);
 app.use('/api/members', scraperRoutes);
 app.use('/api/documents',    documentRoutes);

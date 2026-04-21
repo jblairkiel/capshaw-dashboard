@@ -64,7 +64,8 @@ function QuestionCard({ index, q, revealed, onReveal }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function QuestionGenerator() {
+export default function QuestionGenerator({ user }) {
+  const canWrite = user?.role === 'approved' || user?.role === 'admin';
   const [passage,   setPassage]   = useState('');
   const [grade,     setGrade]     = useState('upper-elementary');
   const [count,     setCount]     = useState(10);
@@ -203,10 +204,15 @@ export default function QuestionGenerator() {
 
         {error && <p className="text-sm text-red-600">{error}</p>}
 
+        {!canWrite && (
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            Your account is pending approval. Question generation requires an approved account.
+          </p>
+        )}
         <button
           onClick={generate}
-          disabled={loading}
-          className="btn-primary flex items-center gap-2 w-full sm:w-auto justify-center"
+          disabled={loading || !canWrite}
+          className="btn-primary flex items-center gap-2 w-full sm:w-auto justify-center disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {loading ? (
             <>
