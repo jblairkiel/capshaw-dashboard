@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const router  = express.Router();
+const { requireAuth, requireApproved } = require('../middleware/auth');
 const https   = require('https');
 const http    = require('http');
 const qs      = require('querystring');
@@ -175,7 +176,7 @@ function saveData(data) {
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 // GET /api/members/data — return stored data (no scraping)
-router.get('/data', (req, res) => {
+router.get('/data', requireAuth, (req, res) => {
   const data = readData();
   res.json({ success: true, data });
 });
@@ -187,52 +188,75 @@ let _updateInProgress = false;
 async function runUpdate() {
   if (_updateInProgress) throw new Error('Update already in progress');
   _updateInProgress = true;
+  const warnings = [];
   try {
     _sessionCookies = null;
     _sessionExpiry  = 0;
     _loginPromise   = null;
 
-    const [jaPage, attPage, serPage, visPage, annPage, deaPage, dashPage] = await Promise.all([
-      fetchPage('/members/job-assignments'),
+    const pages = await Promise.all([
+      fetchPage('/members/job-assignments').catch(e => ({ body: '', status: 0, _err: e.message })),
       fetchPage('/members/attendance'),
-      fetchPage('/members/sermons'),
-      fetchPage('/members/visitor-tracker'),
-      fetchPage('/members/anniversaries-members-non-members'),
-      fetchPage('/members/deacons'),
+      fetchPage('/members/sermons').catch(e => ({ body: '', status: 0, _err: e.message })),
+      fetchPage('/members/visitor-tracker').catch(e => ({ body: '', status: 0, _err: e.message })),
+      fetchPage('/members/anniversaries-members-non-members').catch(e => ({ body: '', status: 0, _err: e.message })),
+      fetchPage('/members/deacons').catch(e => ({ body: '', status: 0, _err: e.message })),
       fetchPage('/members'),
     ]);
+    const [jaPage, attPage, serPage, visPage, annPage, deaPage, dashPage] = pages;
 
-    if (jaPage.url.includes('login') || attPage.url.includes('login')) {
+    if (attPage.url && attPage.url.includes('login')) {
       throw new Error('Session expired or login failed — check credentials in .env');
     }
 
+    function tryParse(name, page, parser, fallback) {
+      if (page._err) {
+        warnings.push(`${name}: fetch error — ${page._err}`);
+        return fallback;
+      }
+      if (page.status === 404 || page.body.includes('Page Not Found')) {
+        warnings.push(`${name}: page not found (404) — feature may be disabled on church site`);
+        return fallback;
+      }
+      try {
+        return parser(page.body);
+      } catch (e) {
+        warnings.push(`${name}: parse error — ${e.message}`);
+        return fallback;
+      }
+    }
+
+    const existing = readData() || {};
+
     const data = {
       lastUpdated:    new Date().toISOString(),
-      jobAssignments: parseJobAssignments(jaPage.body),
+      warnings,
+      jobAssignments: tryParse('jobAssignments', jaPage, parseJobAssignments, existing.jobAssignments || []),
       attendance:     parseAttendance(attPage.body),
-      sermons:        parseSermons(serPage.body),
-      visitors:       parseVisitors(visPage.body),
-      anniversaries:  parseAnniversaries(annPage.body),
-      deacons:        parseDeacons(deaPage.body),
+      sermons:        tryParse('sermons', serPage, parseSermons, existing.sermons || []),
+      visitors:       tryParse('visitors', visPage, parseVisitors, existing.visitors || []),
+      anniversaries:  tryParse('anniversaries', annPage, parseAnniversaries, existing.anniversaries || []),
+      deacons:        tryParse('deacons', deaPage, parseDeacons, existing.deacons || []),
       bulletins:      parseBulletins(dashPage.body),
     };
 
     saveData(data);
+    if (warnings.length) console.log(`[scraper] warnings: ${warnings.join('; ')}`);
     console.log(`[scraper] update complete — ${data.lastUpdated}`);
-    return data.lastUpdated;
+    return { lastUpdated: data.lastUpdated, warnings };
   } finally {
     _updateInProgress = false;
   }
 }
 
 // POST /api/members/update
-router.post('/update', async (req, res) => {
+router.post('/update', requireAuth, requireApproved, async (req, res) => {
   if (_updateInProgress) {
     return res.status(409).json({ success: false, error: 'Update already in progress' });
   }
   try {
-    const lastUpdated = await runUpdate();
-    res.json({ success: true, lastUpdated });
+    const { lastUpdated, warnings } = await runUpdate();
+    res.json({ success: true, lastUpdated, warnings });
   } catch (err) {
     console.error('[scraper] update error:', err.message);
     res.status(500).json({ success: false, error: err.message });
@@ -240,7 +264,7 @@ router.post('/update', async (req, res) => {
 });
 
 // GET /api/members/status
-router.get('/status', (req, res) => {
+router.get('/status', requireAuth, (req, res) => {
   const stored = readData();
   res.json({
     hasData:          !!stored,

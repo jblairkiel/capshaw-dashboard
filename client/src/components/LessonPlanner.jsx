@@ -101,7 +101,7 @@ function SectionCard({ section, index }) {
 
 // ─── Plan display ─────────────────────────────────────────────────────────────
 
-function PlanDisplay({ plan, passage, grade, duration, focuses, onBack, onSave, saving, savedId }) {
+function PlanDisplay({ plan, passage, grade, duration, focuses, onBack, onSave, saving, savedId, canWrite }) {
   const totalMin = plan.sections?.reduce((s, sec) => s + (sec.duration || 0), 0) ?? 0;
 
   return (
@@ -127,7 +127,7 @@ function PlanDisplay({ plan, passage, grade, duration, focuses, onBack, onSave, 
             </svg>
             Saved to library
           </span>
-        ) : (
+        ) : canWrite ? (
           <button
             onClick={onSave}
             disabled={saving}
@@ -143,7 +143,7 @@ function PlanDisplay({ plan, passage, grade, duration, focuses, onBack, onSave, 
             )}
             {saving ? 'Saving…' : 'Save to Library'}
           </button>
-        )}
+        ) : null}
 
         <button
           onClick={() => window.print()}
@@ -240,7 +240,7 @@ function PlanDisplay({ plan, passage, grade, duration, focuses, onBack, onSave, 
 
 // ─── Saved plans library ──────────────────────────────────────────────────────
 
-function SavedPlansLibrary({ onOpen, onBack }) {
+function SavedPlansLibrary({ onOpen, onBack, canWrite }) {
   const [plans,   setPlans]   = useState(null);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState('');
@@ -329,16 +329,18 @@ function SavedPlansLibrary({ onOpen, onBack }) {
                     <span className="text-xs text-gray-400">{dateStr}</span>
                   </div>
                 </div>
-                <button
-                  onClick={e => handleDelete(plan.id, e)}
-                  className="shrink-0 p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
-                  title="Delete"
-                >
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </button>
+                {canWrite && (
+                  <button
+                    onClick={e => handleDelete(plan.id, e)}
+                    className="shrink-0 p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors"
+                    title="Delete"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                )}
               </div>
             );
           })}
@@ -350,7 +352,8 @@ function SavedPlansLibrary({ onOpen, onBack }) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function LessonPlanner() {
+export default function LessonPlanner({ user }) {
+  const canWrite = user?.role === 'approved' || user?.role === 'admin';
   const [view,    setView]    = useState('setup'); // 'setup' | 'plan' | 'library'
   const [plan,    setPlan]    = useState(null);
   const [planCtx, setPlanCtx] = useState(null);   // { passage, grade, duration, focuses }
@@ -423,7 +426,7 @@ export default function LessonPlanner() {
 
   // ── Library view ────────────────────────────────────────────────────────────
   if (view === 'library') {
-    return <SavedPlansLibrary onOpen={openSavedPlan} onBack={() => setView('setup')} />;
+    return <SavedPlansLibrary onOpen={openSavedPlan} onBack={() => setView('setup')} canWrite={canWrite} />;
   }
 
   // ── Plan view ───────────────────────────────────────────────────────────────
@@ -439,6 +442,7 @@ export default function LessonPlanner() {
         onSave={save}
         saving={saving}
         savedId={savedId}
+        canWrite={canWrite}
       />
     );
   }
@@ -566,10 +570,15 @@ export default function LessonPlanner() {
 
         {error && <p className="text-sm text-red-600">{error}</p>}
 
+        {!canWrite && (
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            Your account is pending approval. Lesson plan generation requires an approved account.
+          </p>
+        )}
         <button
           onClick={generate}
-          disabled={loading}
-          className="btn-primary flex items-center gap-2 w-full sm:w-auto justify-center"
+          disabled={loading || !canWrite}
+          className="btn-primary flex items-center gap-2 w-full sm:w-auto justify-center disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {loading ? (
             <>

@@ -124,7 +124,7 @@ function AppTile({ app, onOpen }) {
 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
-export default function BibleClassView() {
+export default function BibleClassView({ user }) {
   const [activeId, setActiveId] = useState(null);
   const activeApp = APPS.find(a => a.id === activeId);
 
@@ -147,7 +147,7 @@ export default function BibleClassView() {
           <span className="text-gray-500">{activeApp.title}</span>
         </div>
 
-        <Component />
+        <Component user={user} />
       </div>
     );
   }

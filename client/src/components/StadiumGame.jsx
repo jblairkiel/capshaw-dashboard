@@ -369,7 +369,7 @@ function GameQuestionGenerator({ onGenerated, onCancel }) {
 
 const TYPE_BADGE = { mc: 'MC', 'true-false': 'T/F', open: 'Open' };
 
-function CustomQuestionsPanel({ onQuestionsChange }) {
+function CustomQuestionsPanel({ onQuestionsChange, canWrite }) {
   const [questions, setQuestions] = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState('');
@@ -429,20 +429,26 @@ function CustomQuestionsPanel({ onQuestionsChange }) {
         <div key={q.id} className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-2 border border-gray-200">
           <span className="text-xs font-bold bg-church-navy text-church-gold px-1.5 py-0.5 rounded shrink-0">{TYPE_BADGE[q.type]}</span>
           <span className="flex-1 text-sm text-gray-700 truncate">{q.question}</span>
-          <button onClick={() => setEditingQ(q)}     className="text-gray-400 hover:text-church-navy p-1 text-base leading-none" title="Edit">✏️</button>
-          <button onClick={() => handleDelete(q.id)} className="text-gray-400 hover:text-red-500  p-1 text-base leading-none" title="Delete">🗑️</button>
+          {canWrite && <button onClick={() => setEditingQ(q)}     className="text-gray-400 hover:text-church-navy p-1 text-base leading-none" title="Edit">✏️</button>}
+          {canWrite && <button onClick={() => handleDelete(q.id)} className="text-gray-400 hover:text-red-500  p-1 text-base leading-none" title="Delete">🗑️</button>}
         </div>
       ))}
-      <div className="flex gap-2 pt-1">
-        <button
-          onClick={() => setEditingQ('new')}
-          className="flex-1 py-2 border-2 border-dashed border-gray-300 text-gray-500 rounded-lg text-sm font-medium hover:border-church-gold hover:text-church-gold transition-colors"
-        >+ Add Manually</button>
-        <button
-          onClick={() => setEditingQ('generate')}
-          className="flex-1 py-2 border-2 border-dashed border-church-gold text-church-gold rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors"
-        >⚡ Generate with AI</button>
-      </div>
+      {canWrite ? (
+        <div className="flex gap-2 pt-1">
+          <button
+            onClick={() => setEditingQ('new')}
+            className="flex-1 py-2 border-2 border-dashed border-gray-300 text-gray-500 rounded-lg text-sm font-medium hover:border-church-gold hover:text-church-gold transition-colors"
+          >+ Add Manually</button>
+          <button
+            onClick={() => setEditingQ('generate')}
+            className="flex-1 py-2 border-2 border-dashed border-church-gold text-church-gold rounded-lg text-sm font-medium hover:bg-amber-50 transition-colors"
+          >⚡ Generate with AI</button>
+        </div>
+      ) : (
+        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-center">
+          Pending approval — you can view questions but cannot add or generate new ones.
+        </p>
+      )}
     </div>
   );
 }
@@ -647,7 +653,7 @@ function SetupScreen({ onStart }) {
 
         {source === 'custom' && (
           <div className="pt-1 space-y-2">
-            <CustomQuestionsPanel onQuestionsChange={setCustomQs} />
+            <CustomQuestionsPanel onQuestionsChange={setCustomQs} canWrite={canWrite} />
             {customQs.length === 0 && (
               <p className="text-xs text-amber-600 bg-amber-50 rounded-lg p-2 text-center">Add at least one question to start the game.</p>
             )}
@@ -819,7 +825,8 @@ function FinalStandings({ teams, onRestart }) {
 
 // ─── Main Game ────────────────────────────────────────────────────────────────
 
-export default function StadiumGame() {
+export default function StadiumGame({ user }) {
+  const canWrite = user?.role === 'approved' || user?.role === 'admin';
   const [phase, setPhase]           = useState('setup');
   const [teams, setTeams]           = useState([]);
   const [currentIdx, setCurrentIdx] = useState(0);
