@@ -141,7 +141,7 @@ async function getSession() {
 
 async function fetchPage(path) {
   const ck = await getSession();
-  return getFollowingRedirects(`https://www.capshawchurch.org${path}`, ck);
+  return getFollowingRedirects(`https://capshawchurch.org${path}`, ck);
 }
 
 // ─── HTML parsers ─────────────────────────────────────────────────────────────
