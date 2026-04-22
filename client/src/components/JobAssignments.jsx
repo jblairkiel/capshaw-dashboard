@@ -104,7 +104,7 @@ export default function JobAssignments({ data }) {
       <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 items-start">
 
         {/* Left: main assignments, scrollable */}
-        <div className="flex-1 min-w-0 space-y-4 overflow-y-auto max-h-[75vh] pr-1 w-full">
+        <div className="flex-1 min-w-0 space-y-4 w-full">
           {Object.entries(filtered).map(([date, rows]) => (
             <div key={date} className="card p-0 overflow-hidden">
               <div className="bg-church-navy px-4 py-2">
