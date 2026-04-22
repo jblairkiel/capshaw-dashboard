@@ -1,4 +1,9 @@
-export default function LoginPage() {
+const AUTH_ERROR_MESSAGES = {
+  google:   'Google sign-in failed. Please try again.',
+  facebook: 'Facebook sign-in failed. Please try again.',
+};
+
+export default function LoginPage({ authError }) {
   return (
     <div className="min-h-screen bg-church-cream flex flex-col items-center justify-center px-4">
       <div className="w-full max-w-sm">
@@ -16,6 +21,13 @@ export default function LoginPage() {
           </h1>
           <p className="text-gray-500 text-sm mt-1">Church of Christ — Staff Portal</p>
         </div>
+
+        {/* Auth error banner */}
+        {authError && (
+          <div className="mb-4 rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 text-center">
+            {AUTH_ERROR_MESSAGES[authError] ?? 'Sign-in failed. Please try again.'}
+          </div>
+        )}
 
         {/* Sign-in card */}
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-8 space-y-4">
