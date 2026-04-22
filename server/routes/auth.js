@@ -55,7 +55,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     {
       clientID:     process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      callbackURL:  '/api/auth/google/callback',
+      callbackURL:  `${SERVER_URL}/api/auth/google/callback`,
     },
     (accessToken, refreshToken, profile, done) => {
       try {
@@ -77,7 +77,7 @@ if (process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET) {
     {
       clientID:     process.env.FACEBOOK_APP_ID,
       clientSecret: process.env.FACEBOOK_APP_SECRET,
-      callbackURL:  '/api/auth/facebook/callback',
+      callbackURL:  `${SERVER_URL}/api/auth/facebook/callback`,
       profileFields: ['id', 'displayName', 'emails', 'photos'],
     },
     (accessToken, refreshToken, profile, done) => {
@@ -95,9 +95,9 @@ if (process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET) {
 
 // ─── Auth routes ──────────────────────────────────────────────────────────────
 
-const CLIENT_URL = process.env.NODE_ENV === 'production'
-  ? 'https://capshaw.jblairkiel.com'
-  : 'http://localhost:5173';
+const isProd     = process.env.NODE_ENV === 'production';
+const CLIENT_URL = isProd ? 'https://capshaw.jblairkiel.com' : 'http://localhost:5173';
+const SERVER_URL = isProd ? 'https://capshaw.jblairkiel.com' : 'http://localhost:3001';
 
 router.get('/google',
   passport.authenticate('google', { scope: ['profile', 'email'] })

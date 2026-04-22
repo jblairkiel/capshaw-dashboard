@@ -25,6 +25,9 @@ if (!fs.existsSync(uploadsDir)) {
 
 const isProd = process.env.NODE_ENV === 'production';
 
+// Trust nginx reverse proxy so req.protocol, req.ip, and secure cookies work correctly
+if (isProd) app.set('trust proxy', 1);
+
 app.use(cors({
   origin: isProd
     ? ['https://capshaw.jblairkiel.com']
