@@ -81,6 +81,12 @@ jobs:
             # Health check
             echo "Waiting for server to start..."
             sleep 5
-            curl -sf http://localhost:3001/api/health \
-              || (echo "Health check failed" && exit 1)
+            if ! curl -sf http://localhost:3001/api/health; then
+              echo ""
+              echo "=== HEALTH CHECK FAILED — last 40 PM2 log lines ==="
+              pm2 logs capshaw-dashboard --lines 40 --nostream 2>&1 || true
+              echo "=== PM2 describe ==="
+              pm2 describe capshaw-dashboard 2>&1 || true
+              exit 1
+            fi
             echo "Deployment verified OK"
