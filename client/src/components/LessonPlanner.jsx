@@ -38,7 +38,7 @@ const SECTION_STYLES = {
 
 // ─── Section card ─────────────────────────────────────────────────────────────
 
-function SectionCard({ section, index }) {
+function SectionCard({ section }) {
   const [noteOpen, setNoteOpen] = useState(false);
   const style = SECTION_STYLES[section.type] || SECTION_STYLES.activity;
 
@@ -101,7 +101,7 @@ function SectionCard({ section, index }) {
 
 // ─── Plan display ─────────────────────────────────────────────────────────────
 
-function PlanDisplay({ plan, passage, grade, duration, focuses, onBack, onSave, saving, savedId, canWrite }) {
+function PlanDisplay({ plan, passage, grade, duration, onBack, onSave, saving, savedId, canWrite }) {
   const totalMin = plan.sections?.reduce((s, sec) => s + (sec.duration || 0), 0) ?? 0;
 
   return (
@@ -175,7 +175,7 @@ function PlanDisplay({ plan, passage, grade, duration, focuses, onBack, onSave, 
         {plan.memoryVerse && (
           <div className="border-l-4 border-church-gold pl-4 py-1">
             <p className="text-xs text-gray-400 font-semibold uppercase tracking-wide mb-1">Memory Verse</p>
-            <p className="text-white italic leading-relaxed">"{plan.memoryVerse.text}"</p>
+            <p className="text-white italic leading-relaxed">&ldquo;{plan.memoryVerse.text}&rdquo;</p>
             <p className="text-church-gold text-sm font-medium mt-1">— {plan.memoryVerse.reference}</p>
           </div>
         )}
@@ -299,7 +299,7 @@ function SavedPlansLibrary({ onOpen, onBack, canWrite }) {
               d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
           </svg>
           <p className="text-sm">No saved lesson plans yet.</p>
-          <p className="text-xs">Generate a plan and click "Save to Library" to add it here.</p>
+          <p className="text-xs">Generate a plan and click &ldquo;Save to Library&rdquo; to add it here.</p>
         </div>
       )}
 

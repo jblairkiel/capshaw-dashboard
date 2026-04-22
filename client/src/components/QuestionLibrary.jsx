@@ -237,7 +237,7 @@ export default function QuestionLibrary({ user }) {
               d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
           </svg>
           <p className="text-sm">No saved question sets yet.</p>
-          <p className="text-xs mt-1">Generate questions and click "Save to Library" to add them here.</p>
+          <p className="text-xs mt-1">Generate questions and click &ldquo;Save to Library&rdquo; to add them here.</p>
         </div>
       )}
 
