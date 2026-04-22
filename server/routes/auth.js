@@ -5,6 +5,10 @@ const { Strategy: FacebookStrategy } = require('passport-facebook');
 const db = require('../db');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 
+const isProd     = process.env.NODE_ENV === 'production';
+const CLIENT_URL = isProd ? 'https://capshaw.jblairkiel.com' : 'http://localhost:5173';
+const SERVER_URL = isProd ? 'https://capshaw.jblairkiel.com' : 'http://localhost:3001';
+
 const router = express.Router();
 
 // ─── Passport serialization ───────────────────────────────────────────────────
@@ -94,10 +98,6 @@ if (process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET) {
 }
 
 // ─── Auth routes ──────────────────────────────────────────────────────────────
-
-const isProd     = process.env.NODE_ENV === 'production';
-const CLIENT_URL = isProd ? 'https://capshaw.jblairkiel.com' : 'http://localhost:5173';
-const SERVER_URL = isProd ? 'https://capshaw.jblairkiel.com' : 'http://localhost:3001';
 
 router.get('/google',
   passport.authenticate('google', { scope: ['profile', 'email'] })
