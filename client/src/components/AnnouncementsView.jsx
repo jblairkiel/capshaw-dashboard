@@ -189,7 +189,7 @@ function FullscreenDisplay({ items, onExit }) {
   const [paused,    setPaused]    = useState(false);
   const [interval,  setInterval_] = useState(8);
   const [showCtrl,  setShowCtrl]  = useState(true);
-  const [nativeFS,  setNativeFS]  = useState(false);
+  const [,          setNativeFS]  = useState(false);
   const overlayRef = useRef(null);
   const hideTimer  = useRef(null);
 

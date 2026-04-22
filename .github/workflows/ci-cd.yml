@@ -33,6 +33,16 @@ jobs:
       - name: Client tests (Vitest)
         run: npm run test:client
 
+      - name: Lint (ESLint)
+        run: cd client && npm run lint
+
+      - name: Build client
+        run: npm run build
+
+      - name: Security audit
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
   # ── Deploy ───────────────────────────────────────────────────────────────────
   deploy:
     name: Deploy to capshaw.jblairkiel.com
@@ -67,3 +77,10 @@ jobs:
             # Restart app
             pm2 restart ecosystem.config.js --env production
             pm2 save
+
+            # Health check
+            echo "Waiting for server to start..."
+            sleep 5
+            curl -sf http://localhost:3001/api/health \
+              || (echo "Health check failed" && exit 1)
+            echo "Deployment verified OK"

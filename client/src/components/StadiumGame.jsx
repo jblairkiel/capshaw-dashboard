@@ -381,7 +381,7 @@ function CustomQuestionsPanel({ onQuestionsChange, canWrite }) {
       .then(j => { if (j.success) { setQuestions(j.questions); onQuestionsChange(j.questions); } else setError(j.error); })
       .catch(() => setError('Could not load custom questions.'))
       .finally(() => setLoading(false));
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sync = (next) => { setQuestions(next); onQuestionsChange(next); };
 
@@ -521,7 +521,7 @@ function StadiumSVG({ teams }) {
 
 // ─── Setup Screen ─────────────────────────────────────────────────────────────
 
-function SetupScreen({ onStart }) {
+function SetupScreen({ onStart, canWrite }) {
   const [count, setCount] = useState(2);
   const [names, setNames] = useState(TEAM_PRESETS.map(t => t.name));
   const [rounds, setRounds] = useState(10);
@@ -813,7 +813,7 @@ function FinalStandings({ teams, onRestart }) {
       </div>
 
       <p className="text-center text-church-brown italic text-sm px-4">
-        "I can do all things through Christ who strengthens me." — Philippians 4:13
+        &ldquo;I can do all things through Christ who strengthens me.&rdquo; — Philippians 4:13
       </p>
 
       <button onClick={onRestart} className="w-full py-3 bg-church-navy text-church-gold font-bold rounded-xl hover:bg-church-brown transition-colors">
@@ -1011,7 +1011,7 @@ export default function StadiumGame({ user }) {
       {phase === 'setup' && (
         <div className={isFullscreen ? 'flex-1 overflow-auto p-4' : ''}>
           <div className="flex justify-end mb-2">{fsBtn}</div>
-          <SetupScreen onStart={startGame} />
+          <SetupScreen onStart={startGame} canWrite={canWrite} />
         </div>
       )}
 
@@ -1061,7 +1061,7 @@ export default function StadiumGame({ user }) {
           {phase === 'playing' && currentTeam && (
             <div className="card text-center space-y-3 border-2" style={{ borderColor: currentTeam.color }}>
               <div className="text-3xl">{currentTeam.emoji}</div>
-              <h3 className="text-lg font-bold" style={{ color: currentTeam.color }}>{currentTeam.name}'s Turn!</h3>
+              <h3 className="text-lg font-bold" style={{ color: currentTeam.color }}>{currentTeam.name}&apos;s Turn!</h3>
               <p className="text-gray-500 text-xs">Square {currentTeam.position} · Total distance: {currentTeam.totalDistance}</p>
               <button
                 onClick={() => drawQuestion(false)}
