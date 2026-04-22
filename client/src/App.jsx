@@ -87,7 +87,9 @@ function MainApp() {
 
   // Not logged in
   if (user === null) {
-    return <LoginPage />;
+    const params = new URLSearchParams(window.location.search);
+    const authError = params.get('auth_error');
+    return <LoginPage authError={authError} />;
   }
 
   const canWrite = user.role === 'approved' || user.role === 'admin';

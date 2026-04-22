@@ -103,19 +103,51 @@ router.get('/google',
   passport.authenticate('google', { scope: ['profile', 'email'] })
 );
 
-router.get('/google/callback',
-  passport.authenticate('google', { failureRedirect: `${CLIENT_URL}/?auth_error=google` }),
-  (req, res) => res.redirect(CLIENT_URL)
-);
+router.get('/google/callback', (req, res, next) => {
+  passport.authenticate('google', (err, user, info) => {
+    if (err) {
+      console.error('[auth] Google error:', err.message);
+      return res.redirect(`${CLIENT_URL}/?auth_error=google`);
+    }
+    if (!user) {
+      console.log('[auth] Google: no user —', info?.message ?? 'unknown reason');
+      return res.redirect(`${CLIENT_URL}/?auth_error=google`);
+    }
+    req.logIn(user, loginErr => {
+      if (loginErr) {
+        console.error('[auth] Google session error:', loginErr.message);
+        return res.redirect(`${CLIENT_URL}/?auth_error=google`);
+      }
+      console.log('[auth] Google login OK — user', user.id, user.role);
+      res.redirect(CLIENT_URL);
+    });
+  })(req, res, next);
+});
 
 router.get('/facebook',
   passport.authenticate('facebook', { scope: ['email'] })
 );
 
-router.get('/facebook/callback',
-  passport.authenticate('facebook', { failureRedirect: `${CLIENT_URL}/?auth_error=facebook` }),
-  (req, res) => res.redirect(CLIENT_URL)
-);
+router.get('/facebook/callback', (req, res, next) => {
+  passport.authenticate('facebook', (err, user, info) => {
+    if (err) {
+      console.error('[auth] Facebook error:', err.message);
+      return res.redirect(`${CLIENT_URL}/?auth_error=facebook`);
+    }
+    if (!user) {
+      console.log('[auth] Facebook: no user —', info?.message ?? 'unknown reason');
+      return res.redirect(`${CLIENT_URL}/?auth_error=facebook`);
+    }
+    req.logIn(user, loginErr => {
+      if (loginErr) {
+        console.error('[auth] Facebook session error:', loginErr.message);
+        return res.redirect(`${CLIENT_URL}/?auth_error=facebook`);
+      }
+      console.log('[auth] Facebook login OK — user', user.id, user.role);
+      res.redirect(CLIENT_URL);
+    });
+  })(req, res, next);
+});
 
 router.get('/me', (req, res) => {
   if (!req.user) return res.status(401).json({ success: false });
