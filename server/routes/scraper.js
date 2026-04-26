@@ -273,4 +273,4 @@ router.get('/status', requireAuth, (req, res) => {
   });
 });
 
-module.exports = { router, runUpdate, readData };
+module.exports = { router, runUpdate, readData, parseCookies, cookieStr, mergeCookieStr };

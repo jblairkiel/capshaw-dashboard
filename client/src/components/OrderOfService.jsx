@@ -27,25 +27,29 @@ function PresentationMode({ html, title, onClose }) {
     .replace(/_/g, ' ') || 'Order of Service';
 
   return (
-    <div className="fixed inset-0 z-50 overflow-auto flex flex-col" style={{ backgroundColor: '#f9f6f0' }}>
+    <div className="fixed inset-0 z-50 overflow-auto flex flex-col" style={{ background: '#0f1a2e' }}>
 
       {/* Top bar */}
-      <div className="bg-church-navy sticky top-0 z-10 px-6 py-3 flex items-center justify-between shadow-lg">
-        <div className="flex items-center gap-3">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"
-            className="w-6 h-6 text-church-gold shrink-0">
-            <path d="M11 2h2v7h7v2h-7v11h-2V11H4V9h7V2z" />
-          </svg>
-          <div>
-            <p className="text-church-gold text-xs tracking-widest uppercase font-medium leading-none">
-              Capshaw Church of Christ
-            </p>
-            <p className="text-white font-serif font-semibold text-base leading-tight mt-0.5">
-              {displayTitle}
-            </p>
-          </div>
+      <div className="sticky top-0 z-10 px-6 py-4 flex items-center justify-between" style={{ background: '#0f1a2e' }}>
+        <span className="text-church-gold font-bold text-sm tracking-widest uppercase">
+          Capshaw Church of Christ
+        </span>
+        <div className="flex items-center gap-4">
+          <span className="text-gray-400 text-sm hidden sm:block">{displayTitle}</span>
+          <button
+            onClick={onClose}
+            className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+            title="Close (Esc)"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
       </div>
+
+      {/* Divider */}
+      <div className="h-px mx-6" style={{ background: 'rgba(201,168,76,0.25)' }} />
 
       {/* Document content */}
       <div className="flex-1 flex justify-center px-4 py-8 sm:py-12">
@@ -61,16 +65,25 @@ function PresentationMode({ html, title, onClose }) {
 
 // ─── Job-assignment helpers ───────────────────────────────────────────────────
 
-const JOB_TERM_OVERRIDES = {
-  Communion: ['communion', 'lord', 'supper'],
-  Usher:     ['usher'],
-  Visuals:   ['visual', 'powerpoint', 'slides'],
-  Speaker:   ['sermon', 'speaker', 'message'],
-  Sermon:    ['sermon', 'speaker', 'message'],
+// Keywords for each normalised job key — any single keyword match is enough.
+// The first element in document order that matches wins (preserves "Collection"
+// appearing before "Lord's Supper", etc.).
+const JOB_KEYWORDS = {
+  Communion:           ['lord', 'supper', 'communion', 'collection'],
+  Usher:               ['usher', 'greet', 'welcome'],
+  Visuals:             ['visual', 'powerpoint', 'slides', 'media'],
+  Speaker:             ['sermon', 'speaker', 'message', 'preach'],
+  Sermon:              ['sermon', 'speaker', 'message', 'preach'],
+  'Scripture Reading': ['scripture', 'reading'],
+  'Song Leader':       ['song', 'singing', 'hymn'],
+  Opening:             ['opening', 'invocation'],
+  'Opening Prayer':    ['opening', 'invocation'],
+  Closing:             ['closing', 'dismiss', 'benediction'],
+  'Closing Prayer':    ['closing', 'dismiss', 'benediction'],
 };
 
-function jobTerms(name) {
-  return JOB_TERM_OVERRIDES[name]
+function jobKeywords(name) {
+  return JOB_KEYWORDS[name]
     ?? name.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean);
 }
 
@@ -78,18 +91,17 @@ function groupJobs(assignments) {
   const map = new Map();
   for (const a of assignments) {
     let key = a.job;
-    if (/^communion/i.test(key)) key = 'Communion';
-    else if (/^usher/i.test(key))   key = 'Usher';
-    else if (/^visual/i.test(key))  key = 'Visuals';
-    if (!map.has(key)) map.set(key, { terms: jobTerms(key), names: [] });
+    if (/^communion/i.test(key))         key = 'Communion';
+    else if (/^usher/i.test(key))        key = 'Usher';
+    else if (/^visual/i.test(key))       key = 'Visuals';
+    else if (/^scripture/i.test(key))    key = 'Scripture Reading';
+    else if (/^song\s*lead/i.test(key))  key = 'Song Leader';
+    else if (/^opening/i.test(key))      key = 'Opening';
+    else if (/^closing/i.test(key))      key = 'Closing';
+    if (!map.has(key)) map.set(key, { keywords: jobKeywords(key), names: [] });
     map.get(key).names.push(a.name);
   }
   return [...map.values()];
-}
-
-function fuzzyScore(terms, text) {
-  const t = text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
-  return terms.filter(w => t.includes(w)).length / terms.length;
 }
 
 const _MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -119,17 +131,16 @@ function applyAssignments(htmlString, groups) {
   const used = new Set();
   let hits = 0;
   for (const g of groups) {
-    let best = null, top = 0;
-    for (const el of els) {
-      if (used.has(el)) continue;
-      const s = fuzzyScore(g.terms, el.textContent);
-      if (s > top) { top = s; best = el; }
-    }
-    if (best && top >= 0.5) {
+    const best = els.find(el => {
+      if (used.has(el)) return false;
+      const t = el.textContent.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+      return g.keywords.some(w => t.includes(w));
+    });
+    if (best) {
       used.add(best); hits++;
       const sp = doc.createElement('span');
       sp.dataset.jobAssignment = '';
-      sp.style.cssText = 'color:#1a2744;font-weight:600;margin-left:.5em;font-style:normal';
+      sp.style.cssText = 'color:#c9a84c;font-weight:600;margin-left:.5em;font-style:normal';
       sp.textContent = '\u2014 ' + g.names.join(', ');
       best.appendChild(sp);
     }

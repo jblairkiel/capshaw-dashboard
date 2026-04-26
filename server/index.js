@@ -13,6 +13,7 @@ const gameQuestionRoutes  = require('./routes/gameQuestions');
 const lessonPlannerRoutes  = require('./routes/lessonPlanner');
 const announcementRoutes   = require('./routes/announcements');
 const authRoutes           = require('./routes/auth');
+const songRoutes           = require('./routes/songTracker');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -58,6 +59,7 @@ app.use('/api/bible-class',  bibleClassRoutes);
 app.use('/api/game-questions',  gameQuestionRoutes);
 app.use('/api/lesson-planner',  lessonPlannerRoutes);
 app.use('/api/announcements',   announcementRoutes);
+app.use('/api/songs',           songRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

@@ -76,6 +76,37 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_questions_set  ON questions(set_id);
   CREATE INDEX IF NOT EXISTS idx_sets_grade     ON question_sets(grade);
+
+  CREATE TABLE IF NOT EXISTS songs (
+    id      INTEGER PRIMARY KEY,
+    title   TEXT    NOT NULL,
+    hymnal  TEXT    NOT NULL DEFAULT '',
+    number  TEXT    NOT NULL DEFAULT ''
+  );
+
+  CREATE TABLE IF NOT EXISTS song_services (
+    id      INTEGER PRIMARY KEY,
+    date    TEXT    NOT NULL,
+    service TEXT    NOT NULL,
+    leader  TEXT    NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS service_songs (
+    service_id INTEGER NOT NULL REFERENCES song_services(id) ON DELETE CASCADE,
+    song_id    INTEGER NOT NULL REFERENCES songs(id),
+    position   INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (service_id, song_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS song_of_week (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    song_id    INTEGER NOT NULL REFERENCES songs(id),
+    week_start TEXT    NOT NULL UNIQUE,
+    notes      TEXT    NOT NULL DEFAULT ''
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_service_songs_song ON service_songs(song_id);
+  CREATE INDEX IF NOT EXISTS idx_song_services_date ON song_services(date);
 `);
 
 module.exports = db;
