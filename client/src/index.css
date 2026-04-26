@@ -47,10 +47,10 @@
 }
 .docx-content th { @apply bg-church-navy text-white; }
 
-/* ── Presentation mode ─────────────────────────────────────────────────────── */
+/* ── Presentation mode (dark navy background: #0f1a2e) ─────────────────────── */
 .presentation-content {
-  font-family: Georgia, "Times New Roman", serif;
-  color: #1a2744;
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #e2e8f0;
   line-height: 1.8;
 }
 
@@ -59,7 +59,7 @@
   font-size: 2rem;
   font-weight: 700;
   text-align: center;
-  color: #1a2744;
+  color: #ffffff;
   margin-bottom: 0.25rem;
   padding-bottom: 0.75rem;
   border-bottom: 3px solid #c9a84c;
@@ -69,7 +69,7 @@
 .presentation-content h2 {
   font-size: 1.4rem;
   font-weight: 600;
-  color: #1a2744;
+  color: #c9a84c;
   margin-top: 2rem;
   margin-bottom: 0.5rem;
   padding-left: 0.75rem;
@@ -80,7 +80,7 @@
 .presentation-content h3 {
   font-size: 1.15rem;
   font-weight: 600;
-  color: #1a2744;
+  color: #f0e6cc;
   margin-top: 1.25rem;
   margin-bottom: 0.35rem;
 }
@@ -89,18 +89,18 @@
 .presentation-content p {
   font-size: 1.1rem;
   margin-bottom: 0.75rem;
-  color: #2d3748;
+  color: #cbd5e1;
 }
 
 /* Bold text (item names, speaker names) */
 .presentation-content strong {
-  color: #1a2744;
+  color: #ffffff;
   font-weight: 700;
 }
 
 /* Italics (scripture refs, instructions) */
 .presentation-content em {
-  color: #5c3d2e;
+  color: #c9a84c;
 }
 
 /* Lists */
@@ -122,19 +122,21 @@
   font-size: 1.05rem;
 }
 .presentation-content th {
-  background: #1a2744;
+  background: rgba(201, 168, 76, 0.15);
   color: #c9a84c;
   font-weight: 600;
   text-align: left;
   padding: 0.6rem 1rem;
+  border-bottom: 1px solid rgba(201, 168, 76, 0.3);
 }
 .presentation-content td {
   padding: 0.5rem 1rem;
-  border-bottom: 1px solid #e8e0d0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
   vertical-align: top;
+  color: #cbd5e1;
 }
 .presentation-content tr:nth-child(even) td {
-  background: rgba(201, 168, 76, 0.06);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 /* Horizontal rules as gold dividers */
@@ -142,5 +144,5 @@
   border: none;
   border-top: 2px solid #c9a84c;
   margin: 1.5rem 0;
-  opacity: 0.4;
+  opacity: 0.35;
 }

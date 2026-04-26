@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Header from './components/Header';
 import OrderOfService from './components/OrderOfService';
@@ -14,23 +14,101 @@ import AnnouncementsView from './components/AnnouncementsView';
 import AnnouncementsDisplay from './components/AnnouncementsDisplay';
 import LoginPage from './components/LoginPage';
 import UsersView from './components/UsersView';
+import SongTrackerView from './components/SongTrackerView';
 
 const API = '/api/members';
 
-const BASE_TABS = [
-  { id: 'assignments',   label: 'Job Assignments' },
-  { id: 'attendance',    label: 'Attendance' },
-  { id: 'sermons',       label: 'Sermons' },
-  { id: 'visitors',      label: 'Visitors' },
-  { id: 'anniversaries', label: 'Anniversaries' },
-  { id: 'leadership',    label: 'Leadership' },
-  { id: 'bible-class',    label: 'Bible Class' },
-  { id: 'announcements', label: 'Announcements' },
-  { id: 'order',         label: 'Order of Service' },
-  { id: 'calendar',      label: 'Calendar' },
+const BASE_GROUPS = [
+  {
+    id: 'worship',
+    label: 'Worship',
+    items: [
+      { id: 'order',         label: 'Order of Service' },
+      { id: 'songs',         label: 'Song Tracker' },
+      { id: 'announcements', label: 'Announcements' },
+    ],
+  },
+  {
+    id: 'congregation',
+    label: 'Congregation',
+    items: [
+      { id: 'assignments',   label: 'Job Assignments' },
+      { id: 'attendance',    label: 'Attendance' },
+      { id: 'visitors',      label: 'Visitors' },
+      { id: 'anniversaries', label: 'Anniversaries' },
+      { id: 'leadership',    label: 'Leadership' },
+      { id: 'sermons',       label: 'Sermons' },
+    ],
+  },
+  {
+    id: 'resources',
+    label: 'Resources',
+    items: [
+      { id: 'bible-class', label: 'Bible Class' },
+      { id: 'calendar',    label: 'Calendar' },
+    ],
+  },
 ];
 
-const STANDALONE_TABS = new Set(['bible-class', 'announcements', 'order', 'calendar', 'users']);
+const STANDALONE_TABS = new Set(['bible-class', 'announcements', 'order', 'calendar', 'users', 'songs']);
+
+// ─── Nav dropdown ──────────────────────────────────────────────────────────────
+
+function NavDropdown({ group, activeTab, onSelect }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+
+  const isActive   = group.items.some(i => i.id === activeTab);
+  const activeItem = group.items.find(i => i.id === activeTab);
+
+  useEffect(() => {
+    const close = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, []);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
+          isActive
+            ? 'border-church-gold text-church-gold'
+            : 'border-transparent text-gray-300 hover:text-white'
+        }`}
+      >
+        <span>{group.label}</span>
+        {isActive && activeItem && (
+          <span className="text-xs opacity-60">· {activeItem.label}</span>
+        )}
+        <svg
+          className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="absolute top-full left-0 bg-white rounded-b-lg shadow-xl border border-gray-200 min-w-44 z-50 py-1">
+          {group.items.map(item => (
+            <button
+              key={item.id}
+              onClick={() => { onSelect(item.id); setOpen(false); }}
+              className={`w-full text-left px-4 py-2.5 text-sm transition-colors ${
+                activeTab === item.id
+                  ? 'bg-church-cream text-church-navy font-semibold'
+                  : 'text-gray-700 hover:bg-gray-50 hover:text-church-navy'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function MainApp() {
   const [activeTab,   setActiveTab]   = useState('assignments');
@@ -93,9 +171,9 @@ function MainApp() {
   }
 
   const canWrite = user.role === 'approved' || user.role === 'admin';
-  const TABS = user.role === 'admin'
-    ? [...BASE_TABS, { id: 'users', label: 'Users' }]
-    : BASE_TABS;
+  const GROUPS = user.role === 'admin'
+    ? [...BASE_GROUPS, { id: 'admin', label: 'Admin', items: [{ id: 'users', label: 'Users' }] }]
+    : BASE_GROUPS;
 
   const lastUpdated = siteData?.lastUpdated
     ? new Date(siteData.lastUpdated).toLocaleString()
@@ -117,22 +195,17 @@ function MainApp() {
         </div>
       )}
 
-      {/* Tab nav */}
+      {/* Nav */}
       <div className="bg-church-navy shadow-md sticky top-0 z-10">
         <div className="max-w-6xl mx-auto flex items-center">
-          <div className="flex overflow-x-auto scrollbar-hide flex-1 min-w-0">
-            {TABS.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`shrink-0 px-4 py-3 text-sm font-medium transition-colors border-b-2 whitespace-nowrap ${
-                  activeTab === tab.id
-                    ? 'border-church-gold text-church-gold'
-                    : 'border-transparent text-gray-300 hover:text-white'
-                }`}
-              >
-                {tab.label}
-              </button>
+          <div className="flex flex-1 min-w-0">
+            {GROUPS.map(group => (
+              <NavDropdown
+                key={group.id}
+                group={group}
+                activeTab={activeTab}
+                onSelect={setActiveTab}
+              />
             ))}
           </div>
 
@@ -220,6 +293,11 @@ function MainApp() {
       )}
 
       {/* Standalone tabs (no scraped data needed) */}
+      {!updating && activeTab === 'songs' && (
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <SongTrackerView user={user} />
+        </main>
+      )}
       {!updating && activeTab === 'bible-class' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           <BibleClassView user={user} />
