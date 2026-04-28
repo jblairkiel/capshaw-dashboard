@@ -5,7 +5,7 @@ const mammoth = require('mammoth');
 const JSZip = require('jszip');
 const path = require('path');
 const fs = require('fs');
-const { requireAuth, requireApproved } = require('../middleware/auth');
+const { requireAdmin } = require('../middleware/auth');
 
 // ─── Convert docx → HTML, preserving paragraph indentation ───────────────────
 // Mammoth strips w:ind (indentation) from paragraphs. We re-read the OOXML to
@@ -73,7 +73,7 @@ const upload = multer({
 });
 
 // POST /api/documents/upload — upload a Word doc and return HTML
-router.post('/upload', requireAuth, requireApproved, upload.single('document'), async (req, res) => {
+router.post('/upload', requireAdmin, upload.single('document'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, error: 'No file uploaded' });
   }
@@ -94,7 +94,7 @@ router.post('/upload', requireAuth, requireApproved, upload.single('document'), 
 });
 
 // GET /api/documents — list uploaded documents
-router.get('/', requireAuth, (req, res) => {
+router.get('/', (req, res) => {
   try {
     const files = fs.readdirSync(uploadsDir)
       .filter((f) => f.match(/\.(docx|doc)$/i))
@@ -118,7 +118,7 @@ router.get('/', requireAuth, (req, res) => {
 });
 
 // GET /api/documents/:filename — convert and return HTML for a stored doc
-router.get('/:filename', requireAuth, async (req, res) => {
+router.get('/:filename', async (req, res) => {
   const filePath = path.join(uploadsDir, req.params.filename);
 
   if (!fs.existsSync(filePath)) {
@@ -139,7 +139,7 @@ router.get('/:filename', requireAuth, async (req, res) => {
 });
 
 // DELETE /api/documents/:filename
-router.delete('/:filename', requireAuth, requireApproved, (req, res) => {
+router.delete('/:filename', requireAdmin, (req, res) => {
   const filePath = path.join(uploadsDir, req.params.filename);
 
   if (!fs.existsSync(filePath)) {

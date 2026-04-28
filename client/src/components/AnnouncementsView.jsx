@@ -382,7 +382,7 @@ function FullscreenDisplay({ items, onExit }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function AnnouncementsView({ user }) {
-  const canWrite = user?.role === 'approved' || user?.role === 'admin';
+  const canWrite = user?.role === 'admin';
   const [items,       setItems]       = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState('');

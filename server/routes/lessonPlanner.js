@@ -2,7 +2,7 @@ const express   = require('express');
 const router    = express.Router();
 const Anthropic = require('@anthropic-ai/sdk');
 const db        = require('../db');
-const { requireAuth, requireApproved } = require('../middleware/auth');
+const { requireAuth, requireAdmin } = require("../middleware/auth");
 
 const GRADE_NAMES = {
   'preschool':        'Preschool (ages 3–5)',
@@ -65,7 +65,7 @@ const GRADE_INSTRUCTIONS = {
 
 // ─── Generate ─────────────────────────────────────────────────────────────────
 
-router.post('/generate', requireAuth, requireApproved, async (req, res) => {
+router.post('/generate', requireAdmin, async (req, res) => {
   const { passage, gradeLevel = 'upper-elementary', duration = 45, focuses = [] } = req.body;
 
   if (!passage?.trim())
@@ -159,7 +159,7 @@ HARD CONSTRAINTS:
 
 // ─── Save ─────────────────────────────────────────────────────────────────────
 
-router.post('/save', requireAuth, requireApproved, (req, res) => {
+router.post('/save', requireAdmin, (req, res) => {
   const { passage, gradeLevel, duration, focuses = [], plan } = req.body;
   if (!passage?.trim() || !gradeLevel || !duration || !plan)
     return res.status(400).json({ success: false, error: 'passage, gradeLevel, duration, and plan are required' });
@@ -194,7 +194,7 @@ router.get('/:id', requireAuth, (req, res) => {
 
 // ─── Delete ───────────────────────────────────────────────────────────────────
 
-router.delete('/:id', requireAuth, requireApproved, (req, res) => {
+router.delete('/:id', requireAdmin, (req, res) => {
   db.prepare('DELETE FROM lesson_plans WHERE id=?').run(req.params.id);
   res.json({ success: true });
 });

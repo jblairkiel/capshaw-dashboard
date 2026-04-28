@@ -4,7 +4,7 @@ const router  = express.Router();
 const https   = require('https');
 const qs      = require('querystring');
 
-const { requireAuth, requireApproved } = require('../middleware/auth');
+const { requireAdmin } = require('../middleware/auth');
 const { parseCookies, cookieStr, mergeCookieStr } = require('./scraper');
 const db = require('../db');
 
@@ -203,7 +203,7 @@ function upsertServiceSongs(serviceId, songData) {
 // ─── Routes — specific paths MUST come before /:id ────────────────────────────
 
 // GET /api/songs/options — leaders + services for the add form
-router.get('/options', requireAuth, async (req, res) => {
+router.get('/options', async (req, res) => {
   try {
     res.json({ success: true, ...(await getFormOptions()) });
   } catch (err) {
@@ -212,7 +212,7 @@ router.get('/options', requireAuth, async (req, res) => {
 });
 
 // GET /api/songs/search?q= — proxy admin tokenize endpoint
-router.get('/search', requireAuth, async (req, res) => {
+router.get('/search', async (req, res) => {
   const q = (req.query.q || '').trim();
   if (!q) return res.json({ success: true, results: [] });
   try {
@@ -231,7 +231,7 @@ router.get('/search', requireAuth, async (req, res) => {
 });
 
 // GET /api/songs/analytics
-router.get('/analytics', requireAuth, (req, res) => {
+router.get('/analytics', (req, res) => {
   const topSongs = db.prepare(`
     SELECT s.id, s.title, s.hymnal, s.number,
            COUNT(sx.service_id) AS count,
@@ -278,7 +278,7 @@ router.get('/analytics', requireAuth, (req, res) => {
 });
 
 // POST /api/songs/sync — scrape latest records from admin panel
-router.post('/sync', requireAuth, requireApproved, async (req, res) => {
+router.post('/sync', requireAdmin, async (req, res) => {
   const pages    = Math.min(parseInt(req.body?.pages || 5), 20);
   const warnings = [];
   let   synced   = 0;
@@ -323,7 +323,7 @@ router.post('/sync', requireAuth, requireApproved, async (req, res) => {
 });
 
 // POST /api/songs/add — submit new service record to admin + cache locally
-router.post('/add', requireAuth, requireApproved, async (req, res) => {
+router.post('/add', requireAdmin, async (req, res) => {
   const { day, month, year, serviceId, leaderId, songIds } = req.body;
   if (!day || !month || !year || !serviceId || !leaderId || !Array.isArray(songIds) || !songIds.length)
     return res.status(400).json({ success: false, error: 'day, month, year, serviceId, leaderId, and songIds are required' });
@@ -376,7 +376,7 @@ router.post('/add', requireAuth, requireApproved, async (req, res) => {
 });
 
 // GET /api/songs — list cached service records with optional filters
-router.get('/', requireAuth, (req, res) => {
+router.get('/', (req, res) => {
   const { service = '', q = '', limit = 50, offset = 0 } = req.query;
 
   const conditions = [];
@@ -416,7 +416,7 @@ router.get('/', requireAuth, (req, res) => {
 });
 
 // GET /api/songs/:id — get service record with songs (lazy-fetches from admin if uncached)
-router.get('/:id', requireAuth, async (req, res) => {
+router.get('/:id', async (req, res) => {
   const id     = parseInt(req.params.id);
   const record = db.prepare('SELECT * FROM song_services WHERE id = ?').get(id);
   if (!record) return res.status(404).json({ success: false, error: 'Not found' });
@@ -448,7 +448,7 @@ router.get('/:id', requireAuth, async (req, res) => {
 });
 
 // POST /api/songs/:id/refresh — force re-fetch this one record from admin panel
-router.post('/:id/refresh', requireAuth, requireApproved, async (req, res) => {
+router.post('/:id/refresh', requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id);
   try {
     const detail   = await fetchAdmin(`/admin/songsdb/edit/${id}`);

@@ -353,7 +353,7 @@ function SavedPlansLibrary({ onOpen, onBack, canWrite }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function LessonPlanner({ user }) {
-  const canWrite = user?.role === 'approved' || user?.role === 'admin';
+  const canWrite = user?.role === 'admin';
   const [view,    setView]    = useState('setup'); // 'setup' | 'plan' | 'library'
   const [plan,    setPlan]    = useState(null);
   const [planCtx, setPlanCtx] = useState(null);   // { passage, grade, duration, focuses }

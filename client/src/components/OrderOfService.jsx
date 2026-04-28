@@ -150,7 +150,8 @@ function applyAssignments(htmlString, groups) {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function OrderOfService() {
+export default function OrderOfService({ user }) {
+  const canWrite = user?.role === 'admin';
   const [docList, setDocList]         = useState([]);
   const [currentDoc, setCurrentDoc]   = useState(null);
   const [html, setHtml]               = useState('');
@@ -267,27 +268,29 @@ export default function OrderOfService() {
 
         {/* Sidebar */}
         <aside className="lg:col-span-1 space-y-4">
-          <div className="card">
-            <h2 className="section-heading">Upload Document</h2>
-            <p className="text-sm text-gray-500 mb-3">
-              Upload a Word (.docx) file for the Order of Service.
-            </p>
-            <label className="block">
-              <span className="sr-only">Choose file</span>
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".docx,.doc"
-                onChange={handleUpload}
-                className="block w-full text-sm text-gray-600
-                  file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0
-                  file:text-sm file:bg-church-navy file:text-white
-                  hover:file:bg-opacity-90 cursor-pointer"
-              />
-            </label>
-            {loading && <p className="text-sm text-church-gold mt-2 animate-pulse">Processing...</p>}
-            {error   && <p className="text-sm text-red-600 mt-2">{error}</p>}
-          </div>
+          {canWrite && (
+            <div className="card">
+              <h2 className="section-heading">Upload Document</h2>
+              <p className="text-sm text-gray-500 mb-3">
+                Upload a Word (.docx) file for the Order of Service.
+              </p>
+              <label className="block">
+                <span className="sr-only">Choose file</span>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".docx,.doc"
+                  onChange={handleUpload}
+                  className="block w-full text-sm text-gray-600
+                    file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0
+                    file:text-sm file:bg-church-navy file:text-white
+                    hover:file:bg-opacity-90 cursor-pointer"
+                />
+              </label>
+              {loading && <p className="text-sm text-church-gold mt-2 animate-pulse">Processing...</p>}
+              {error   && <p className="text-sm text-red-600 mt-2">{error}</p>}
+            </div>
+          )}
 
           <div className="card">
             <div className="flex items-center justify-between mb-3">
@@ -314,13 +317,15 @@ export default function OrderOfService() {
                   >
                     {f.displayName}
                   </button>
-                  <button
-                    onClick={() => handleDelete(f.filename)}
-                    className="flex-shrink-0 text-red-400 hover:text-red-600 text-xs"
-                    title="Delete"
-                  >
-                    &#x2715;
-                  </button>
+                  {canWrite && (
+                    <button
+                      onClick={() => handleDelete(f.filename)}
+                      className="flex-shrink-0 text-red-400 hover:text-red-600 text-xs"
+                      title="Delete"
+                    >
+                      &#x2715;
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -349,7 +354,7 @@ export default function OrderOfService() {
                 <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
                   <h2 className="section-heading mb-0 min-w-0 truncate">{displayName}</h2>
                   <div className="flex items-start gap-2 shrink-0 flex-wrap justify-end">
-                    {!annotated ? (
+                    {canWrite && (!annotated ? (
                       <button
                         onClick={handleAssignJobs}
                         disabled={annotating}
@@ -377,7 +382,7 @@ export default function OrderOfService() {
                         </button>
                         {annotateInfo && <p className="text-xs text-gray-400">{annotateInfo}</p>}
                       </div>
-                    )}
+                    ))}
                     <button
                       onClick={() => setPresenting(true)}
                       className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-church-navy text-church-gold border border-church-gold/40 hover:bg-church-gold hover:text-church-navy transition-colors"

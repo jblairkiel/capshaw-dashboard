@@ -65,7 +65,7 @@ function UserMenu({ user, onLogout }) {
   );
 }
 
-export default function Header({ user, onLogout }) {
+export default function Header({ user, onLogout, onSignIn }) {
   return (
     <header className="bg-church-navy text-white">
       <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
@@ -92,7 +92,21 @@ export default function Header({ user, onLogout }) {
             <p>{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
             <p className="text-gray-400 mt-0.5">8941 Wall Triana Hwy &bull; Harvest, AL</p>
           </div>
-          {user && <UserMenu user={user} onLogout={onLogout} />}
+          {user
+            ? <UserMenu user={user} onLogout={onLogout} />
+            : (
+              <button
+                onClick={onSignIn}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border border-church-gold text-church-gold hover:bg-church-gold hover:text-church-navy transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                    d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+                </svg>
+                Sign in
+              </button>
+            )
+          }
         </div>
       </div>
     </header>

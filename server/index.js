@@ -14,6 +14,7 @@ const lessonPlannerRoutes  = require('./routes/lessonPlanner');
 const announcementRoutes   = require('./routes/announcements');
 const authRoutes           = require('./routes/auth');
 const songRoutes           = require('./routes/songTracker');
+const adminRoutes          = require('./routes/admin');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -60,6 +61,7 @@ app.use('/api/game-questions',  gameQuestionRoutes);
 app.use('/api/lesson-planner',  lessonPlannerRoutes);
 app.use('/api/announcements',   announcementRoutes);
 app.use('/api/songs',           songRoutes);
+app.use('/api/admin',           adminRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

@@ -15,6 +15,8 @@ import AnnouncementsDisplay from './components/AnnouncementsDisplay';
 import LoginPage from './components/LoginPage';
 import UsersView from './components/UsersView';
 import SongTrackerView from './components/SongTrackerView';
+import DatabaseAdminView from './components/DatabaseAdminView';
+import DirectoryView from './components/DirectoryView';
 
 const API = '/api/members';
 
@@ -50,7 +52,7 @@ const BASE_GROUPS = [
   },
 ];
 
-const STANDALONE_TABS = new Set(['bible-class', 'announcements', 'order', 'calendar', 'users', 'songs']);
+const STANDALONE_TABS = new Set(['bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database', 'directory']);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
 
@@ -117,6 +119,11 @@ function MainApp() {
   const [updateError,    setUpdateError]    = useState('');
   const [updateWarnings, setUpdateWarnings] = useState([]);
   const [user,        setUser]        = useState(undefined); // undefined=loading, null=not authed
+  const [showLogin,   setShowLogin]   = useState(() =>
+    !!new URLSearchParams(window.location.search).get('auth_error')
+  );
+
+  const authError = new URLSearchParams(window.location.search).get('auth_error');
 
   // Load current auth session
   useEffect(() => {
@@ -126,9 +133,9 @@ function MainApp() {
       .catch(() => setUser(null));
   }, []);
 
-  // Load scraped data
+  // Load scraped data — re-runs when auth resolves so a login mid-session still loads data
   useEffect(() => {
-    if (!user) return;
+    if (user === undefined) return; // still checking auth, wait
     fetch(`${API}/data`, { credentials: 'include' })
       .then(r => r.json())
       .then(j => { if (j.success && j.data) setSiteData(j.data); })
@@ -163,16 +170,14 @@ function MainApp() {
     );
   }
 
-  // Not logged in
-  if (user === null) {
-    const params = new URLSearchParams(window.location.search);
-    const authError = params.get('auth_error');
-    return <LoginPage authError={authError} />;
+  // Show login page when explicitly requested or after an OAuth redirect error
+  if (user === null && showLogin) {
+    return <LoginPage authError={authError} onBack={() => setShowLogin(false)} />;
   }
 
-  const canWrite = user.role === 'approved' || user.role === 'admin';
-  const GROUPS = user.role === 'admin'
-    ? [...BASE_GROUPS, { id: 'admin', label: 'Admin', items: [{ id: 'users', label: 'Users' }] }]
+  const canWrite = user?.role === 'admin';
+  const GROUPS = user?.role === 'admin'
+    ? [...BASE_GROUPS, { id: 'admin', label: 'Admin', items: [{ id: 'users', label: 'Users' }, { id: 'database', label: 'Database' }, { id: 'directory', label: 'Directory' }] }]
     : BASE_GROUPS;
 
   const lastUpdated = siteData?.lastUpdated
@@ -181,10 +186,10 @@ function MainApp() {
 
   return (
     <div className="min-h-screen bg-church-cream flex flex-col">
-      <Header user={user} onLogout={() => setUser(null)} />
+      <Header user={user} onLogout={() => setUser(null)} onSignIn={() => setShowLogin(true)} />
 
       {/* Pending approval banner */}
-      {user.role === 'pending' && (
+      {user?.role === 'pending' && (
         <div className="bg-amber-50 border-b border-amber-200 px-4 py-2.5 text-sm text-amber-800 flex items-center gap-2">
           <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
@@ -310,7 +315,7 @@ function MainApp() {
       )}
       {!updating && activeTab === 'order' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
-          <OrderOfService />
+          <OrderOfService user={user} />
         </main>
       )}
       {!updating && activeTab === 'calendar' && (
@@ -318,15 +323,25 @@ function MainApp() {
           <CalendarView />
         </main>
       )}
-      {!updating && activeTab === 'users' && user.role === 'admin' && (
+      {!updating && activeTab === 'users' && user?.role === 'admin' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           <UsersView currentUser={user} />
+        </main>
+      )}
+      {!updating && activeTab === 'database' && user?.role === 'admin' && (
+        <main className="w-full px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <DatabaseAdminView />
+        </main>
+      )}
+      {!updating && activeTab === 'directory' && user?.role === 'admin' && (
+        <main className="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <DirectoryView />
         </main>
       )}
 
       {/* Data-dependent tabs */}
       {siteData && !updating && !STANDALONE_TABS.has(activeTab) && (
-        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+        <main className={`${activeTab === 'assignments' ? 'w-full' : 'max-w-6xl mx-auto'} px-3 sm:px-4 py-4 sm:py-6 flex-1`}>
           {activeTab === 'assignments'   && <JobAssignments data={siteData.jobAssignments} />}
           {activeTab === 'attendance'    && <AttendanceView data={siteData.attendance} />}
           {activeTab === 'sermons'       && <SermonsView data={siteData.sermons} />}
