@@ -2,7 +2,7 @@ const express   = require('express');
 const router    = express.Router();
 const Anthropic = require('@anthropic-ai/sdk');
 const db        = require('../db');
-const { requireAuth, requireApproved } = require('../middleware/auth');
+const { requireAuth, requireAdmin } = require('../middleware/auth');
 
 const GRADE_DESCRIPTIONS = {
   'preschool':        'preschool children ages 3–5. Use very simple words and focus on basic who/what facts.',
@@ -20,7 +20,7 @@ router.get('/', requireAuth, (req, res) => {
   res.json({ success: true, questions: rows.map(parse) });
 });
 
-router.post('/', requireAuth, requireApproved, (req, res) => {
+router.post('/', requireAdmin, (req, res) => {
   const { type, question, options, answer, hint = '' } = req.body;
   if (!type || !question?.trim() || answer == null)
     return res.status(400).json({ success: false, error: 'type, question, and answer are required' });
@@ -33,7 +33,7 @@ router.post('/', requireAuth, requireApproved, (req, res) => {
   res.json({ success: true, question: { id, type, question: question.trim(), options: options ?? null, answer: String(answer), hint: hint.trim() } });
 });
 
-router.put('/:id', requireAuth, requireApproved, (req, res) => {
+router.put('/:id', requireAdmin, (req, res) => {
   const { type, question, options, answer, hint = '' } = req.body;
   if (!type || !question?.trim() || answer == null)
     return res.status(400).json({ success: false, error: 'type, question, and answer are required' });
@@ -45,14 +45,14 @@ router.put('/:id', requireAuth, requireApproved, (req, res) => {
   res.json({ success: true });
 });
 
-router.delete('/:id', requireAuth, requireApproved, (req, res) => {
+router.delete('/:id', requireAdmin, (req, res) => {
   db.prepare('DELETE FROM custom_game_questions WHERE id=?').run(req.params.id);
   res.json({ success: true });
 });
 
 // ─── AI generation ────────────────────────────────────────────────────────────
 
-router.post('/generate', requireAuth, requireApproved, async (req, res) => {
+router.post('/generate', requireAdmin, async (req, res) => {
   const { passage, gradeLevel = 'upper-elementary', questionCount = 10 } = req.body;
 
   if (!passage?.trim())

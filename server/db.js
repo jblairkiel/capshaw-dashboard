@@ -107,6 +107,98 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_service_songs_song ON service_songs(song_id);
   CREATE INDEX IF NOT EXISTS idx_song_services_date ON song_services(date);
+
+  -- ── Scraped / editable congregation data ────────────────────────────────────
+
+  CREATE TABLE IF NOT EXISTS attendance (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    date    TEXT    NOT NULL,
+    service TEXT    NOT NULL DEFAULT '',
+    count   INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS sermons (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    date    TEXT    NOT NULL,
+    title   TEXT    NOT NULL DEFAULT '',
+    speaker TEXT    NOT NULL DEFAULT '',
+    type    TEXT    NOT NULL DEFAULT '',
+    series  TEXT    NOT NULL DEFAULT '',
+    service TEXT    NOT NULL DEFAULT ''
+  );
+
+  CREATE TABLE IF NOT EXISTS job_assignments (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    month   TEXT    NOT NULL DEFAULT '',
+    date    TEXT    NOT NULL DEFAULT '',
+    service TEXT    NOT NULL DEFAULT '',
+    job     TEXT    NOT NULL DEFAULT '',
+    name    TEXT    NOT NULL DEFAULT ''
+  );
+
+  CREATE TABLE IF NOT EXISTS visitors (
+    id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT    NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS visitor_visits (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    visitor_id INTEGER NOT NULL REFERENCES visitors(id) ON DELETE CASCADE,
+    date       TEXT    NOT NULL DEFAULT '',
+    service    TEXT    NOT NULL DEFAULT ''
+  );
+
+  CREATE TABLE IF NOT EXISTS anniversaries (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    month     TEXT    NOT NULL DEFAULT '',
+    date      TEXT    NOT NULL DEFAULT '',
+    names     TEXT    NOT NULL DEFAULT '',
+    month_num INTEGER NOT NULL DEFAULT 0,
+    day       INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS deacons (
+    id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT    NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS deacon_duties (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    deacon_id INTEGER NOT NULL REFERENCES deacons(id) ON DELETE CASCADE,
+    duty      TEXT    NOT NULL,
+    position  INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS bulletins (
+    id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    url   TEXT NOT NULL,
+    label TEXT NOT NULL DEFAULT ''
+  );
+
+  CREATE TABLE IF NOT EXISTS scraped_meta (
+    id            INTEGER PRIMARY KEY CHECK (id = 1),
+    last_updated  TEXT    NOT NULL DEFAULT '',
+    last_warnings TEXT    NOT NULL DEFAULT '[]'
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_attendance_date        ON attendance(date);
+  CREATE INDEX IF NOT EXISTS idx_sermons_date           ON sermons(date);
+  CREATE INDEX IF NOT EXISTS idx_job_assignments_month  ON job_assignments(month);
+  CREATE INDEX IF NOT EXISTS idx_visitor_visits_visitor ON visitor_visits(visitor_id);
+
+  CREATE TABLE IF NOT EXISTS directory (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    name    TEXT NOT NULL DEFAULT '',
+    address TEXT NOT NULL DEFAULT '',
+    city    TEXT NOT NULL DEFAULT '',
+    state   TEXT NOT NULL DEFAULT '',
+    zip     TEXT NOT NULL DEFAULT '',
+    phone   TEXT NOT NULL DEFAULT '',
+    cell    TEXT NOT NULL DEFAULT '',
+    email   TEXT NOT NULL DEFAULT '',
+    notes   TEXT NOT NULL DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS idx_directory_name ON directory(name);
 `);
 
 module.exports = db;

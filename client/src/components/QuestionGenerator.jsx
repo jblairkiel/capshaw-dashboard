@@ -65,7 +65,7 @@ function QuestionCard({ index, q, revealed, onReveal }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function QuestionGenerator({ user }) {
-  const canWrite = user?.role === 'approved' || user?.role === 'admin';
+  const canWrite = user?.role === 'admin';
   const [passage,   setPassage]   = useState('');
   const [grade,     setGrade]     = useState('upper-elementary');
   const [count,     setCount]     = useState(10);

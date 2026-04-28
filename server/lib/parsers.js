@@ -122,6 +122,58 @@ function parseBulletins(html) {
     .filter(b => b.label && b.label.length > 3);
 }
 
+// Parse vCard 2.1 export from /members/directory/vcard
+function parseDirectory(vcf) {
+  const members = [];
+  // Unfold continuation lines (CRLF/LF + whitespace = folded)
+  const text = vcf.replace(/\r\n|\r/g, '\n').replace(/\n[ \t]/g, '');
+  const blocks = text.split(/\n(?=BEGIN:VCARD)/i).filter(b => /BEGIN:VCARD/i.test(b));
+
+  for (const block of blocks) {
+    const props = {};
+    for (const line of block.split('\n')) {
+      if (/^BEGIN:|^END:/i.test(line.trim())) continue;
+      const ci = line.indexOf(':');
+      if (ci < 0) continue;
+      const key = line.slice(0, ci).toUpperCase();
+      const val = line.slice(ci + 1).trim();
+      if (!props[key]) props[key] = [];
+      props[key].push(val);
+    }
+
+    const fn = (props['FN'] || [])[0] || '';
+    if (!fn) continue;
+
+    const adrKey = Object.keys(props).find(k => k.startsWith('ADR'));
+    let street = '', city = '', state = '', zip = '';
+    if (adrKey) {
+      const parts = (props[adrKey][0] || '').split(';');
+      street = parts[2] || '';
+      city   = parts[3] || '';
+      state  = parts[4] || '';
+      zip    = parts[5] || '';
+    }
+
+    const cellKey = Object.keys(props).find(k => k.startsWith('TEL') && k.includes('CELL'));
+    const homeKey = Object.keys(props).find(k => k.startsWith('TEL') && !k.includes('CELL'));
+    const emailKey = Object.keys(props).find(k => k.startsWith('EMAIL'));
+
+    members.push({
+      name:    fn,
+      address: street,
+      city,
+      state,
+      zip,
+      phone:   homeKey  ? (props[homeKey][0]  || '') : '',
+      cell:    cellKey  ? (props[cellKey][0]  || '') : '',
+      email:   emailKey ? (props[emailKey][0] || '') : '',
+      notes:   '',
+    });
+  }
+
+  return members;
+}
+
 module.exports = {
   stripTags,
   extractTables,
@@ -132,4 +184,5 @@ module.exports = {
   parseAnniversaries,
   parseDeacons,
   parseBulletins,
+  parseDirectory,
 };

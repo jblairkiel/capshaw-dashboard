@@ -132,7 +132,7 @@ function SetCard({ set, onDelete, canWrite }) {
 const GRADES = Object.entries(GRADE_LABELS).map(([value, label]) => ({ value, label }));
 
 export default function QuestionLibrary({ user }) {
-  const canWrite = user?.role === 'approved' || user?.role === 'admin';
+  const canWrite = user?.role === 'admin';
   const [sets,    setSets]    = useState([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState('');

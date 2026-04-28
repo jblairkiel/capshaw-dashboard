@@ -826,7 +826,7 @@ function FinalStandings({ teams, onRestart }) {
 // ─── Main Game ────────────────────────────────────────────────────────────────
 
 export default function StadiumGame({ user }) {
-  const canWrite = user?.role === 'approved' || user?.role === 'admin';
+  const canWrite = user?.role === 'admin';
   const [phase, setPhase]           = useState('setup');
   const [teams, setTeams]           = useState([]);
   const [currentIdx, setCurrentIdx] = useState(0);

@@ -524,7 +524,7 @@ const SERVICE_FILTERS = ['All', 'Sun AM', 'Sun PM', 'Wed', 'Singing', 'Other'];
 // ─── Main view ─────────────────────────────────────────────────────────────────
 
 export default function SongTrackerView({ user }) {
-  const canWrite = user?.role === 'approved' || user?.role === 'admin';
+  const canWrite = user?.role === 'admin';
 
   const [view,     setView]     = useState('history');  // 'history' | 'analytics' | 'add'
   const [records,  setRecords]  = useState([]);

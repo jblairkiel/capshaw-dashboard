@@ -3,7 +3,7 @@ const AUTH_ERROR_MESSAGES = {
   facebook: 'Facebook sign-in failed. Please try again.',
 };
 
-export default function LoginPage({ authError }) {
+export default function LoginPage({ authError, onBack }) {
   return (
     <div className="min-h-screen bg-church-cream flex flex-col items-center justify-center px-4">
       <div className="w-full max-w-sm">
@@ -65,6 +65,14 @@ export default function LoginPage({ authError }) {
           Access is limited to approved church staff.<br />
           New accounts require manual approval after sign-in.
         </p>
+
+        {onBack && (
+          <div className="text-center mt-4">
+            <button onClick={onBack} className="text-xs text-gray-400 hover:text-church-navy transition-colors underline underline-offset-2">
+              ← Continue without signing in
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
