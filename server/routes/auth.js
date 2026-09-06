@@ -26,6 +26,17 @@ passport.deserializeUser((id, done) => {
 
 // ─── Shared upsert helper ─────────────────────────────────────────────────────
 
+// Find the directory entry this sign-in belongs to by email. Only an
+// unambiguous single match counts — a shared family email must be assigned by
+// an admin rather than guessed at.
+function findPersonByEmail(email) {
+  if (!email) return null;
+  const matches = db.prepare(
+    'SELECT id FROM directory WHERE lower(trim(email)) = ? LIMIT 2'
+  ).all(email.trim().toLowerCase());
+  return matches.length === 1 ? matches[0].id : null;
+}
+
 function upsertUser(provider, profileId, email, name, photo) {
   const adminEmail = process.env.ADMIN_EMAIL?.toLowerCase();
   const isAdmin = email && adminEmail && email.toLowerCase() === adminEmail;
@@ -42,13 +53,19 @@ function upsertUser(provider, profileId, email, name, photo) {
     if (isAdmin && existing.role !== 'admin') {
       db.prepare('UPDATE users SET role=\'admin\' WHERE id=?').run(existing.id);
     }
+    // Link to a directory entry once, and never re-point an existing link —
+    // an admin may have assigned it deliberately.
+    if (!existing.directory_id) {
+      const personId = findPersonByEmail(email || existing.email);
+      if (personId) db.prepare('UPDATE users SET directory_id=? WHERE id=?').run(personId, existing.id);
+    }
     return db.prepare('SELECT * FROM users WHERE id=?').get(existing.id);
   }
 
   const role = isAdmin ? 'admin' : 'pending';
   const { lastInsertRowid: id } = db.prepare(
-    'INSERT INTO users (provider, provider_id, email, name, photo, role, last_login) VALUES (?,?,?,?,?,?,datetime(\'now\'))'
-  ).run(provider, profileId, email || null, name, photo || null, role);
+    'INSERT INTO users (provider, provider_id, email, name, photo, role, directory_id, last_login) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))'
+  ).run(provider, profileId, email || null, name, photo || null, role, findPersonByEmail(email));
   return db.prepare('SELECT * FROM users WHERE id=?').get(id);
 }
 
@@ -151,8 +168,8 @@ router.get('/facebook/callback', (req, res, next) => {
 
 router.get('/me', (req, res) => {
   if (!req.user) return res.status(401).json({ success: false });
-  const { id, name, email, photo, role, provider, created_at, last_login } = req.user;
-  res.json({ success: true, user: { id, name, email, photo, role, provider, created_at, last_login } });
+  const { id, name, email, photo, role, provider, created_at, last_login, directory_id } = req.user;
+  res.json({ success: true, user: { id, name, email, photo, role, provider, created_at, last_login, directory_id } });
 });
 
 router.post('/logout', (req, res) => {
@@ -204,9 +221,12 @@ function changeRole(actor, targetId, role) {
 }
 
 router.get('/users', requireAuth, requireAdmin, (req, res) => {
-  const users = db.prepare(
-    'SELECT id, provider, email, name, photo, role, created_at, last_login FROM users ORDER BY role ASC, created_at ASC'
-  ).all().map(u => ({ ...u, is_owner: isOwner(u) }));
+  const users = db.prepare(`
+    SELECT u.id, u.provider, u.email, u.name, u.photo, u.role, u.created_at, u.last_login,
+           u.directory_id, d.name AS directory_name
+    FROM users u LEFT JOIN directory d ON d.id = u.directory_id
+    ORDER BY u.role ASC, u.created_at ASC
+  `).all().map(u => ({ ...u, is_owner: isOwner(u) }));
   res.json({ success: true, users, roles: ROLES });
 });
 
@@ -223,6 +243,35 @@ router.patch('/users/:id/approve', requireAuth, requireAdmin, (req, res) => {
 router.patch('/users/:id/revoke', requireAuth, requireAdmin, (req, res) => {
   const { status, body } = changeRole(req.user, req.params.id, 'pending');
   res.status(status).json(body);
+});
+
+// Link a login to the directory entry it belongs to. Needed whenever someone
+// signs in with an email that differs from the one in the directory, since
+// only then can they edit their own household.
+router.patch('/users/:id/directory', requireAuth, requireAdmin, (req, res) => {
+  const target = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+  if (!target) return res.status(404).json({ success: false, error: 'User not found' });
+
+  const raw = req.body?.directory_id;
+  if (raw === null || raw === '' || raw === undefined) {
+    db.prepare('UPDATE users SET directory_id=NULL WHERE id=?').run(target.id);
+    return res.json({ success: true, directory_id: null });
+  }
+
+  const personId = Number(raw);
+  if (!Number.isInteger(personId)) {
+    return res.status(400).json({ success: false, error: 'directory_id must be a number or null' });
+  }
+  const person = db.prepare('SELECT id, name FROM directory WHERE id=?').get(personId);
+  if (!person) return res.status(404).json({ success: false, error: 'Directory entry not found' });
+
+  const taken = db.prepare('SELECT id, name FROM users WHERE directory_id=? AND id<>?').get(personId, target.id);
+  if (taken) {
+    return res.status(409).json({ success: false, error: `Already linked to ${taken.name}` });
+  }
+
+  db.prepare('UPDATE users SET directory_id=? WHERE id=?').run(personId, target.id);
+  res.json({ success: true, directory_id: personId, directory_name: person.name });
 });
 
 router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {
@@ -242,3 +291,5 @@ router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {
 });
 
 module.exports = router;
+// Exported for tests: the sign-in path that links an account to a directory entry.
+module.exports.upsertUser = upsertUser;

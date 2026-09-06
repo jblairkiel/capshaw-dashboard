@@ -1,23 +1,4 @@
-// Swap db.js for an in-memory SQLite instance before the auth routes require it.
-jest.mock('../db', () => {
-  const Database = require('better-sqlite3');
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id          INTEGER PRIMARY KEY AUTOINCREMENT,
-      provider    TEXT    NOT NULL,
-      provider_id TEXT    NOT NULL,
-      email       TEXT,
-      name        TEXT    NOT NULL,
-      photo       TEXT,
-      role        TEXT    NOT NULL DEFAULT 'pending',
-      created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
-      last_login  TEXT,
-      UNIQUE(provider, provider_id)
-    );
-  `);
-  return db;
-});
+jest.mock('../db', () => require('./helpers/memoryDb').createMemoryDb());
 
 const request    = require('supertest');
 const express    = require('express');
@@ -49,6 +30,7 @@ function roleOf(id) {
 beforeEach(() => {
   delete process.env.ADMIN_EMAIL;
   db.prepare('DELETE FROM users').run();
+  db.prepare('DELETE FROM directory').run();
   ADMIN   = insert('Ada',   'ada@example.com',   'admin');
   MEMBER  = insert('Mel',   'mel@example.com',   'approved');
   PENDING = insert('Pat',   'pat@example.com',   'pending');
@@ -215,5 +197,115 @@ describe('DELETE /api/auth/users/:id', () => {
     const res = await request(buildApp(second)).delete(`/api/auth/users/${ADMIN.id}`);
     expect(res.status).toBe(400);
     expect(roleOf(ADMIN.id)).toBe('admin');
+  });
+});
+
+// ─── Linking an account to its directory entry ────────────────────────────────
+
+function addPerson(name, email = '', address = '') {
+  const { lastInsertRowid: id } = db.prepare(
+    'INSERT INTO directory (name, email, address) VALUES (?,?,?)'
+  ).run(name, email, address);
+  return db.prepare('SELECT * FROM directory WHERE id=?').get(id);
+}
+
+function linkOf(userId) {
+  return db.prepare('SELECT directory_id FROM users WHERE id=?').get(userId)?.directory_id;
+}
+
+describe('PATCH /api/auth/users/:id/directory', () => {
+  test('links an account to a directory entry', async () => {
+    const person = addPerson('Mel Harris', 'mel@example.com');
+    const res = await request(buildApp(ADMIN))
+      .patch(`/api/auth/users/${MEMBER.id}/directory`)
+      .send({ directory_id: person.id });
+    expect(res.status).toBe(200);
+    expect(linkOf(MEMBER.id)).toBe(person.id);
+  });
+
+  test('clears the link when given null', async () => {
+    const person = addPerson('Mel Harris');
+    await request(buildApp(ADMIN)).patch(`/api/auth/users/${MEMBER.id}/directory`).send({ directory_id: person.id });
+    const res = await request(buildApp(ADMIN))
+      .patch(`/api/auth/users/${MEMBER.id}/directory`)
+      .send({ directory_id: null });
+    expect(res.status).toBe(200);
+    expect(linkOf(MEMBER.id)).toBeNull();
+  });
+
+  test('403 for a member — linking is an admin job', async () => {
+    const person = addPerson('Mel Harris');
+    const res = await request(buildApp(MEMBER))
+      .patch(`/api/auth/users/${PENDING.id}/directory`)
+      .send({ directory_id: person.id });
+    expect(res.status).toBe(403);
+  });
+
+  test('404 for a directory entry that does not exist', async () => {
+    const res = await request(buildApp(ADMIN))
+      .patch(`/api/auth/users/${MEMBER.id}/directory`)
+      .send({ directory_id: 9999 });
+    expect(res.status).toBe(404);
+  });
+
+  test('409 when that person is already linked to another account', async () => {
+    const person = addPerson('Mel Harris');
+    await request(buildApp(ADMIN)).patch(`/api/auth/users/${MEMBER.id}/directory`).send({ directory_id: person.id });
+    const res = await request(buildApp(ADMIN))
+      .patch(`/api/auth/users/${PENDING.id}/directory`)
+      .send({ directory_id: person.id });
+    expect(res.status).toBe(409);
+    expect(linkOf(PENDING.id)).toBeNull();
+  });
+
+  test('400 for a non-numeric directory id', async () => {
+    const res = await request(buildApp(ADMIN))
+      .patch(`/api/auth/users/${MEMBER.id}/directory`)
+      .send({ directory_id: 'Mel' });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('auto-linking at sign-in', () => {
+  const { upsertUser } = authRouter;
+
+  test('links a new account when exactly one directory email matches', () => {
+    const person = addPerson('Mel Harris', 'Mel@Example.com');
+    const user = upsertUser('google', 'new-1', 'mel@example.com', 'Mel', null);
+    expect(user.directory_id).toBe(person.id);
+  });
+
+  test('leaves the account unlinked when the email matches nobody', () => {
+    addPerson('Mel Harris', 'mel@example.com');
+    const user = upsertUser('google', 'new-2', 'someone@example.com', 'Someone', null);
+    expect(user.directory_id).toBeNull();
+  });
+
+  test('refuses to guess when a shared email matches two people', () => {
+    addPerson('Mel Harris', 'harris@example.com');
+    addPerson('Ray Harris', 'harris@example.com');
+    const user = upsertUser('google', 'new-3', 'harris@example.com', 'Mel', null);
+    expect(user.directory_id).toBeNull();
+  });
+
+  test('never re-points a link an admin already set', () => {
+    const assigned = addPerson('Ray Harris', 'ray@example.com');
+    const byEmail  = addPerson('Mel Harris', 'mel@example.com');
+    const created  = upsertUser('google', 'new-4', 'mel@example.com', 'Mel', null);
+    expect(created.directory_id).toBe(byEmail.id);
+
+    // An admin corrects it, then that person signs in again.
+    db.prepare('UPDATE users SET directory_id=? WHERE id=?').run(assigned.id, created.id);
+    const again = upsertUser('google', 'new-4', 'mel@example.com', 'Mel', null);
+    expect(again.directory_id).toBe(assigned.id);
+  });
+
+  test('links an existing unlinked account on their next sign-in', () => {
+    const created = upsertUser('google', 'new-5', 'mel@example.com', 'Mel', null);
+    expect(created.directory_id).toBeNull();
+
+    const person = addPerson('Mel Harris', 'mel@example.com');
+    const again  = upsertUser('google', 'new-5', 'mel@example.com', 'Mel', null);
+    expect(again.directory_id).toBe(person.id);
   });
 });

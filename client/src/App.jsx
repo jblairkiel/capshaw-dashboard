@@ -17,6 +17,7 @@ import UsersView from './components/UsersView';
 import SongTrackerView from './components/SongTrackerView';
 import DatabaseAdminView from './components/DatabaseAdminView';
 import DirectoryView from './components/DirectoryView';
+import MyProfileView from './components/MyProfileView';
 import { hasWriteAccess, isAdmin } from './lib/roles';
 
 const API = '/api/members';
@@ -53,7 +54,14 @@ const BASE_GROUPS = [
   },
 ];
 
-const STANDALONE_TABS = new Set(['bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database', 'directory']);
+// Shown to anyone signed in: their own details and worship preferences.
+const PROFILE_GROUP = {
+  id: 'me',
+  label: 'My Info',
+  items: [{ id: 'profile', label: 'My Info & Preferences' }],
+};
+
+const STANDALONE_TABS = new Set(['bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database', 'directory', 'profile']);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
 
@@ -178,9 +186,11 @@ function MainApp() {
 
   const canWrite = hasWriteAccess(user);
   const admin    = isAdmin(user);
-  const GROUPS = admin
-    ? [...BASE_GROUPS, { id: 'admin', label: 'Admin', items: [{ id: 'users', label: 'Users & Roles' }, { id: 'database', label: 'Database' }, { id: 'directory', label: 'Directory' }] }]
-    : BASE_GROUPS;
+  const GROUPS = [
+    ...BASE_GROUPS,
+    ...(user ? [PROFILE_GROUP] : []),
+    ...(admin ? [{ id: 'admin', label: 'Admin', items: [{ id: 'users', label: 'Users & Roles' }, { id: 'database', label: 'Database' }, { id: 'directory', label: 'Directory' }] }] : []),
+  ];
 
   const lastUpdated = siteData?.lastUpdated
     ? new Date(siteData.lastUpdated).toLocaleString()
@@ -323,6 +333,11 @@ function MainApp() {
       {!updating && activeTab === 'calendar' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           <CalendarView />
+        </main>
+      )}
+      {!updating && activeTab === 'profile' && user && (
+        <main className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
+          <MyProfileView user={user} />
         </main>
       )}
       {!updating && activeTab === 'users' && admin && (

@@ -187,18 +187,55 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_visitor_visits_visitor ON visitor_visits(visitor_id);
 
   CREATE TABLE IF NOT EXISTS directory (
-    id      INTEGER PRIMARY KEY AUTOINCREMENT,
-    name    TEXT NOT NULL DEFAULT '',
-    address TEXT NOT NULL DEFAULT '',
-    city    TEXT NOT NULL DEFAULT '',
-    state   TEXT NOT NULL DEFAULT '',
-    zip     TEXT NOT NULL DEFAULT '',
-    phone   TEXT NOT NULL DEFAULT '',
-    cell    TEXT NOT NULL DEFAULT '',
-    email   TEXT NOT NULL DEFAULT '',
-    notes   TEXT NOT NULL DEFAULT ''
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT NOT NULL DEFAULT '',
+    address       TEXT NOT NULL DEFAULT '',
+    city          TEXT NOT NULL DEFAULT '',
+    state         TEXT NOT NULL DEFAULT '',
+    zip           TEXT NOT NULL DEFAULT '',
+    phone         TEXT NOT NULL DEFAULT '',
+    cell          TEXT NOT NULL DEFAULT '',
+    email         TEXT NOT NULL DEFAULT '',
+    notes         TEXT NOT NULL DEFAULT '',
+    -- JSON array of field names a person or admin edited by hand. The scraper
+    -- refuses to overwrite these, so local corrections survive every re-sync.
+    edited_fields TEXT NOT NULL DEFAULT '[]'
   );
   CREATE INDEX IF NOT EXISTS idx_directory_name ON directory(name);
+
+  -- ── Worship role preferences ────────────────────────────────────────────────
+  -- One row per person per role they have an opinion about. Absent means
+  -- "no preference given".
+
+  CREATE TABLE IF NOT EXISTS worship_preferences (
+    directory_id INTEGER NOT NULL REFERENCES directory(id) ON DELETE CASCADE,
+    role         TEXT    NOT NULL,
+    level        TEXT    NOT NULL DEFAULT 'willing',
+    updated_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (directory_id, role)
+  );
+
+  CREATE TABLE IF NOT EXISTS worship_profile (
+    directory_id INTEGER PRIMARY KEY REFERENCES directory(id) ON DELETE CASCADE,
+    notes        TEXT    NOT NULL DEFAULT '',
+    updated_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
 `);
+
+// ─── Migrations ───────────────────────────────────────────────────────────────
+// CREATE TABLE IF NOT EXISTS leaves existing installs untouched, so columns
+// added after a table shipped need an explicit ALTER.
+
+function addColumn(table, column, definition) {
+  const exists = db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === column);
+  if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+// Which directory person this login belongs to. Set automatically when the
+// sign-in email matches a directory entry, or assigned by an admin.
+addColumn('users', 'directory_id', 'INTEGER REFERENCES directory(id) ON DELETE SET NULL');
+addColumn('directory', 'edited_fields', "TEXT NOT NULL DEFAULT '[]'");
+
+db.exec(`CREATE INDEX IF NOT EXISTS idx_users_directory ON users(directory_id);`);
 
 module.exports = db;

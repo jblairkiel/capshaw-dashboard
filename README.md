@@ -86,6 +86,49 @@ Three guardrails keep an admin from locking everyone out:
 
 ---
 
+## Personal Info & Worship Preferences
+
+Every member can keep their own details current instead of asking an admin.
+The **My Info** tab shows the person's directory entry, everyone else at the
+same address, and each person's worship role preferences.
+
+**Who may edit what**
+
+| | Own entry | Own household | Anyone |
+|---|---|---|---|
+| `pending` | read-only | read-only | — |
+| `approved` (Member) | ✅ | ✅ | — |
+| `admin` | ✅ | ✅ | ✅ (from **Admin → Directory**) |
+
+A *household* is everyone sharing a street address — the same grouping the
+directory shows as a family. Someone with no address on file is a household of
+one, so a blank address never pulls in strangers.
+
+**Worship preferences** are per person, per role — `preferred` ("glad to"),
+`willing`, or `unavailable` ("rather not") — with a free-text note for the
+person building the schedule. Roles come from `server/lib/people.js` and match
+the job names the scraper reads off the church website.
+
+**Linking an account to a person.** A login is matched to its directory entry
+by email at sign-in, but only when exactly one entry matches — a shared family
+email is never guessed at. Admins can set the link by hand from **Admin →
+Users & Roles**; an existing link is never re-pointed automatically. Until an
+account is linked, My Info explains that and points the person at an admin.
+
+**Edits survive re-scraping.** The scraper used to wipe the directory and
+re-insert it every four hours. It now upserts by name, so row ids stay stable
+(accounts and preferences hang off them), and any field edited by hand is
+recorded in `directory.edited_fields` and skipped on future syncs. People the
+website drops are removed only if they are pure scrape artifacts — never if
+they were edited, linked to an account, or carry preferences.
+
+> **Note on trust:** a member can change their own address, and doing so moves
+> them into whatever household matches that address. Members are already
+> trusted with congregation-wide content, so this is deliberate rather than a
+> gap — but it is why the household rule keys on the *stored* address.
+
+---
+
 ## Tests
 
 ```bash

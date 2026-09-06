@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import WorshipPreferences from './WorshipPreferences';
 
 const API = '/api/admin';
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
@@ -34,6 +35,8 @@ function groupByFamily(members) {
 
 // ─── Member modal (add / edit individual) ────────────────────────────────────
 
+const PROFILE_API = '/api/profile';
+
 function MemberModal({ member, onSave, onClose }) {
   const isNew = !member?.id;
   const FIELDS = [
@@ -54,19 +57,45 @@ function MemberModal({ member, onSave, onClose }) {
   });
   const [saving, setSaving] = useState(false);
   const [error,  setError]  = useState('');
+  // Worship preferences live behind the profile API, so an existing member's
+  // are fetched when the modal opens.
+  const [person, setPerson] = useState(null);
+
+  useEffect(() => {
+    if (isNew) return;
+    let cancelled = false;
+    fetch(`${PROFILE_API}/person/${member.id}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(j => { if (!cancelled && j.success) setPerson(j.person); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isNew, member?.id]);
 
   async function handleSubmit(e) {
     e.preventDefault();
     setSaving(true); setError('');
     try {
-      const url    = isNew ? `${API}/directory` : `${API}/directory/${member.id}`;
+      // Editing goes through the profile API so the fields are marked as
+      // hand-edited and the next scrape leaves them alone. Creating a brand
+      // new person is still a directory-table insert.
+      const url    = isNew ? `${API}/directory` : `${PROFILE_API}/person/${member.id}`;
       const method = isNew ? 'POST' : 'PATCH';
       const res    = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(form) });
       const j      = await res.json();
       if (!j.success) throw new Error(j.error || 'Save failed');
-      onSave(j.row);
+      onSave(j.row ?? j.person);
     } catch (err) { setError(err.message); }
     finally { setSaving(false); }
+  }
+
+  async function saveWorship(body) {
+    const res = await fetch(`${PROFILE_API}/person/${member.id}/worship`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      credentials: 'include', body: JSON.stringify(body),
+    });
+    const j = await res.json();
+    if (!j.success) throw new Error(j.error || 'Save failed');
+    setPerson(j.person);
   }
 
   return (
@@ -78,21 +107,29 @@ function MemberModal({ member, onSave, onClose }) {
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-          {FIELDS.map(f => (
-            <label key={f.key} className="block">
-              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">{f.label}</span>
-              <input
-                type="text"
-                className="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold"
-                value={form[f.key]}
-                placeholder={f.placeholder}
-                onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
-              />
-            </label>
-          ))}
-          {error && <p className="text-sm text-red-600">{error}</p>}
-        </form>
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-3">
+            {FIELDS.map(f => (
+              <label key={f.key} className="block">
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">{f.label}</span>
+                <input
+                  type="text"
+                  className="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold"
+                  value={form[f.key]}
+                  placeholder={f.placeholder}
+                  onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))}
+                />
+              </label>
+            ))}
+            {error && <p className="text-sm text-red-600">{error}</p>}
+          </form>
+
+          {person && (
+            <div className="pt-4 border-t border-gray-100">
+              <WorshipPreferences person={person} onSave={saveWorship} />
+            </div>
+          )}
+        </div>
         <div className="px-5 py-4 border-t border-gray-100 flex justify-end gap-2">
           <button onClick={onClose} className="px-4 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-50 border border-gray-200">Cancel</button>
           <button onClick={handleSubmit} disabled={saving} className="btn-primary text-sm">{saving ? 'Saving…' : 'Save'}</button>

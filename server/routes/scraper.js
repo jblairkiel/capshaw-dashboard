@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const router  = express.Router();
 const { requireApproved } = require('../middleware/auth');
+const { syncDirectory } = require('../lib/directorySync');
 const https   = require('https');
 const http    = require('http');
 const qs      = require('querystring');
@@ -209,10 +210,9 @@ const _saveScraped = db.transaction((data) => {
   const insBulletin = db.prepare('INSERT INTO bulletins (url, label) VALUES (?, ?)');
   for (const b of (data.bulletins || [])) insBulletin.run(b.url, b.label);
 
-  // Directory
-  db.prepare('DELETE FROM directory').run();
-  const insDir = db.prepare('INSERT INTO directory (name, address, city, state, zip, phone, cell, email, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
-  for (const d of (data.directory || [])) insDir.run(d.name, d.address || '', d.city || '', d.state || '', d.zip || '', d.phone || '', d.cell || '', d.email || '', d.notes || '');
+  // Directory — upserted, never wiped: accounts and worship preferences are
+  // keyed on these ids, and hand-edited fields must survive a re-scrape.
+  syncDirectory(db, data.directory || []);
 
   // Meta
   db.prepare('INSERT OR REPLACE INTO scraped_meta (id, last_updated, last_warnings) VALUES (1, ?, ?)').run(

@@ -55,7 +55,35 @@ function RoleBadge({ role }) {
   );
 }
 
-function UserRow({ user, currentUserId, onSetRole, onRemove }) {
+function DirectoryLink({ user, people, onLink }) {
+  const [busy, setBusy] = useState(false);
+
+  async function change(value) {
+    setBusy(true);
+    await onLink(user.id, value === '' ? null : Number(value));
+    setBusy(false);
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <label className="sr-only" htmlFor={`person-${user.id}`}>Directory entry for {user.name}</label>
+      <select
+        id={`person-${user.id}`}
+        value={user.directory_id ?? ''}
+        disabled={busy}
+        onChange={e => change(e.target.value)}
+        className="text-xs px-2 py-1 rounded-lg border border-gray-200 bg-white text-gray-600 max-w-[13rem] focus:outline-none focus:ring-1 focus:ring-church-gold disabled:opacity-50"
+      >
+        <option value="">Not linked to the directory</option>
+        {people.map(p => (
+          <option key={p.id} value={p.id}>{p.name}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function UserRow({ user, currentUserId, people, onSetRole, onRemove, onLink }) {
   const isSelf = user.id === currentUserId;
   const locked = isSelf || user.is_owner;
   const joined = user.created_at
@@ -82,6 +110,9 @@ function UserRow({ user, currentUserId, onSetRole, onRemove }) {
           <span className="text-xs text-gray-500 truncate">{user.email || 'No email'}</span>
           <ProviderBadge provider={user.provider} />
           <span className="text-xs text-gray-400">Joined {joined}</span>
+        </div>
+        <div className="mt-1.5">
+          <DirectoryLink user={user} people={people} onLink={onLink} />
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
@@ -143,12 +174,19 @@ export default function UsersView({ currentUser }) {
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
   const [notice, setNotice]   = useState('');
+  const [people, setPeople]   = useState([]);
 
   const load = useCallback(() => {
     setLoading(true);
-    fetch('/api/auth/users')
-      .then(r => r.json())
-      .then(j => { if (j.success) setUsers(j.users); else throw new Error(j.error); })
+    Promise.all([
+      fetch('/api/auth/users').then(r => r.json()),
+      fetch('/api/admin/directory?limit=2000&sort=name&dir=asc').then(r => r.json()).catch(() => ({ rows: [] })),
+    ])
+      .then(([usersJson, dirJson]) => {
+        if (!usersJson.success) throw new Error(usersJson.error);
+        setUsers(usersJson.users);
+        setPeople(dirJson.rows ?? []);
+      })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
@@ -176,7 +214,19 @@ export default function UsersView({ currentUser }) {
     load();
   }
 
-  const rowProps = { currentUserId: currentUser.id, onSetRole: setRole, onRemove: remove };
+  async function link(id, directoryId) {
+    setNotice('');
+    const res  = await fetch(`/api/auth/users/${id}/directory`, {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ directory_id: directoryId }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!json.success) setNotice(json.error || 'Could not link that account');
+    load();
+  }
+
+  const rowProps = { currentUserId: currentUser.id, people, onSetRole: setRole, onRemove: remove, onLink: link };
 
   const pending = users.filter(u => u.role === 'pending');
   const members = users.filter(u => u.role === 'approved');
@@ -226,6 +276,12 @@ export default function UsersView({ currentUser }) {
           ))}
         </dl>
       </div>
+
+      <p className="text-xs text-gray-500">
+        Linking an account to its directory entry lets that person edit their own and their
+        household&apos;s details and worship preferences. Accounts link automatically when the
+        sign-in email matches the directory.
+      </p>
 
       <UserGroup
         title="Pending Approval"
