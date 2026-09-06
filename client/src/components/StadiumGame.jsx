@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { hasWriteAccess } from '../lib/roles';
 
 // ─── Built-in question bank (multiple-choice) ─────────────────────────────────
 
@@ -826,7 +827,7 @@ function FinalStandings({ teams, onRestart }) {
 // ─── Main Game ────────────────────────────────────────────────────────────────
 
 export default function StadiumGame({ user }) {
-  const canWrite = user?.role === 'admin';
+  const canWrite = hasWriteAccess(user);
   const [phase, setPhase]           = useState('setup');
   const [teams, setTeams]           = useState([]);
   const [currentIdx, setCurrentIdx] = useState(0);

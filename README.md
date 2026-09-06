@@ -56,6 +56,94 @@ On first start the server will attempt to scrape the church website. It re-scrap
 
 ---
 
+## Roles & Permissions
+
+Every signed-in user holds exactly one of three roles. They are ranked, so each
+role includes everything below it.
+
+| Role | Can do |
+|---|---|
+| `pending` | View the dashboard. Cannot create or edit anything. |
+| `approved` (Member) | Everything a pending user sees, plus: Bible class questions, the lesson planner, site updates, and editing their own household's details and worship preferences. |
+| `admin` | Everything a member can do, plus writing announcements, the song tracker and the order of service, and the Admin tabs — user roles, the congregation directory, and direct editing of every database table. |
+
+Read and write are separate: **announcements, the song tracker and the order of
+service are read-only for members** — everyone can see them, only admins can
+change them.
+
+| Feature | Member | Admin |
+|---|---|---|
+| Announcements | read | read + write |
+| Song Tracker | read | read + write |
+| Order of Service | read | read + write |
+| Bible Class & Lesson Planner | read + write | read + write |
+| My Info (own household) | read + write | read + write (anyone) |
+| Site update (re-scrape) | ✅ | ✅ |
+| Directory, Database, User roles | — | ✅ |
+
+New sign-ins land on `pending`. An admin promotes them from **Admin → Users &
+Roles**, either with the one-click **Approve** button or the per-user role
+selector.
+
+Roles are enforced on the server by `server/middleware/auth.js`:
+`requireApproved` guards the member routes (Bible class, lesson planner, site
+update, profile edits), `requireAdmin` guards announcements, songs, documents,
+`/api/admin/*` (the database editor) and user management. The client mirrors
+the same ranks in `client/src/lib/roles.js` purely to decide what to show — the
+server is always the authority.
+
+Three guardrails keep an admin from locking everyone out:
+
+- You cannot change or delete your own role.
+- The last remaining admin cannot be demoted or removed.
+- The account named by `ADMIN_EMAIL` is the owner; it is promoted to admin on
+  every login and its role cannot be edited.
+
+---
+
+## Personal Info & Worship Preferences
+
+Every member can keep their own details current instead of asking an admin.
+The **My Info** tab shows the person's directory entry, everyone else at the
+same address, and each person's worship role preferences.
+
+**Who may edit what**
+
+| | Own entry | Own household | Anyone |
+|---|---|---|---|
+| `pending` | read-only | read-only | — |
+| `approved` (Member) | ✅ | ✅ | — |
+| `admin` | ✅ | ✅ | ✅ (from **Admin → Directory**) |
+
+A *household* is everyone sharing a street address — the same grouping the
+directory shows as a family. Someone with no address on file is a household of
+one, so a blank address never pulls in strangers.
+
+**Worship preferences** are per person, per role — `preferred` ("glad to"),
+`willing`, or `unavailable` ("rather not") — with a free-text note for the
+person building the schedule. Roles come from `server/lib/people.js` and match
+the job names the scraper reads off the church website.
+
+**Linking an account to a person.** A login is matched to its directory entry
+by email at sign-in, but only when exactly one entry matches — a shared family
+email is never guessed at. Admins can set the link by hand from **Admin →
+Users & Roles**; an existing link is never re-pointed automatically. Until an
+account is linked, My Info explains that and points the person at an admin.
+
+**Edits survive re-scraping.** The scraper used to wipe the directory and
+re-insert it every four hours. It now upserts by name, so row ids stay stable
+(accounts and preferences hang off them), and any field edited by hand is
+recorded in `directory.edited_fields` and skipped on future syncs. People the
+website drops are removed only if they are pure scrape artifacts — never if
+they were edited, linked to an account, or carry preferences.
+
+> **Note on trust:** a member can change their own address, and doing so moves
+> them into whatever household matches that address. Members are already
+> trusted with congregation-wide content, so this is deliberate rather than a
+> gap — but it is why the household rule keys on the *stored* address.
+
+---
+
 ## Tests
 
 ```bash
@@ -202,5 +290,8 @@ pm2 restart capshaw-dashboard
 | Variable | Required | Description |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Yes (for Bible Class tab) | Anthropic API key for question generation |
+| `ADMIN_EMAIL` | Recommended | Email of the owner account — promoted to admin on every login |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | For Google sign-in | Google OAuth credentials |
+| `FACEBOOK_APP_ID` / `FACEBOOK_APP_SECRET` | For Facebook sign-in | Facebook OAuth credentials |
 | `NODE_ENV` | Production only | Set to `production` to serve the React build |
 | `PORT` | No | API port (default `3001`) |

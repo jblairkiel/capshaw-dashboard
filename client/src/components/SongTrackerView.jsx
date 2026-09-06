@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { isAdmin } from '../lib/roles';
 
 // ─── Song search typeahead ─────────────────────────────────────────────────────
 
@@ -524,7 +525,7 @@ const SERVICE_FILTERS = ['All', 'Sun AM', 'Sun PM', 'Wed', 'Singing', 'Other'];
 // ─── Main view ─────────────────────────────────────────────────────────────────
 
 export default function SongTrackerView({ user }) {
-  const canWrite = user?.role === 'admin';
+  const canWrite = isAdmin(user);
 
   const [view,     setView]     = useState('history');  // 'history' | 'analytics' | 'add'
   const [records,  setRecords]  = useState([]);

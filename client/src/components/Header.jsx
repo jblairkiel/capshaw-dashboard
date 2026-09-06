@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { roleInfo } from '../lib/roles';
 
 function UserMenu({ user, onLogout }) {
   const [open,     setOpen]     = useState(false);
@@ -40,12 +41,8 @@ function UserMenu({ user, onLogout }) {
             <div className="px-4 py-3 border-b border-gray-100">
               <p className="text-sm font-semibold text-church-navy truncate">{user.name}</p>
               <p className="text-xs text-gray-500 truncate">{user.email || 'No email'}</p>
-              <span className={`mt-1 inline-block text-xs px-2 py-0.5 rounded-full font-medium ${
-                user.role === 'admin'    ? 'bg-church-gold/20 text-church-navy' :
-                user.role === 'approved' ? 'bg-green-100 text-green-700' :
-                                           'bg-orange-100 text-orange-700'
-              }`}>
-                {user.role === 'admin' ? 'Admin' : user.role === 'approved' ? 'Approved' : 'Pending approval'}
+              <span className={`mt-1 inline-block text-xs px-2 py-0.5 rounded-full font-medium ${roleInfo(user.role).tone}`}>
+                {roleInfo(user.role).badge}
               </span>
             </div>
             <button

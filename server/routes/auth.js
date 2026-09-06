@@ -3,7 +3,7 @@ const passport  = require('passport');
 const { Strategy: GoogleStrategy }   = require('passport-google-oauth20');
 const { Strategy: FacebookStrategy } = require('passport-facebook');
 const db = require('../db');
-const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { requireAuth, requireAdmin, ROLES, isRole } = require('../middleware/auth');
 
 const isProd     = process.env.NODE_ENV === 'production';
 const CLIENT_URL = isProd ? 'https://capshaw.jblairkiel.com' : 'http://localhost:5173';
@@ -26,6 +26,17 @@ passport.deserializeUser((id, done) => {
 
 // ─── Shared upsert helper ─────────────────────────────────────────────────────
 
+// Find the directory entry this sign-in belongs to by email. Only an
+// unambiguous single match counts — a shared family email must be assigned by
+// an admin rather than guessed at.
+function findPersonByEmail(email) {
+  if (!email) return null;
+  const matches = db.prepare(
+    'SELECT id FROM directory WHERE lower(trim(email)) = ? LIMIT 2'
+  ).all(email.trim().toLowerCase());
+  return matches.length === 1 ? matches[0].id : null;
+}
+
 function upsertUser(provider, profileId, email, name, photo) {
   const adminEmail = process.env.ADMIN_EMAIL?.toLowerCase();
   const isAdmin = email && adminEmail && email.toLowerCase() === adminEmail;
@@ -42,13 +53,19 @@ function upsertUser(provider, profileId, email, name, photo) {
     if (isAdmin && existing.role !== 'admin') {
       db.prepare('UPDATE users SET role=\'admin\' WHERE id=?').run(existing.id);
     }
+    // Link to a directory entry once, and never re-point an existing link —
+    // an admin may have assigned it deliberately.
+    if (!existing.directory_id) {
+      const personId = findPersonByEmail(email || existing.email);
+      if (personId) db.prepare('UPDATE users SET directory_id=? WHERE id=?').run(personId, existing.id);
+    }
     return db.prepare('SELECT * FROM users WHERE id=?').get(existing.id);
   }
 
   const role = isAdmin ? 'admin' : 'pending';
   const { lastInsertRowid: id } = db.prepare(
-    'INSERT INTO users (provider, provider_id, email, name, photo, role, last_login) VALUES (?,?,?,?,?,?,datetime(\'now\'))'
-  ).run(provider, profileId, email || null, name, photo || null, role);
+    'INSERT INTO users (provider, provider_id, email, name, photo, role, directory_id, last_login) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))'
+  ).run(provider, profileId, email || null, name, photo || null, role, findPersonByEmail(email));
   return db.prepare('SELECT * FROM users WHERE id=?').get(id);
 }
 
@@ -151,8 +168,8 @@ router.get('/facebook/callback', (req, res, next) => {
 
 router.get('/me', (req, res) => {
   if (!req.user) return res.status(401).json({ success: false });
-  const { id, name, email, photo, role, provider, created_at, last_login } = req.user;
-  res.json({ success: true, user: { id, name, email, photo, role, provider, created_at, last_login } });
+  const { id, name, email, photo, role, provider, created_at, last_login, directory_id } = req.user;
+  res.json({ success: true, user: { id, name, email, photo, role, provider, created_at, last_login, directory_id } });
 });
 
 router.post('/logout', (req, res) => {
@@ -164,35 +181,115 @@ router.post('/logout', (req, res) => {
 
 // ─── Admin: user management ───────────────────────────────────────────────────
 
+// The account named by ADMIN_EMAIL is re-promoted to admin on every login, so
+// its role is not editable here — changing it would silently revert.
+function isOwner(user) {
+  const ownerEmail = process.env.ADMIN_EMAIL?.toLowerCase();
+  return !!(ownerEmail && user?.email && user.email.toLowerCase() === ownerEmail);
+}
+
+function countAdmins() {
+  return db.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin'").get().n;
+}
+
+// Shared by the role selector and the approve/revoke shortcuts. Returns an
+// { status, body } pair so each route can just forward it.
+function changeRole(actor, targetId, role) {
+  if (!isRole(role)) {
+    return { status: 400, body: { success: false, error: `Role must be one of: ${ROLES.join(', ')}` } };
+  }
+
+  const target = db.prepare('SELECT * FROM users WHERE id=?').get(targetId);
+  if (!target) return { status: 404, body: { success: false, error: 'User not found' } };
+
+  if (String(target.id) === String(actor.id)) {
+    return { status: 400, body: { success: false, error: 'You cannot change your own role' } };
+  }
+  if (isOwner(target)) {
+    return { status: 400, body: { success: false, error: 'The owner account is always an admin' } };
+  }
+  if (target.role === 'admin' && role !== 'admin' && countAdmins() <= 1) {
+    return { status: 400, body: { success: false, error: 'Cannot remove the last admin' } };
+  }
+
+  if (target.role !== role) db.prepare('UPDATE users SET role=? WHERE id=?').run(role, target.id);
+
+  const user = db.prepare(
+    'SELECT id, provider, email, name, photo, role, created_at, last_login FROM users WHERE id=?'
+  ).get(target.id);
+  return { status: 200, body: { success: true, user: { ...user, is_owner: isOwner(user) } } };
+}
+
 router.get('/users', requireAuth, requireAdmin, (req, res) => {
-  const users = db.prepare(
-    'SELECT id, provider, email, name, photo, role, created_at, last_login FROM users ORDER BY role ASC, created_at ASC'
-  ).all();
-  res.json({ success: true, users });
+  const users = db.prepare(`
+    SELECT u.id, u.provider, u.email, u.name, u.photo, u.role, u.created_at, u.last_login,
+           u.directory_id, d.name AS directory_name
+    FROM users u LEFT JOIN directory d ON d.id = u.directory_id
+    ORDER BY u.role ASC, u.created_at ASC
+  `).all().map(u => ({ ...u, is_owner: isOwner(u) }));
+  res.json({ success: true, users, roles: ROLES });
+});
+
+router.patch('/users/:id/role', requireAuth, requireAdmin, (req, res) => {
+  const { status, body } = changeRole(req.user, req.params.id, req.body?.role);
+  res.status(status).json(body);
 });
 
 router.patch('/users/:id/approve', requireAuth, requireAdmin, (req, res) => {
-  const target = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
-  if (!target) return res.status(404).json({ success: false, error: 'User not found' });
-  if (target.role === 'admin') return res.status(400).json({ success: false, error: 'Cannot change admin role' });
-  db.prepare('UPDATE users SET role=\'approved\' WHERE id=?').run(req.params.id);
-  res.json({ success: true });
+  const { status, body } = changeRole(req.user, req.params.id, 'approved');
+  res.status(status).json(body);
 });
 
 router.patch('/users/:id/revoke', requireAuth, requireAdmin, (req, res) => {
+  const { status, body } = changeRole(req.user, req.params.id, 'pending');
+  res.status(status).json(body);
+});
+
+// Link a login to the directory entry it belongs to. Needed whenever someone
+// signs in with an email that differs from the one in the directory, since
+// only then can they edit their own household.
+router.patch('/users/:id/directory', requireAuth, requireAdmin, (req, res) => {
   const target = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
   if (!target) return res.status(404).json({ success: false, error: 'User not found' });
-  if (target.role === 'admin') return res.status(400).json({ success: false, error: 'Cannot revoke admin' });
-  db.prepare('UPDATE users SET role=\'pending\' WHERE id=?').run(req.params.id);
-  res.json({ success: true });
+
+  const raw = req.body?.directory_id;
+  if (raw === null || raw === '' || raw === undefined) {
+    db.prepare('UPDATE users SET directory_id=NULL WHERE id=?').run(target.id);
+    return res.json({ success: true, directory_id: null });
+  }
+
+  const personId = Number(raw);
+  if (!Number.isInteger(personId)) {
+    return res.status(400).json({ success: false, error: 'directory_id must be a number or null' });
+  }
+  const person = db.prepare('SELECT id, name FROM directory WHERE id=?').get(personId);
+  if (!person) return res.status(404).json({ success: false, error: 'Directory entry not found' });
+
+  const taken = db.prepare('SELECT id, name FROM users WHERE directory_id=? AND id<>?').get(personId, target.id);
+  if (taken) {
+    return res.status(409).json({ success: false, error: `Already linked to ${taken.name}` });
+  }
+
+  db.prepare('UPDATE users SET directory_id=? WHERE id=?').run(personId, target.id);
+  res.json({ success: true, directory_id: personId, directory_name: person.name });
 });
 
 router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {
   if (String(req.params.id) === String(req.user.id)) {
     return res.status(400).json({ success: false, error: 'Cannot delete your own account' });
   }
-  db.prepare('DELETE FROM users WHERE id=?').run(req.params.id);
+  const target = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+  if (!target) return res.status(404).json({ success: false, error: 'User not found' });
+  if (isOwner(target)) {
+    return res.status(400).json({ success: false, error: 'Cannot remove the owner account' });
+  }
+  if (target.role === 'admin' && countAdmins() <= 1) {
+    return res.status(400).json({ success: false, error: 'Cannot remove the last admin' });
+  }
+  db.prepare('DELETE FROM users WHERE id=?').run(target.id);
   res.json({ success: true });
 });
 
 module.exports = router;
+// Exported for tests: the sign-in path that links an account to a directory entry.
+module.exports.upsertUser = upsertUser;

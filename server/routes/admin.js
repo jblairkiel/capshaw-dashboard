@@ -1,15 +1,13 @@
 const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAdmin } = require('../middleware/auth');
 const { readData } = require('./scraper');
+const { syncDirectory } = require('../lib/directorySync');
 
-function requireAdmin(req, res, next) {
-  if (req.user?.role !== 'admin') return res.status(403).json({ success: false, error: 'Admin only' });
-  next();
-}
-
-router.use(requireAuth, requireAdmin);
+// Direct database editing is an admin-only privilege — members get the
+// feature tabs, admins additionally get every table below.
+router.use(requireAdmin);
 
 // ─── Table definitions ────────────────────────────────────────────────────────
 // Each entry describes columns (for SELECT), writable fields (for INSERT/UPDATE),
@@ -148,9 +146,7 @@ router.post('/import-cache', (req, res) => {
       const insB = db.prepare('INSERT INTO bulletins (url, label) VALUES (?, ?)');
       for (const b of (d.bulletins || [])) insB.run(b.url, b.label);
 
-      db.prepare('DELETE FROM directory').run();
-      const insDir = db.prepare('INSERT INTO directory (name, address, city, state, zip, phone, cell, email, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
-      for (const dir of (data.directory || [])) insDir.run(dir.name, dir.address||'', dir.city||'', dir.state||'', dir.zip||'', dir.phone||'', dir.cell||'', dir.email||'', dir.notes||'');
+      syncDirectory(db, data.directory || []);
 
       db.prepare('INSERT OR REPLACE INTO scraped_meta (id, last_updated, last_warnings) VALUES (1, ?, ?)').run(
         d.lastUpdated || new Date().toISOString(), JSON.stringify(d.warnings || [])

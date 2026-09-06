@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { hasWriteAccess } from '../lib/roles';
 
 const GRADE_LEVELS = [
   { value: 'preschool',        label: 'Preschool',         sub: 'Ages 3–5' },
@@ -65,7 +66,7 @@ function QuestionCard({ index, q, revealed, onReveal }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function QuestionGenerator({ user }) {
-  const canWrite = user?.role === 'admin';
+  const canWrite = hasWriteAccess(user);
   const [passage,   setPassage]   = useState('');
   const [grade,     setGrade]     = useState('upper-elementary');
   const [count,     setCount]     = useState(10);
