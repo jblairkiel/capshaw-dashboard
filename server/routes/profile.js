@@ -2,6 +2,7 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
 const { requireAuth, requireApproved } = require('../middleware/auth');
+const photoStore = require('../lib/photoStore');
 const {
   sameHousehold,
   WORSHIP_ROLES, PREFERENCE_LEVELS, isWorshipRole, isPreferenceLevel,
@@ -35,10 +36,11 @@ function notesOf(directoryId) {
 
 // A person plus everything the profile screens render about them.
 function personPayload(person) {
-  const { edited_fields, ...fields } = person;
+  const { edited_fields, photo, ...fields } = person;
   return {
     ...fields,
     edited_fields: safeParse(edited_fields),
+    has_photo: !!photo,
     worship: { preferences: preferencesOf(person.id), notes: notesOf(person.id) },
   };
 }
@@ -92,6 +94,25 @@ router.get('/person/:id', requireApproved, (req, res) => {
     return res.status(403).json({ success: false, error: 'You can only view profiles in your own household' });
   }
   res.json({ success: true, person: personPayload(person), household: householdOf(person).map(personPayload) });
+});
+
+// ─── GET /api/profile/person/:id/photo ────────────────────────────────────────
+
+router.get('/person/:id/photo', requireApproved, (req, res) => {
+  const person = getPerson(req.params.id);
+  if (!person) return res.status(404).json({ success: false, error: 'Person not found' });
+  if (!canEdit(req.user, person)) {
+    return res.status(403).json({ success: false, error: 'You can only view photos in your own household' });
+  }
+
+  const file = photoStore.photoPath(person.photo);
+  if (!person.photo || !file || !photoStore.exists(person.photo)) {
+    return res.status(404).json({ success: false, error: 'No photo on file' });
+  }
+
+  // Content-addressed filenames never change contents, so this is safe to keep.
+  res.set('Cache-Control', 'private, max-age=86400');
+  res.sendFile(file);
 });
 
 // ─── PATCH /api/profile/person/:id — contact details ──────────────────────────

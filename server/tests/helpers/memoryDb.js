@@ -17,7 +17,8 @@ function createMemoryDb() {
       cell          TEXT NOT NULL DEFAULT '',
       email         TEXT NOT NULL DEFAULT '',
       notes         TEXT NOT NULL DEFAULT '',
-      edited_fields TEXT NOT NULL DEFAULT '[]'
+      edited_fields TEXT NOT NULL DEFAULT '[]',
+      photo         TEXT NOT NULL DEFAULT ''
     );
     CREATE TABLE users (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,

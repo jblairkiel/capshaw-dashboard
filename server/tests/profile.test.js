@@ -272,3 +272,51 @@ describe('GET /api/profile/person/:id', () => {
     expect(res.status).toBe(403);
   });
 });
+
+// ─── GET /person/:id/photo ────────────────────────────────────────────────────
+
+describe('GET /api/profile/person/:id/photo', () => {
+  test('404 when the person has no photo on file', async () => {
+    const res = await request(buildApp(MEMBER)).get(`/api/profile/person/${DAD.id}/photo`);
+    expect(res.status).toBe(404);
+  });
+
+  test('403 for someone in another household, even if they have a photo', async () => {
+    db.prepare('UPDATE directory SET photo=? WHERE id=?').run('abc.jpg', STRANGER.id);
+    const res = await request(buildApp(MEMBER)).get(`/api/profile/person/${STRANGER.id}/photo`);
+    expect(res.status).toBe(403);
+  });
+
+  test('404 rather than a crash when the row names a file that is gone', async () => {
+    db.prepare('UPDATE directory SET photo=? WHERE id=?').run('deadbeef.jpg', DAD.id);
+    const res = await request(buildApp(MEMBER)).get(`/api/profile/person/${DAD.id}/photo`);
+    expect(res.status).toBe(404);
+  });
+
+  test('404 for a stored filename that tries to escape the photo directory', async () => {
+    db.prepare('UPDATE directory SET photo=? WHERE id=?').run('../../../etc/passwd', DAD.id);
+    const res = await request(buildApp(MEMBER)).get(`/api/profile/person/${DAD.id}/photo`);
+    expect(res.status).toBe(404);
+  });
+
+  test('404 for an unknown person', async () => {
+    const res = await request(buildApp(ADMIN)).get('/api/profile/person/9999/photo');
+    expect(res.status).toBe(404);
+  });
+});
+
+// ─── Payload ──────────────────────────────────────────────────────────────────
+
+describe('person payload', () => {
+  test('reports whether a photo exists without leaking the filename', async () => {
+    db.prepare('UPDATE directory SET photo=? WHERE id=?').run('abc.jpg', DAD.id);
+    const res = await request(buildApp(MEMBER)).get('/api/profile/me');
+    expect(res.body.person.has_photo).toBe(true);
+    expect(res.body.person.photo).toBeUndefined();
+  });
+
+  test('has_photo is false when there is none', async () => {
+    const res = await request(buildApp(MEMBER)).get('/api/profile/me');
+    expect(res.body.person.has_photo).toBe(false);
+  });
+});

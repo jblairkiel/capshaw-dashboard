@@ -225,10 +225,86 @@ const STATUS_META = {
   unknown: { dot: 'bg-gray-300',    badge: 'bg-gray-50 text-gray-400 border-gray-200',           label: 'Unknown' },
 };
 
+// Renders the /api/members/debug/:section report in plain language, so the
+// answer to "why is this empty?" does not require reading JSON.
+function SectionDiagnosis({ report }) {
+  if (report.error) {
+    return <p className="text-xs text-red-600">Could not check: {report.error}</p>;
+  }
+
+  const verdict =
+    report.looksLikeLogin ? 'The site returned a login page — the scraper credentials are being rejected.'
+    : report.pageNotFound ? 'The site returned "page not found" — this feature may be switched off on the church website.'
+    : report.parseError   ? `The page loaded but the parser errored: ${report.parseError}`
+    : report.parsed?.count ? `Loaded and parsed ${report.parsed.count} row${report.parsed.count === 1 ? '' : 's'}.`
+    : report.tables?.length ? 'The page loaded and has tables, but none matched a shape the parser understands — the site\'s layout has probably changed. The table preview below shows what it actually returned.'
+    : 'The page loaded but contained no tables at all.';
+
+  const tone = report.parsed?.count ? 'text-emerald-700' : 'text-amber-800';
+
+  return (
+    <div className="space-y-2">
+      <p className={`text-xs font-medium ${tone}`}>{verdict}</p>
+      <p className="text-xs text-gray-500 font-mono">
+        {report.path} · HTTP {report.status} · {report.bytes.toLocaleString()} bytes
+        {report.tables ? ` · ${report.tables.length} table${report.tables.length === 1 ? '' : 's'}` : ''}
+      </p>
+
+      {report.photos && (
+        <p className="text-xs text-gray-600">
+          Photos: <strong>{report.photos.embedded}</strong> embedded in the vCard
+          {report.photos.urlOnly > 0 && <> · {report.photos.urlOnly} linked by URL (not downloaded)</>}
+          {' '}· {report.photos.none} with no photo
+        </p>
+      )}
+
+      {report.tables?.length > 0 && (
+        <div className="space-y-2 max-h-72 overflow-auto">
+          {report.tables.map(t => (
+            <div key={t.index} className="bg-white border border-gray-200 rounded-lg p-2">
+              <p className="text-xs text-gray-400 mb-1">Table {t.index} — {t.rowCount} rows</p>
+              <table className="text-xs w-full">
+                <tbody>
+                  {t.sampleRows.map((row, i) => (
+                    <tr key={i} className="border-t border-gray-50">
+                      {row.map((cell, j) => (
+                        <td key={j} className="px-1.5 py-0.5 text-gray-600 font-mono align-top">
+                          {cell === '' ? <span className="text-gray-300">(empty)</span> : cell}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ScrapeStatus({ onScrape, scraping }) {
   const [data, setData]         = useState(null);
   const [loading, setLoading]   = useState(true);
   const [expanded, setExpanded] = useState({});
+  // Per-section diagnostic: what the church site actually returned.
+  const [diagnosis, setDiagnosis] = useState({});
+  const [checking, setChecking]   = useState('');
+
+  async function diagnose(key) {
+    setChecking(key);
+    try {
+      const res = await fetch(`/api/members/debug/${key}`, { credentials: 'include' });
+      const j   = await res.json();
+      setDiagnosis(p => ({ ...p, [key]: j.success ? j.report : { error: j.error } }));
+      setExpanded(p => ({ ...p, [key]: true }));
+    } catch (err) {
+      setDiagnosis(p => ({ ...p, [key]: { error: err.message } }));
+    } finally {
+      setChecking('');
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -323,8 +399,18 @@ function ScrapeStatus({ onScrape, scraping }) {
                     {m.label}
                   </span>
 
-                  {/* Expand toggle (only if warnings) */}
-                  {s.warnings.length > 0 && (
+                  {/* Ask the site directly what it returns for this section */}
+                  <button
+                    onClick={() => diagnose(s.key)}
+                    disabled={checking === s.key}
+                    title="Re-fetch this page and report what the parser saw"
+                    className="text-xs px-2 py-1 rounded-lg border border-gray-200 text-gray-500 hover:border-church-gold hover:text-church-navy shrink-0 disabled:opacity-50"
+                  >
+                    {checking === s.key ? 'Checking…' : 'Diagnose'}
+                  </button>
+
+                  {/* Expand toggle (only if warnings or a diagnosis) */}
+                  {(s.warnings.length > 0 || diagnosis[s.key]) && (
                     <button
                       onClick={() => toggle(s.key)}
                       className="text-gray-400 hover:text-gray-600 shrink-0"
@@ -342,6 +428,13 @@ function ScrapeStatus({ onScrape, scraping }) {
                     {s.warnings.map((w, i) => (
                       <p key={i} className="text-xs text-amber-800 font-mono">{w}</p>
                     ))}
+                  </div>
+                )}
+
+                {/* What the site returned just now */}
+                {expanded[s.key] && diagnosis[s.key] && (
+                  <div className="border-t border-gray-100 bg-gray-50 px-4 py-3">
+                    <SectionDiagnosis report={diagnosis[s.key]} />
                   </div>
                 )}
               </div>

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import WorshipPreferences from './WorshipPreferences';
+import PersonPhoto from './PersonPhoto';
 
 const API = '/api/admin';
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
@@ -156,7 +157,8 @@ function FamilyCard({ family, onEdit, onDelete }) {
       {/* Member rows */}
       <div className="divide-y divide-gray-50 flex-1">
         {members.map(m => (
-          <div key={m.id} className="group px-4 py-2.5 flex items-start gap-2">
+          <div key={m.id} className="group px-4 py-2.5 flex items-start gap-2.5">
+            <PersonPhoto person={{ ...m, has_photo: !!m.photo }} size={40} />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-800 leading-snug">{m.name}</p>
               <div className="mt-0.5 space-y-0.5">
