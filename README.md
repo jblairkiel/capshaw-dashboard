@@ -200,6 +200,93 @@ dropped.
 
 ---
 
+## Workflows
+
+Requests and approvals that need more than one person, tracked as a small state
+machine per workflow. **My Info → Workflows & Inbox** shows an inbox of what is
+waiting on you, the workflows you are involved in, and a flowchart of where
+each one has got to.
+
+### The engine
+
+Definitions live in code (`server/workflows/definitions/`); only running
+instances live in the database. A definition is steps, the actions each step
+offers, and where each action leads:
+
+```js
+steps: {
+  review: {
+    title: 'Deacon review',
+    assign: { role: 'admin' },
+    actions: [
+      { id: 'approve', label: 'Approve', to: 'confirm' },
+      { id: 'decline', label: 'Decline', to: 'declined', requiresNote: true },
+    ],
+  },
+}
+```
+
+`to` names the next step, or a terminal outcome, or is a function of the
+instance data for conditional routing (an approval threshold, say) — declare
+`possibleTo` alongside it so the flowchart can still draw both branches.
+
+**Who gets asked.** A step's `assign` is one of `{ role }` (anyone holding it),
+`{ creator: true }` (whoever started it), `{ userField }`, or `{ personField }`
+(a directory person, reached through their linked login). If a person has no
+linked login the task falls back to the definition's `fallbackRole` rather than
+stalling silently.
+
+**Reaching the rest of the site.** An action may carry an `effect` that reads or
+writes the site database — the job swap updates `job_assignments` on approval.
+An effect that returns an error refuses the action and rolls back, so a failed
+write never leaves the workflow half-advanced. A workflow that touches nothing
+but its own data is equally fine.
+
+**Dynamic form options.** A start field can declare `optionsFrom` and be filled
+from live data, scoped to the person opening the form —
+`myAssignments` offers only the duties you are actually rostered for.
+
+### Who sees what
+
+| | Inbox | Workflows they took part in | Everything |
+|---|---|---|---|
+| `pending` | — | read | — |
+| `approved` (Member) | ✅ | ✅ | — |
+| `admin` | ✅ | ✅ | ✅ |
+
+Participation is earned by starting a workflow, being assigned a task on it, or
+acting on it — and is never revoked, so the history stays readable to the people
+who took part. A pending task aimed at a *role* is visible to everyone who could
+pick it up, so shared queues are discoverable before anyone claims them. A
+definition marked `visibility: 'restricted'` is limited to its participants even
+for other roles, which is what a benevolence request would want.
+
+### The flowchart
+
+`client/src/lib/flowLayout.js` is a pure, dependency-free layered layout: rows
+by longest path (so a step is never drawn above something that leads to it),
+nodes ordered within a row to reduce crossings, and genuine loops routed through
+the gap below their row and out to a lane on the right. Nodes are shaded for
+where the instance is now, where it has already been, and which outcome it
+reached.
+
+### The three seeded workflows
+
+| Workflow | Shape it exercises |
+|---|---|
+| **Facility Use Request** | Role approval, then confirmation back to the requester. Touches no congregation data. |
+| **Job Assignment Swap** | Starts from a duty you are really rostered for, loops while a replacement is found, writes the new name to `job_assignments` on approval. |
+| **Visitor Follow-Up** | Task aimed at a named person, loops on "no answer", hands off to an admin if they decline. |
+
+### Adding a workflow
+
+Drop a definition in `server/workflows/definitions/` and list it in that
+folder's `index.js`. The inbox, the visibility rules, the API and the flowchart
+all work off the definition alone. `validateDefinitions()` runs at start-up and
+logs any action pointing at a step or outcome that does not exist.
+
+---
+
 ## Tests
 
 ```bash

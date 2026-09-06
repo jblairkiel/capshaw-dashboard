@@ -220,6 +220,67 @@ db.exec(`
     notes        TEXT    NOT NULL DEFAULT '',
     updated_at   TEXT    NOT NULL DEFAULT (datetime('now'))
   );
+  -- ── Workflows ───────────────────────────────────────────────────────────────
+  -- Definitions live in code (server/workflows/definitions); only running
+  -- instances and their history are stored here.
+
+  CREATE TABLE IF NOT EXISTS workflow_instances (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    definition_id TEXT    NOT NULL,
+    title         TEXT    NOT NULL DEFAULT '',
+    status        TEXT    NOT NULL DEFAULT 'active',   -- active | completed | cancelled
+    step_id       TEXT    NOT NULL DEFAULT '',         -- '' once finished
+    outcome       TEXT    NOT NULL DEFAULT '',         -- terminal outcome id
+    data          TEXT    NOT NULL DEFAULT '{}',       -- JSON captured at start, plus anything steps add
+    created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+    completed_at  TEXT
+  );
+
+  -- One row per thing somebody has to do. A task is aimed either at a named
+  -- person or at anyone holding a role.
+  CREATE TABLE IF NOT EXISTS workflow_tasks (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id      INTEGER NOT NULL REFERENCES workflow_instances(id) ON DELETE CASCADE,
+    step_id          TEXT    NOT NULL,
+    assignee_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    assignee_role    TEXT    NOT NULL DEFAULT '',
+    status           TEXT    NOT NULL DEFAULT 'pending', -- pending | done | cancelled
+    action           TEXT    NOT NULL DEFAULT '',
+    note             TEXT    NOT NULL DEFAULT '',
+    created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+    completed_at     TEXT,
+    completed_by     INTEGER REFERENCES users(id) ON DELETE SET NULL
+  );
+
+  -- Append-only audit trail: who did what, and when.
+  CREATE TABLE IF NOT EXISTS workflow_events (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    instance_id   INTEGER NOT NULL REFERENCES workflow_instances(id) ON DELETE CASCADE,
+    step_id       TEXT    NOT NULL DEFAULT '',
+    action        TEXT    NOT NULL DEFAULT '',
+    summary       TEXT    NOT NULL DEFAULT '',
+    note          TEXT    NOT NULL DEFAULT '',
+    actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Who may see an instance. Membership is earned by starting it, being
+  -- assigned a task on it, or acting on it — and is never revoked, so the
+  -- history stays readable to the people who took part.
+  CREATE TABLE IF NOT EXISTS workflow_participants (
+    instance_id INTEGER NOT NULL REFERENCES workflow_instances(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    added_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (instance_id, user_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_wf_tasks_instance ON workflow_tasks(instance_id);
+  CREATE INDEX IF NOT EXISTS idx_wf_tasks_assignee ON workflow_tasks(assignee_user_id, status);
+  CREATE INDEX IF NOT EXISTS idx_wf_tasks_role     ON workflow_tasks(assignee_role, status);
+  CREATE INDEX IF NOT EXISTS idx_wf_events_inst    ON workflow_events(instance_id);
+  CREATE INDEX IF NOT EXISTS idx_wf_inst_status    ON workflow_instances(status);
 `);
 
 // ─── Migrations ───────────────────────────────────────────────────────────────

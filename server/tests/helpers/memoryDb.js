@@ -46,6 +46,63 @@ function createMemoryDb() {
       updated_at   TEXT    NOT NULL DEFAULT (datetime('now'))
     );
   `);
+  db.exec(`
+    CREATE TABLE job_assignments (
+      id      INTEGER PRIMARY KEY AUTOINCREMENT,
+      month   TEXT NOT NULL DEFAULT '',
+      date    TEXT NOT NULL DEFAULT '',
+      service TEXT NOT NULL DEFAULT '',
+      job     TEXT NOT NULL DEFAULT '',
+      name    TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE visitors (
+      id   INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL
+    );
+    CREATE TABLE workflow_instances (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      definition_id TEXT    NOT NULL,
+      title         TEXT    NOT NULL DEFAULT '',
+      status        TEXT    NOT NULL DEFAULT 'active',
+      step_id       TEXT    NOT NULL DEFAULT '',
+      outcome       TEXT    NOT NULL DEFAULT '',
+      data          TEXT    NOT NULL DEFAULT '{}',
+      created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+      completed_at  TEXT
+    );
+    CREATE TABLE workflow_tasks (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      instance_id      INTEGER NOT NULL REFERENCES workflow_instances(id) ON DELETE CASCADE,
+      step_id          TEXT    NOT NULL,
+      assignee_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      assignee_role    TEXT    NOT NULL DEFAULT '',
+      status           TEXT    NOT NULL DEFAULT 'pending',
+      action           TEXT    NOT NULL DEFAULT '',
+      note             TEXT    NOT NULL DEFAULT '',
+      created_at       TEXT    NOT NULL DEFAULT (datetime('now')),
+      completed_at     TEXT,
+      completed_by     INTEGER REFERENCES users(id) ON DELETE SET NULL
+    );
+    CREATE TABLE workflow_events (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      instance_id   INTEGER NOT NULL REFERENCES workflow_instances(id) ON DELETE CASCADE,
+      step_id       TEXT    NOT NULL DEFAULT '',
+      action        TEXT    NOT NULL DEFAULT '',
+      summary       TEXT    NOT NULL DEFAULT '',
+      note          TEXT    NOT NULL DEFAULT '',
+      actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE workflow_participants (
+      instance_id INTEGER NOT NULL REFERENCES workflow_instances(id) ON DELETE CASCADE,
+      user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      added_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (instance_id, user_id)
+    );
+  `);
+
   return db;
 }
 

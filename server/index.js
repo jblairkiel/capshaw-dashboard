@@ -15,6 +15,7 @@ const announcementRoutes   = require('./routes/announcements');
 const authRoutes           = require('./routes/auth');
 const songRoutes           = require('./routes/songTracker');
 const profileRoutes = require('./routes/profile');
+const workflowRoutes = require('./routes/workflows');
 const adminRoutes          = require('./routes/admin');
 
 const app = express();
@@ -64,6 +65,7 @@ app.use('/api/announcements',   announcementRoutes);
 app.use('/api/songs',           songRoutes);
 app.use('/api/admin',           adminRoutes);
 app.use('/api/profile',         profileRoutes);
+app.use('/api/workflows',       workflowRoutes);
 
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -79,6 +81,9 @@ if (isProd) {
 }
 
 const SCRAPE_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+const { validateDefinitions } = require('./workflows/definitions');
+for (const problem of validateDefinitions()) console.error('[workflows] definition problem:', problem);
 
 app.listen(PORT, () => {
   console.log(`Capshaw Dashboard API running on http://localhost:${PORT}`);
