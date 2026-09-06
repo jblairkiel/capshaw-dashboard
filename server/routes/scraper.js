@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const router  = express.Router();
-const { requireAdmin } = require('../middleware/auth');
+const { requireApproved } = require('../middleware/auth');
 const https   = require('https');
 const http    = require('http');
 const qs      = require('querystring');
@@ -363,7 +363,7 @@ async function runUpdate() {
 }
 
 // POST /api/members/update
-router.post('/update', requireAdmin, async (req, res) => {
+router.post('/update', requireApproved, async (req, res) => {
   if (_updateInProgress) {
     return res.status(409).json({ success: false, error: 'Update already in progress' });
   }

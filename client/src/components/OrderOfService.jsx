@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import axios from 'axios';
+import { hasWriteAccess } from '../lib/roles';
 
 const API = '/api';
 
@@ -151,7 +152,7 @@ function applyAssignments(htmlString, groups) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function OrderOfService({ user }) {
-  const canWrite = user?.role === 'admin';
+  const canWrite = hasWriteAccess(user);
   const [docList, setDocList]         = useState([]);
   const [currentDoc, setCurrentDoc]   = useState(null);
   const [html, setHtml]               = useState('');

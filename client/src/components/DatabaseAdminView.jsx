@@ -672,7 +672,6 @@ export default function DatabaseAdminView() {
   const [scraping, setScraping]       = useState(false);
   const [importing, setImporting]     = useState(false);
   const [scrapeMsg, setScrapeMsg]     = useState('');
-  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const loadOverview = useCallback(async () => {
     try {
@@ -723,7 +722,7 @@ export default function DatabaseAdminView() {
     <div className="flex gap-0 h-[calc(100vh-10rem)] min-h-[500px]">
 
       {/* Sidebar */}
-      <aside className={`shrink-0 bg-white border-r border-gray-100 rounded-l-xl flex flex-col transition-all ${sidebarOpen ? 'w-52' : 'w-52'} hidden lg:flex`}>
+      <aside className="shrink-0 w-52 bg-white border-r border-gray-100 rounded-l-xl flex flex-col transition-all hidden lg:flex">
         <div className="px-3 py-3 border-b border-gray-100">
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Database Admin</p>
         </div>

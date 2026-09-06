@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { hasWriteAccess } from '../lib/roles';
 
 const GRADE_LABELS = {
   'preschool':        'Preschool',
@@ -132,7 +133,7 @@ function SetCard({ set, onDelete, canWrite }) {
 const GRADES = Object.entries(GRADE_LABELS).map(([value, label]) => ({ value, label }));
 
 export default function QuestionLibrary({ user }) {
-  const canWrite = user?.role === 'admin';
+  const canWrite = hasWriteAccess(user);
   const [sets,    setSets]    = useState([]);
   const [loading, setLoading] = useState(true);
   const [error,   setError]   = useState('');

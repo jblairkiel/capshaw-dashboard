@@ -1,15 +1,12 @@
 const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
-const { requireAuth } = require('../middleware/auth');
+const { requireAdmin } = require('../middleware/auth');
 const { readData } = require('./scraper');
 
-function requireAdmin(req, res, next) {
-  if (req.user?.role !== 'admin') return res.status(403).json({ success: false, error: 'Admin only' });
-  next();
-}
-
-router.use(requireAuth, requireAdmin);
+// Direct database editing is an admin-only privilege — members get the
+// feature tabs, admins additionally get every table below.
+router.use(requireAdmin);
 
 // ─── Table definitions ────────────────────────────────────────────────────────
 // Each entry describes columns (for SELECT), writable fields (for INSERT/UPDATE),

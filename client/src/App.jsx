@@ -17,6 +17,7 @@ import UsersView from './components/UsersView';
 import SongTrackerView from './components/SongTrackerView';
 import DatabaseAdminView from './components/DatabaseAdminView';
 import DirectoryView from './components/DirectoryView';
+import { hasWriteAccess, isAdmin } from './lib/roles';
 
 const API = '/api/members';
 
@@ -175,9 +176,10 @@ function MainApp() {
     return <LoginPage authError={authError} onBack={() => setShowLogin(false)} />;
   }
 
-  const canWrite = user?.role === 'admin';
-  const GROUPS = user?.role === 'admin'
-    ? [...BASE_GROUPS, { id: 'admin', label: 'Admin', items: [{ id: 'users', label: 'Users' }, { id: 'database', label: 'Database' }, { id: 'directory', label: 'Directory' }] }]
+  const canWrite = hasWriteAccess(user);
+  const admin    = isAdmin(user);
+  const GROUPS = admin
+    ? [...BASE_GROUPS, { id: 'admin', label: 'Admin', items: [{ id: 'users', label: 'Users & Roles' }, { id: 'database', label: 'Database' }, { id: 'directory', label: 'Directory' }] }]
     : BASE_GROUPS;
 
   const lastUpdated = siteData?.lastUpdated
@@ -195,7 +197,7 @@ function MainApp() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
           </svg>
           <span>
-            <strong>Your account is pending approval.</strong> You can view everything, but creating and editing content requires approval from an admin.
+            <strong>Your account is pending approval.</strong> You can view everything, but creating and editing content requires an admin to approve you as a member.
           </span>
         </div>
       )}
@@ -323,17 +325,17 @@ function MainApp() {
           <CalendarView />
         </main>
       )}
-      {!updating && activeTab === 'users' && user?.role === 'admin' && (
+      {!updating && activeTab === 'users' && admin && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           <UsersView currentUser={user} />
         </main>
       )}
-      {!updating && activeTab === 'database' && user?.role === 'admin' && (
+      {!updating && activeTab === 'database' && admin && (
         <main className="w-full px-3 sm:px-4 py-4 sm:py-6 flex-1">
           <DatabaseAdminView />
         </main>
       )}
-      {!updating && activeTab === 'directory' && user?.role === 'admin' && (
+      {!updating && activeTab === 'directory' && admin && (
         <main className="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           <DirectoryView />
         </main>

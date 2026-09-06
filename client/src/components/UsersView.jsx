@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { ROLES, roleInfo } from '../lib/roles';
 
 function ProviderBadge({ provider }) {
   if (provider === 'google') {
@@ -45,12 +46,27 @@ function Avatar({ user, size = 10 }) {
   );
 }
 
-function UserRow({ user, currentUserId, onApprove, onRevoke, onRemove }) {
+function RoleBadge({ role }) {
+  const info = roleInfo(role);
+  return (
+    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${info.tone}`}>
+      {info.badge}
+    </span>
+  );
+}
+
+function UserRow({ user, currentUserId, onSetRole, onRemove }) {
   const isSelf = user.id === currentUserId;
-  const isAdmin = user.role === 'admin';
+  const locked = isSelf || user.is_owner;
   const joined = user.created_at
     ? new Date(user.created_at).toLocaleDateString()
     : '—';
+
+  const lockReason = isSelf
+    ? 'You cannot change your own role'
+    : user.is_owner
+      ? 'The owner account is always an admin'
+      : undefined;
 
   return (
     <div className="flex items-center gap-3 py-3 border-b border-gray-100 last:border-0">
@@ -58,14 +74,9 @@ function UserRow({ user, currentUserId, onApprove, onRevoke, onRemove }) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium text-church-navy text-sm truncate">{user.name}</span>
-          {isAdmin && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-church-gold/20 text-church-navy border border-church-gold/30">
-              Admin
-            </span>
-          )}
-          {isSelf && (
-            <span className="text-xs text-gray-400">(you)</span>
-          )}
+          <RoleBadge role={user.role} />
+          {user.is_owner && <span className="text-xs text-gray-400">(owner)</span>}
+          {isSelf && <span className="text-xs text-gray-400">(you)</span>}
         </div>
         <div className="flex items-center gap-2 mt-0.5 flex-wrap">
           <span className="text-xs text-gray-500 truncate">{user.email || 'No email'}</span>
@@ -74,23 +85,28 @@ function UserRow({ user, currentUserId, onApprove, onRevoke, onRemove }) {
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
-        {!isAdmin && !isSelf && user.role === 'pending' && (
+        {!locked && user.role === 'pending' && (
           <button
-            onClick={() => onApprove(user.id)}
+            onClick={() => onSetRole(user.id, 'approved')}
             className="text-xs px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors font-medium"
           >
             Approve
           </button>
         )}
-        {!isAdmin && !isSelf && user.role === 'approved' && (
-          <button
-            onClick={() => onRevoke(user.id)}
-            className="text-xs px-3 py-1.5 rounded-lg border border-orange-300 text-orange-600 hover:bg-orange-50 transition-colors font-medium"
-          >
-            Revoke
-          </button>
-        )}
-        {!isAdmin && !isSelf && (
+        <label className="sr-only" htmlFor={`role-${user.id}`}>Role for {user.name}</label>
+        <select
+          id={`role-${user.id}`}
+          value={user.role}
+          disabled={locked}
+          title={lockReason}
+          onChange={e => onSetRole(user.id, e.target.value)}
+          className="text-xs px-2 py-1.5 rounded-lg border border-gray-200 bg-white text-church-navy focus:outline-none focus:ring-1 focus:ring-church-gold disabled:bg-gray-50 disabled:text-gray-400 disabled:cursor-not-allowed"
+        >
+          {ROLES.map(r => (
+            <option key={r.id} value={r.id}>{r.label}</option>
+          ))}
+        </select>
+        {!locked && (
           <button
             onClick={() => onRemove(user.id, user.name)}
             className="text-xs px-3 py-1.5 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-colors"
@@ -103,10 +119,30 @@ function UserRow({ user, currentUserId, onApprove, onRevoke, onRemove }) {
   );
 }
 
+function UserGroup({ title, blurb, users, badge, ...rowProps }) {
+  return (
+    <div className="card">
+      <h3 className="font-semibold text-church-navy mb-1 flex items-center gap-2">
+        {title}
+        {badge && users.length > 0 && (
+          <span className="text-xs bg-orange-100 text-orange-700 rounded-full px-2 py-0.5">{users.length}</span>
+        )}
+      </h3>
+      {blurb && <p className="text-xs text-gray-500 mb-3">{blurb}</p>}
+      {users.length === 0 ? (
+        <p className="text-sm text-gray-400 py-4 text-center">None</p>
+      ) : (
+        users.map(u => <UserRow key={u.id} user={u} {...rowProps} />)
+      )}
+    </div>
+  );
+}
+
 export default function UsersView({ currentUser }) {
-  const [users, setUsers]   = useState([]);
+  const [users, setUsers]     = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError]   = useState('');
+  const [error, setError]     = useState('');
+  const [notice, setNotice]   = useState('');
 
   const load = useCallback(() => {
     setLoading(true);
@@ -119,24 +155,32 @@ export default function UsersView({ currentUser }) {
 
   useEffect(() => { load(); }, [load]);
 
-  async function approve(id) {
-    await fetch(`/api/auth/users/${id}/approve`, { method: 'PATCH' });
-    load();
-  }
-
-  async function revoke(id) {
-    await fetch(`/api/auth/users/${id}/revoke`, { method: 'PATCH' });
+  async function setRole(id, role) {
+    setNotice('');
+    const res  = await fetch(`/api/auth/users/${id}/role`, {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ role }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!json.success) setNotice(json.error || 'Could not change that role');
     load();
   }
 
   async function remove(id, name) {
     if (!window.confirm(`Remove ${name} from the dashboard? They will need to sign in and be re-approved.`)) return;
-    await fetch(`/api/auth/users/${id}`, { method: 'DELETE' });
+    setNotice('');
+    const res  = await fetch(`/api/auth/users/${id}`, { method: 'DELETE' });
+    const json = await res.json().catch(() => ({}));
+    if (!json.success) setNotice(json.error || 'Could not remove that user');
     load();
   }
 
-  const pending  = users.filter(u => u.role === 'pending');
-  const approved = users.filter(u => u.role !== 'pending');
+  const rowProps = { currentUserId: currentUser.id, onSetRole: setRole, onRemove: remove };
+
+  const pending = users.filter(u => u.role === 'pending');
+  const members = users.filter(u => u.role === 'approved');
+  const admins  = users.filter(u => u.role === 'admin');
 
   if (loading) {
     return (
@@ -155,59 +199,55 @@ export default function UsersView({ currentUser }) {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h2 className="section-heading mb-0">User Management</h2>
+        <h2 className="section-heading mb-0">Users &amp; Roles</h2>
         <button onClick={load} className="text-sm text-church-gold hover:text-church-navy transition-colors">
           Refresh
         </button>
       </div>
 
-      {/* Pending */}
+      {notice && (
+        <div className="card border border-red-200 bg-red-50 text-sm text-red-700 flex items-center justify-between">
+          <span>{notice}</span>
+          <button onClick={() => setNotice('')} className="underline text-xs ml-3">dismiss</button>
+        </div>
+      )}
+
+      {/* What each role can do */}
       <div className="card">
-        <h3 className="font-semibold text-church-navy mb-1 flex items-center gap-2">
-          Pending Approval
-          {pending.length > 0 && (
-            <span className="text-xs bg-orange-100 text-orange-700 rounded-full px-2 py-0.5">{pending.length}</span>
-          )}
-        </h3>
-        <p className="text-xs text-gray-500 mb-3">
-          These users have signed in but cannot make changes until approved.
-        </p>
-        {pending.length === 0 ? (
-          <p className="text-sm text-gray-400 py-4 text-center">No pending users</p>
-        ) : (
-          pending.map(u => (
-            <UserRow
-              key={u.id}
-              user={u}
-              currentUserId={currentUser.id}
-              onApprove={approve}
-              onRevoke={revoke}
-              onRemove={remove}
-            />
-          ))
-        )}
+        <h3 className="font-semibold text-church-navy mb-3">What each role can do</h3>
+        <dl className="space-y-2">
+          {ROLES.map(r => (
+            <div key={r.id} className="flex items-start gap-3">
+              <dt className="shrink-0 w-24">
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${r.tone}`}>{r.badge}</span>
+              </dt>
+              <dd className="text-xs text-gray-600 flex-1">{r.description}</dd>
+            </div>
+          ))}
+        </dl>
       </div>
 
-      {/* Approved / Admin */}
-      <div className="card">
-        <h3 className="font-semibold text-church-navy mb-3">
-          Approved Users
-        </h3>
-        {approved.length === 0 ? (
-          <p className="text-sm text-gray-400 py-4 text-center">No approved users</p>
-        ) : (
-          approved.map(u => (
-            <UserRow
-              key={u.id}
-              user={u}
-              currentUserId={currentUser.id}
-              onApprove={approve}
-              onRevoke={revoke}
-              onRemove={remove}
-            />
-          ))
-        )}
-      </div>
+      <UserGroup
+        title="Pending Approval"
+        blurb="These users have signed in but cannot make changes until they are given a role."
+        users={pending}
+        badge
+        {...rowProps}
+      />
+
+      <UserGroup
+        title="Members"
+        blurb="Full access to member functions across the dashboard."
+        users={members}
+        {...rowProps}
+      />
+
+      <UserGroup
+        title="Admins"
+        blurb="Member functions plus role management and direct editing of every database table."
+        users={admins}
+        {...rowProps}
+      />
     </div>
   );
 }

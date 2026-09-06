@@ -56,6 +56,36 @@ On first start the server will attempt to scrape the church website. It re-scrap
 
 ---
 
+## Roles & Permissions
+
+Every signed-in user holds exactly one of three roles. They are ranked, so each
+role includes everything below it.
+
+| Role | Can do |
+|---|---|
+| `pending` | View the dashboard. Cannot create or edit anything. |
+| `approved` (Member) | All member functions: announcements, song tracker, order of service, Bible class questions, lesson planner, document uploads, and site updates. |
+| `admin` | Everything a member can do, plus the Admin tabs — managing user roles, the congregation directory, and direct editing of every database table. |
+
+New sign-ins land on `pending`. An admin promotes them from **Admin → Users &
+Roles**, either with the one-click **Approve** button or the per-user role
+selector.
+
+Roles are enforced on the server by `server/middleware/auth.js`:
+`requireApproved` guards the member routes, `requireAdmin` guards
+`/api/admin/*` (the database editor) and user management. The client mirrors
+the same ranks in `client/src/lib/roles.js` purely to decide what to show — the
+server is always the authority.
+
+Three guardrails keep an admin from locking everyone out:
+
+- You cannot change or delete your own role.
+- The last remaining admin cannot be demoted or removed.
+- The account named by `ADMIN_EMAIL` is the owner; it is promoted to admin on
+  every login and its role cannot be edited.
+
+---
+
 ## Tests
 
 ```bash
@@ -202,5 +232,8 @@ pm2 restart capshaw-dashboard
 | Variable | Required | Description |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Yes (for Bible Class tab) | Anthropic API key for question generation |
+| `ADMIN_EMAIL` | Recommended | Email of the owner account — promoted to admin on every login |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | For Google sign-in | Google OAuth credentials |
+| `FACEBOOK_APP_ID` / `FACEBOOK_APP_SECRET` | For Facebook sign-in | Facebook OAuth credentials |
 | `NODE_ENV` | Production only | Set to `production` to serve the React build |
 | `PORT` | No | API port (default `3001`) |

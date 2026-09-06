@@ -5,7 +5,7 @@ const mammoth = require('mammoth');
 const JSZip = require('jszip');
 const path = require('path');
 const fs = require('fs');
-const { requireAdmin } = require('../middleware/auth');
+const { requireApproved } = require('../middleware/auth');
 
 // ─── Convert docx → HTML, preserving paragraph indentation ───────────────────
 // Mammoth strips w:ind (indentation) from paragraphs. We re-read the OOXML to
@@ -73,7 +73,7 @@ const upload = multer({
 });
 
 // POST /api/documents/upload — upload a Word doc and return HTML
-router.post('/upload', requireAdmin, upload.single('document'), async (req, res) => {
+router.post('/upload', requireApproved, upload.single('document'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, error: 'No file uploaded' });
   }
@@ -139,7 +139,7 @@ router.get('/:filename', async (req, res) => {
 });
 
 // DELETE /api/documents/:filename
-router.delete('/:filename', requireAdmin, (req, res) => {
+router.delete('/:filename', requireApproved, (req, res) => {
   const filePath = path.join(uploadsDir, req.params.filename);
 
   if (!fs.existsSync(filePath)) {

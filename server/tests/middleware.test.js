@@ -1,4 +1,4 @@
-const { requireAuth, requireApproved, requireAdmin } = require('../middleware/auth');
+const { requireAuth, requireApproved, requireAdmin, requireRole, hasRole, isRole, ROLES } = require('../middleware/auth');
 
 function mockRes() {
   const res = {};
@@ -100,5 +100,39 @@ describe('requireAdmin', () => {
     requireAdmin(req, res, next);
     expect(next).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(401);
+  });
+});
+
+// ─── Role model ───────────────────────────────────────────────────────────────
+
+describe('role model', () => {
+  test('ROLES is ordered from least to most privileged', () => {
+    expect(ROLES).toEqual(['pending', 'approved', 'admin']);
+  });
+
+  test('isRole accepts known roles and rejects anything else', () => {
+    for (const role of ROLES) expect(isRole(role)).toBe(true);
+    expect(isRole('superuser')).toBe(false);
+    expect(isRole(undefined)).toBe(false);
+    expect(isRole('toString')).toBe(false);
+  });
+
+  test('hasRole compares ranks rather than exact roles', () => {
+    expect(hasRole({ role: 'admin' },    'approved')).toBe(true);
+    expect(hasRole({ role: 'approved' }, 'approved')).toBe(true);
+    expect(hasRole({ role: 'pending' },  'approved')).toBe(false);
+    expect(hasRole({ role: 'approved' }, 'admin')).toBe(false);
+    expect(hasRole({ role: 'bogus' },    'pending')).toBe(false);
+    expect(hasRole(null,                 'pending')).toBe(false);
+  });
+
+  test('requireRole builds a middleware for any minimum role', () => {
+    const mw   = requireRole('admin', 'Nope');
+    const res  = mockRes();
+    const next = jest.fn();
+    mw({ user: { id: 1, role: 'approved' } }, res, next);
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(403);
+    expect(res.json).toHaveBeenCalledWith({ success: false, error: 'Nope' });
   });
 });
