@@ -281,6 +281,50 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_wf_tasks_role     ON workflow_tasks(assignee_role, status);
   CREATE INDEX IF NOT EXISTS idx_wf_events_inst    ON workflow_events(instance_id);
   CREATE INDEX IF NOT EXISTS idx_wf_inst_status    ON workflow_instances(status);
+  -- ── Mail ────────────────────────────────────────────────────────────────────
+  -- Distribution groups are lists this app sends to. They are not mailboxes:
+  -- an address people can write *to* (elders@…) has to exist at the mail
+  -- provider, which is outside this application.
+
+  CREATE TABLE IF NOT EXISTS mail_groups (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    key         TEXT    NOT NULL UNIQUE,      -- 'elders', 'group-3'
+    name        TEXT    NOT NULL,
+    description TEXT    NOT NULL DEFAULT '',
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- A member is either a directory person (so the address follows the
+  -- directory as it is corrected) or a plain address for somebody not in it.
+  CREATE TABLE IF NOT EXISTS mail_group_members (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id     INTEGER NOT NULL REFERENCES mail_groups(id) ON DELETE CASCADE,
+    directory_id INTEGER REFERENCES directory(id) ON DELETE CASCADE,
+    email        TEXT    NOT NULL DEFAULT '',
+    added_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Every message is queued here first and sent from the queue, so a slow or
+  -- unavailable mail server never blocks the request that caused it, and
+  -- there is a record of what the site tried to send.
+  CREATE TABLE IF NOT EXISTS mail_outbox (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    to_email     TEXT    NOT NULL,
+    to_name      TEXT    NOT NULL DEFAULT '',
+    intended_for TEXT    NOT NULL DEFAULT '',  -- who it would go to but for the test redirect
+    subject      TEXT    NOT NULL,
+    body         TEXT    NOT NULL DEFAULT '',
+    context      TEXT    NOT NULL DEFAULT '',  -- e.g. 'workflow:12'
+    status       TEXT    NOT NULL DEFAULT 'pending',  -- pending | sent | failed
+    attempts     INTEGER NOT NULL DEFAULT 0,
+    error        TEXT    NOT NULL DEFAULT '',
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    sent_at      TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_mail_members_group ON mail_group_members(group_id);
+  CREATE INDEX IF NOT EXISTS idx_mail_outbox_status ON mail_outbox(status, id);
 `);
 
 // ─── Migrations ───────────────────────────────────────────────────────────────
@@ -300,5 +344,26 @@ addColumn('directory', 'edited_fields', "TEXT NOT NULL DEFAULT '[]'");
 addColumn('directory', 'photo', "TEXT NOT NULL DEFAULT ''");
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_users_directory ON users(directory_id);`);
+
+// ─── Seed the distribution groups ─────────────────────────────────────────────
+// Created empty; an admin fills in who is in each from Admin → Email Groups.
+
+const DEFAULT_MAIL_GROUPS = [
+  { key: 'elders',        name: 'Elders',        description: 'The eldership' },
+  { key: 'deacons',       name: 'Deacons',       description: 'The deacons' },
+  { key: 'men',           name: 'Men',           description: 'Men of the congregation' },
+  { key: 'women',         name: 'Women',         description: 'Women of the congregation' },
+  { key: 'announcements', name: 'Announcements', description: 'Everyone who wants congregation announcements' },
+  ...Array.from({ length: 6 }, (_, i) => ({
+    key: `group-${i + 1}`,
+    name: `Group ${i + 1}`,
+    description: `Fellowship group ${i + 1}`,
+  })),
+];
+
+const insertGroup = db.prepare(
+  'INSERT OR IGNORE INTO mail_groups (key, name, description, sort_order) VALUES (?, ?, ?, ?)'
+);
+DEFAULT_MAIL_GROUPS.forEach((g, i) => insertGroup.run(g.key, g.name, g.description, i));
 
 module.exports = db;

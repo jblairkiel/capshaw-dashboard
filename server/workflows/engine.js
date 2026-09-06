@@ -15,6 +15,8 @@
 const db = require('../db');
 const { getDefinition } = require('./definitions');
 const { ROLE_RANK, hasRole } = require('../middleware/auth');
+const mailer = require('../mail/mailer');
+const notify = require('../mail/notify');
 
 // ─── Small helpers ────────────────────────────────────────────────────────────
 
@@ -170,7 +172,16 @@ function start({ definitionId, data, user }) {
     prepared = { ...prepared, ...(result?.data || {}) };
   }
 
-  return { id: startInstance(definition, prepared, user) };
+  const id = startInstance(definition, prepared, user);
+  flushMail();
+  return { id };
+}
+
+// Sending is deliberately outside every transaction above: mail only goes
+// out for work that actually committed, and a slow mail server never holds
+// a request open.
+function flushMail() {
+  mailer.drainOutbox().catch(err => console.error('[mail] drain failed:', err.message));
 }
 
 // ─── Advancing ────────────────────────────────────────────────────────────────
@@ -185,13 +196,25 @@ function enterStep(instance, definition, stepId, actor) {
     .run(stepId, instance.id);
 
   const { assigneeUserId, assigneeRole } = assignmentFor(step, definition, instance);
-  db.prepare(`
+  const { lastInsertRowid: taskId } = db.prepare(`
     INSERT INTO workflow_tasks (instance_id, step_id, assignee_user_id, assignee_role)
     VALUES (?, ?, ?, ?)
   `).run(instance.id, stepId, assigneeUserId, assigneeRole);
 
   addParticipant(instance.id, assigneeUserId);
   if (actor) addParticipant(instance.id, actor.id);
+
+  // Queued in the same transaction, so an action that rolls back sends
+  // nothing; the sending itself happens once the transaction has committed.
+  try {
+    notify.taskAssigned({
+      instance: { ...instance, title: instance.title },
+      definition,
+      task: { id: taskId, step_id: stepId, assignee_user_id: assigneeUserId, assignee_role: assigneeRole },
+    });
+  } catch (err) {
+    console.error('[workflows] could not queue assignment email:', err.message);
+  }
 }
 
 function finish(instance, definition, outcomeId, actor) {
@@ -207,6 +230,12 @@ function finish(instance, definition, outcomeId, actor) {
     summary: outcome?.label || outcomeId,
     actorUserId: actor?.id ?? null,
   });
+
+  try {
+    notify.workflowCompleted({ instance, definition, outcomeId, actorName: actor?.name });
+  } catch (err) {
+    console.error('[workflows] could not queue completion email:', err.message);
+  }
 }
 
 // `to` may name a step, name an outcome, or compute either from the data.
@@ -275,6 +304,7 @@ function act({ taskId, actionId, note = '', user }) {
     if (err.userFacing) return { error: err.message, status: 400 };
     throw err;
   }
+  flushMail();
   return { id: instance.id };
 }
 

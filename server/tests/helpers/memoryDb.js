@@ -103,6 +103,43 @@ function createMemoryDb() {
     );
   `);
 
+  db.exec(`
+    CREATE TABLE mail_groups (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      key         TEXT    NOT NULL UNIQUE,
+      name        TEXT    NOT NULL,
+      description TEXT    NOT NULL DEFAULT '',
+      sort_order  INTEGER NOT NULL DEFAULT 0,
+      created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE mail_group_members (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id     INTEGER NOT NULL REFERENCES mail_groups(id) ON DELETE CASCADE,
+      directory_id INTEGER REFERENCES directory(id) ON DELETE CASCADE,
+      email        TEXT    NOT NULL DEFAULT '',
+      added_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE mail_outbox (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      to_email     TEXT    NOT NULL,
+      to_name      TEXT    NOT NULL DEFAULT '',
+      intended_for TEXT    NOT NULL DEFAULT '',
+      subject      TEXT    NOT NULL,
+      body         TEXT    NOT NULL DEFAULT '',
+      context      TEXT    NOT NULL DEFAULT '',
+      status       TEXT    NOT NULL DEFAULT 'pending',
+      attempts     INTEGER NOT NULL DEFAULT 0,
+      error        TEXT    NOT NULL DEFAULT '',
+      created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+      sent_at      TEXT
+    );
+  `);
+
+  const seedGroup = db.prepare('INSERT INTO mail_groups (key, name, sort_order) VALUES (?, ?, ?)');
+  ['elders', 'deacons', 'men', 'women', 'announcements',
+   'group-1', 'group-2', 'group-3', 'group-4', 'group-5', 'group-6']
+    .forEach((key, i) => seedGroup.run(key, key, i));
+
   return db;
 }
 

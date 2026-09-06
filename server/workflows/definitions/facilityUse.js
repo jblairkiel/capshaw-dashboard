@@ -57,7 +57,8 @@ module.exports = {
   },
 
   outcomes: {
-    approved:  { label: 'Approved',  tone: 'good' },
+    // An approved booking is worth the announcements list knowing about.
+    approved:  { label: 'Approved',  tone: 'good', notifyGroups: ['announcements'] },
     declined:  { label: 'Declined',  tone: 'bad' },
     withdrawn: { label: 'Withdrawn', tone: 'neutral' },
   },
