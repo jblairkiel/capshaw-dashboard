@@ -4,7 +4,7 @@ const router  = express.Router();
 const https   = require('https');
 const qs      = require('querystring');
 
-const { requireApproved } = require('../middleware/auth');
+const { requireAdmin } = require('../middleware/auth');
 const { parseCookies, cookieStr, mergeCookieStr } = require('./scraper');
 const db = require('../db');
 
@@ -278,7 +278,7 @@ router.get('/analytics', (req, res) => {
 });
 
 // POST /api/songs/sync — scrape latest records from admin panel
-router.post('/sync', requireApproved, async (req, res) => {
+router.post('/sync', requireAdmin, async (req, res) => {
   const pages    = Math.min(parseInt(req.body?.pages || 5), 20);
   const warnings = [];
   let   synced   = 0;
@@ -323,7 +323,7 @@ router.post('/sync', requireApproved, async (req, res) => {
 });
 
 // POST /api/songs/add — submit new service record to admin + cache locally
-router.post('/add', requireApproved, async (req, res) => {
+router.post('/add', requireAdmin, async (req, res) => {
   const { day, month, year, serviceId, leaderId, songIds } = req.body;
   if (!day || !month || !year || !serviceId || !leaderId || !Array.isArray(songIds) || !songIds.length)
     return res.status(400).json({ success: false, error: 'day, month, year, serviceId, leaderId, and songIds are required' });
@@ -448,7 +448,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/songs/:id/refresh — force re-fetch this one record from admin panel
-router.post('/:id/refresh', requireApproved, async (req, res) => {
+router.post('/:id/refresh', requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id);
   try {
     const detail   = await fetchAdmin(`/admin/songsdb/edit/${id}`);

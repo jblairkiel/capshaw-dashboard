@@ -19,14 +19,14 @@ export const ROLES = [
     id:          'approved',
     label:       'Member',
     badge:       'Member',
-    description: 'All member functions — announcements, song tracker, order of service, Bible class and lesson tools.',
+    description: 'Bible class and lesson tools, site updates, and their own household\'s details and worship preferences. Announcements, songs and the order of service are read-only.',
     tone:        'bg-green-100 text-green-700',
   },
   {
     id:          'admin',
     label:       'Admin',
     badge:       'Admin',
-    description: 'Everything a member can do, plus managing user roles and editing every database table directly.',
+    description: 'Everything a member can do, plus writing announcements, songs and the order of service, managing user roles, and editing every database table directly.',
     tone:        'bg-church-gold/20 text-church-navy',
   },
 ];

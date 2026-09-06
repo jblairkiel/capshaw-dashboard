@@ -293,14 +293,14 @@ export default function UsersView({ currentUser }) {
 
       <UserGroup
         title="Members"
-        blurb="Full access to member functions across the dashboard."
+        blurb="Can use the Bible class tools and keep their own household's details current. Announcements, songs and the order of service are read-only for them."
         users={members}
         {...rowProps}
       />
 
       <UserGroup
         title="Admins"
-        blurb="Member functions plus role management and direct editing of every database table."
+        blurb="Everything members can do, plus announcements, songs, the order of service, role management and direct database editing."
         users={admins}
         {...rowProps}
       />

@@ -64,15 +64,30 @@ role includes everything below it.
 | Role | Can do |
 |---|---|
 | `pending` | View the dashboard. Cannot create or edit anything. |
-| `approved` (Member) | All member functions: announcements, song tracker, order of service, Bible class questions, lesson planner, document uploads, and site updates. |
-| `admin` | Everything a member can do, plus the Admin tabs — managing user roles, the congregation directory, and direct editing of every database table. |
+| `approved` (Member) | Everything a pending user sees, plus: Bible class questions, the lesson planner, site updates, and editing their own household's details and worship preferences. |
+| `admin` | Everything a member can do, plus writing announcements, the song tracker and the order of service, and the Admin tabs — user roles, the congregation directory, and direct editing of every database table. |
+
+Read and write are separate: **announcements, the song tracker and the order of
+service are read-only for members** — everyone can see them, only admins can
+change them.
+
+| Feature | Member | Admin |
+|---|---|---|
+| Announcements | read | read + write |
+| Song Tracker | read | read + write |
+| Order of Service | read | read + write |
+| Bible Class & Lesson Planner | read + write | read + write |
+| My Info (own household) | read + write | read + write (anyone) |
+| Site update (re-scrape) | ✅ | ✅ |
+| Directory, Database, User roles | — | ✅ |
 
 New sign-ins land on `pending`. An admin promotes them from **Admin → Users &
 Roles**, either with the one-click **Approve** button or the per-user role
 selector.
 
 Roles are enforced on the server by `server/middleware/auth.js`:
-`requireApproved` guards the member routes, `requireAdmin` guards
+`requireApproved` guards the member routes (Bible class, lesson planner, site
+update, profile edits), `requireAdmin` guards announcements, songs, documents,
 `/api/admin/*` (the database editor) and user management. The client mirrors
 the same ranks in `client/src/lib/roles.js` purely to decide what to show — the
 server is always the authority.

@@ -38,9 +38,10 @@ describe('AnnouncementsView — permission gating', () => {
     expect(screen.queryByRole('button', { name: /add item/i })).not.toBeInTheDocument();
   });
 
-  test('shows "Add Item" button when user.role=approved', async () => {
+  test('hides "Add Item" button when user.role=approved — announcements are admin-only', async () => {
     render(<AnnouncementsView user={{ role: 'approved' }} />);
-    await waitFor(() => expect(screen.getByRole('button', { name: /add item/i })).toBeInTheDocument());
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: /add item/i })).not.toBeInTheDocument();
   });
 
   test('shows "Add Item" button when user.role=admin', async () => {

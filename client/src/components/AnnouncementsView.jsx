@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { hasWriteAccess } from '../lib/roles';
+import { isAdmin } from '../lib/roles';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -383,7 +383,7 @@ function FullscreenDisplay({ items, onExit }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function AnnouncementsView({ user }) {
-  const canWrite = hasWriteAccess(user);
+  const canWrite = isAdmin(user);
   const [items,       setItems]       = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState('');

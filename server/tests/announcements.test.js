@@ -24,8 +24,10 @@ const request          = require('supertest');
 const express          = require('express');
 const announcementRouter = require('../routes/announcements');
 
-const APPROVED_USER = { id: 1, role: 'approved' };
-const PENDING_USER  = { id: 2, role: 'pending' };
+// Announcements are read-only for members: only an admin may write.
+const ADMIN_USER    = { id: 1, role: 'admin' };
+const APPROVED_USER = { id: 2, role: 'approved' };
+const PENDING_USER  = { id: 3, role: 'pending' };
 
 function buildApp(user = null) {
   const app = express();
@@ -65,8 +67,16 @@ describe('POST /api/announcements', () => {
     expect(res.body.success).toBe(false);
   });
 
-  test('200 and returns created item for approved user', async () => {
+  test('403 with an approved member — announcements are admin-only', async () => {
     const res = await request(buildApp(APPROVED_USER))
+      .post('/api/announcements')
+      .send({ title: 'Members cannot post this' });
+    expect(res.status).toBe(403);
+    expect(res.body.success).toBe(false);
+  });
+
+  test('200 and returns created item for an admin', async () => {
+    const res = await request(buildApp(ADMIN_USER))
       .post('/api/announcements')
       .send({ title: 'Sunday Potluck', type: 'event', body: 'Bring a dish!' });
     expect(res.status).toBe(200);
@@ -76,7 +86,7 @@ describe('POST /api/announcements', () => {
   });
 
   test('400 when title is missing', async () => {
-    const res = await request(buildApp(APPROVED_USER))
+    const res = await request(buildApp(ADMIN_USER))
       .post('/api/announcements')
       .send({ body: 'No title here' });
     expect(res.status).toBe(400);
@@ -92,8 +102,16 @@ describe('DELETE /api/announcements/:id', () => {
     expect(res.status).toBe(401);
   });
 
+  test('403 with an approved member', async () => {
+    const created = await request(buildApp(ADMIN_USER))
+      .post('/api/announcements')
+      .send({ title: 'Admin only' });
+    const res = await request(buildApp(APPROVED_USER)).delete(`/api/announcements/${created.body.item.id}`);
+    expect(res.status).toBe(403);
+  });
+
   test('200 after creating then deleting an item', async () => {
-    const app = buildApp(APPROVED_USER);
+    const app = buildApp(ADMIN_USER);
     const created = await request(app)
       .post('/api/announcements')
       .send({ title: 'To Be Deleted' });
@@ -114,29 +132,37 @@ describe('DELETE /api/announcements/:id', () => {
 describe('PATCH /api/announcements/:id/toggle', () => {
   let itemId;
 
+  test('403 with an approved member', async () => {
+    const created = await request(buildApp(ADMIN_USER))
+      .post('/api/announcements')
+      .send({ title: 'Toggle guard' });
+    const res = await request(buildApp(APPROVED_USER)).patch(`/api/announcements/${created.body.item.id}/toggle`);
+    expect(res.status).toBe(403);
+  });
+
   beforeAll(async () => {
-    const res = await request(buildApp(APPROVED_USER))
+    const res = await request(buildApp(ADMIN_USER))
       .post('/api/announcements')
       .send({ title: 'Toggle Test', active: 1 });
     itemId = res.body.item.id;
   });
 
   test('toggles active from 1 to 0', async () => {
-    const res = await request(buildApp(APPROVED_USER))
+    const res = await request(buildApp(ADMIN_USER))
       .patch(`/api/announcements/${itemId}/toggle`);
     expect(res.status).toBe(200);
     expect(res.body.active).toBe(0);
   });
 
   test('toggles active from 0 to 1', async () => {
-    const res = await request(buildApp(APPROVED_USER))
+    const res = await request(buildApp(ADMIN_USER))
       .patch(`/api/announcements/${itemId}/toggle`);
     expect(res.status).toBe(200);
     expect(res.body.active).toBe(1);
   });
 
   test('404 for non-existent id', async () => {
-    const res = await request(buildApp(APPROVED_USER))
+    const res = await request(buildApp(ADMIN_USER))
       .patch('/api/announcements/99999/toggle');
     expect(res.status).toBe(404);
     expect(res.body.success).toBe(false);
