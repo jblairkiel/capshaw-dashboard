@@ -18,6 +18,7 @@ import SongTrackerView from './components/SongTrackerView';
 import DatabaseAdminView from './components/DatabaseAdminView';
 import DirectoryView from './components/DirectoryView';
 import MyProfileView from './components/MyProfileView';
+import MobileNav from './components/MobileNav';
 import { hasWriteAccess, isAdmin } from './lib/roles';
 
 const API = '/api/members';
@@ -90,7 +91,7 @@ function NavDropdown({ group, activeTab, onSelect }) {
       >
         <span>{group.label}</span>
         {isActive && activeItem && (
-          <span className="text-xs opacity-60">· {activeItem.label}</span>
+          <span className="text-xs opacity-60 hidden lg:inline">· {activeItem.label}</span>
         )}
         <svg
           className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
@@ -120,6 +121,7 @@ function NavDropdown({ group, activeTab, onSelect }) {
     </div>
   );
 }
+
 
 function MainApp() {
   const [activeTab,   setActiveTab]   = useState('assignments');
@@ -215,7 +217,11 @@ function MainApp() {
       {/* Nav */}
       <div className="bg-church-navy shadow-md sticky top-0 z-10">
         <div className="max-w-6xl mx-auto flex items-center">
-          <div className="flex flex-1 min-w-0">
+          {/* Phones: one folder menu. Tablets up: the full dropdown row. */}
+          <div className="flex md:hidden flex-1 min-w-0">
+            <MobileNav groups={GROUPS} activeTab={activeTab} onSelect={setActiveTab} />
+          </div>
+          <div className="hidden md:flex flex-1 min-w-0">
             {GROUPS.map(group => (
               <NavDropdown
                 key={group.id}
