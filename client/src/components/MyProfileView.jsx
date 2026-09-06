@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { DIRECTORY_FIELDS, PREFERENCE_LEVELS } from '../lib/worship';
 import WorshipPreferences from './WorshipPreferences';
+import PersonPhoto from './PersonPhoto';
 
 const API = '/api/profile';
 
@@ -93,12 +94,15 @@ function PersonCard({ person, isSelf, canEdit, onSaved, defaultOpen }) {
         aria-expanded={open}
         className="w-full flex items-center justify-between gap-3 text-left"
       >
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="font-semibold text-church-navy">{person.name}</h3>
-            {isSelf && <span className="text-xs px-2 py-0.5 rounded-full bg-church-gold/20 text-church-navy">You</span>}
+        <div className="flex items-center gap-3 min-w-0">
+          <PersonPhoto person={person} size={44} />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="font-semibold text-church-navy">{person.name}</h3>
+              {isSelf && <span className="text-xs px-2 py-0.5 rounded-full bg-church-gold/20 text-church-navy">You</span>}
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5 truncate">{summary}</p>
           </div>
-          <p className="text-xs text-gray-500 mt-0.5 truncate">{summary}</p>
         </div>
         <svg
           className={`w-4 h-4 shrink-0 text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`}

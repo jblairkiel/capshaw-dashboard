@@ -235,6 +235,8 @@ function addColumn(table, column, definition) {
 // sign-in email matches a directory entry, or assigned by an admin.
 addColumn('users', 'directory_id', 'INTEGER REFERENCES directory(id) ON DELETE SET NULL');
 addColumn('directory', 'edited_fields', "TEXT NOT NULL DEFAULT '[]'");
+// Filename of this person's photo inside server/data/photos, or '' if none.
+addColumn('directory', 'photo', "TEXT NOT NULL DEFAULT ''");
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_users_directory ON users(directory_id);`);
 

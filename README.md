@@ -54,6 +54,8 @@ Open `http://localhost:5173` in your browser.
 
 On first start the server will attempt to scrape the church website. It re-scrapes automatically every 4 hours. Scraped data is cached to `server/data/members.json` (gitignored). The scraper requires valid church website credentials — without them the dashboard tabs that depend on scraped data will be empty.
 
+See [Scraper](#scraper-1) below for family photos and for diagnosing a section that comes back empty.
+
 ---
 
 ## Roles & Permissions
@@ -141,6 +143,60 @@ they were edited, linked to an account, or carry preferences.
 > them into whatever household matches that address. Members are already
 > trusted with congregation-wide content, so this is deliberate rather than a
 > gap — but it is why the household rule keys on the *stored* address.
+
+---
+
+## Scraper
+
+Data is pulled from capshawchurch.org on start-up and every four hours. Most
+sections are replaced wholesale on each run; the directory is upserted (see
+above) because accounts and worship preferences are keyed to its rows.
+
+### Family photos
+
+Photos come from the vCard export the directory sync already downloads
+(`/members/directory/vcard`), so they cost no extra requests. All the common
+vCard shapes are handled — `PHOTO;ENCODING=b`, `ENCODING=BASE64`, and a
+vCard 4.0 `data:` URI.
+
+Photos are written to `server/data/photos/` rather than into the database,
+named by a hash of their content — so an unchanged photo is not rewritten and a
+family sharing one portrait shares one file. Files nothing references are
+pruned after each sync. They are served by
+`GET /api/profile/person/:id/photo`, which applies the same visibility rule as
+the rest of a profile: admins see anyone, members see their own household.
+Only JPEG, PNG, GIF and WebP are stored (notably **not** SVG, which can carry
+script).
+
+A photo given only as a URL is counted but not downloaded — that would mean one
+request per member. If the church site turns out to serve photos that way, the
+Diagnose button reports how many, and downloading them is a small change.
+
+### Diagnosing a section that looks empty
+
+A parse that silently matches nothing looks exactly like a genuinely empty
+page. **Admin → Database → Scrape Status** has a **Diagnose** button on every
+section: it re-fetches that page and reports the HTTP status, size, every table
+it found with a preview of the first rows, and what the parser made of them.
+It distinguishes:
+
+- a login page coming back (scraper credentials rejected),
+- a 404 (the feature is switched off on the church site),
+- tables present but in a shape the parser does not recognise (site layout
+  changed — the preview shows the new shape),
+- and a page that genuinely has no data.
+
+The same report is available directly at `GET /api/members/debug/:section`
+(admin only) for `jobAssignments`, `attendance`, `sermons`, `visitors`,
+`anniversaries`, `deacons` and `directory`.
+
+### Job assignments
+
+This table is rendered in more than one shape by the church site, so the parser
+recognises a date header row, a date in the first column (blank on
+continuation rows), and a standalone date row above its assignments. Rows whose
+name is still blank are kept, so an unfilled slot is visible rather than
+dropped.
 
 ---
 

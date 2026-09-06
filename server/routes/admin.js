@@ -69,7 +69,9 @@ const TABLES = {
     order:    'id DESC',
   },
   directory: {
-    columns:  ['id', 'name', 'address', 'city', 'state', 'zip', 'phone', 'cell', 'email', 'notes'],
+    // `photo` is readable so the directory can render it, but not writable —
+    // photos come from the vCard sync, not from typing a filename.
+    columns:  ['id', 'name', 'address', 'city', 'state', 'zip', 'phone', 'cell', 'email', 'notes', 'photo'],
     writable: ['name', 'address', 'city', 'state', 'zip', 'phone', 'cell', 'email', 'notes'],
     search:   'name',
     order:    'name ASC',

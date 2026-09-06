@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const router  = express.Router();
-const { requireApproved } = require('../middleware/auth');
+const { requireApproved, requireAdmin } = require('../middleware/auth');
 const { syncDirectory } = require('../lib/directorySync');
 const https   = require('https');
 const http    = require('http');
@@ -157,7 +157,19 @@ const {
   parseDeacons,
   parseBulletins,
   parseDirectory,
+  extractTablesPreservingCells,
 } = require('../lib/parsers');
+
+// Job assignments are the one section whose parser returns an object rather
+// than an array. Everything that touches them goes through these so a shape
+// mismatch can never silently empty the table again.
+const EMPTY_JOB_ASSIGNMENTS = { month: '', assignments: [] };
+
+function normaliseJobAssignments(value) {
+  if (Array.isArray(value))                return { month: '', assignments: value };
+  if (value && Array.isArray(value.assignments)) return { month: value.month || '', assignments: value.assignments };
+  return EMPTY_JOB_ASSIGNMENTS;
+}
 
 // ─── Persistence (SQLite primary, JSON backup) ────────────────────────────────
 
@@ -172,11 +184,12 @@ const _saveScraped = db.transaction((data) => {
   const insSermon = db.prepare('INSERT INTO sermons (date, title, speaker, type, series, service) VALUES (?, ?, ?, ?, ?, ?)');
   for (const r of (data.sermons || [])) insSermon.run(r.date, r.title, r.speaker, r.type, r.series, r.service);
 
-  // Job assignments
-  db.prepare('DELETE FROM job_assignments').run();
-  const insJA = db.prepare('INSERT INTO job_assignments (month, date, service, job, name) VALUES (?, ?, ?, ?, ?)');
-  const ja = data.jobAssignments;
-  if (ja && ja.assignments) {
+  // Job assignments. Only clear the table once we have rows to put back:
+  // a failed fetch or an unexpected shape must never leave it empty.
+  const ja = normaliseJobAssignments(data.jobAssignments);
+  if (ja.assignments.length) {
+    db.prepare('DELETE FROM job_assignments').run();
+    const insJA = db.prepare('INSERT INTO job_assignments (month, date, service, job, name) VALUES (?, ?, ?, ?, ?)');
     for (const r of ja.assignments) insJA.run(ja.month || '', r.date, r.service, r.job, r.name);
   }
 
@@ -242,7 +255,12 @@ function readData() {
     const meta = db.prepare('SELECT * FROM scraped_meta WHERE id = 1').get();
     if (!meta) return _readDataFromJson();
 
-    const jaRows = db.prepare('SELECT * FROM job_assignments ORDER BY date').all();
+    // Dates are stored as text ("April 6"), so sort on the trailing day number
+    // rather than lexically — otherwise the 6th lands after the 27th.
+    const jaRows = db.prepare(`
+      SELECT * FROM job_assignments
+      ORDER BY CAST(NULLIF(rtrim(substr(date, -2), ' '), '') AS INTEGER), id
+    `).all();
     const months = [...new Set(jaRows.map(r => r.month).filter(Boolean))];
     const month  = months.sort().reverse()[0] || '';
 
@@ -290,6 +308,81 @@ function _readDataFromJson() {
 router.get('/data', (req, res) => {
   const data = readData();
   res.json({ success: true, data });
+});
+
+// ─── GET /api/members/debug/:section — what did the site actually return? ─────
+// A silent parse miss and a genuinely empty page look identical from the
+// dashboard. This re-fetches one page and reports what came back and what the
+// parser made of it, so an admin can tell the two apart without server access.
+
+const DEBUG_SECTIONS = {
+  jobAssignments: { path: '/members/job-assignments',                       parser: parseJobAssignments },
+  attendance:     { path: '/members/attendance',                            parser: parseAttendance },
+  sermons:        { path: '/members/sermons',                               parser: parseSermons },
+  visitors:       { path: '/members/visitor-tracker',                       parser: parseVisitors },
+  anniversaries:  { path: '/members/anniversaries-members-non-members',     parser: parseAnniversaries },
+  deacons:        { path: '/members/deacons',                               parser: parseDeacons },
+  directory:      { path: '/members/directory/vcard',                       parser: parseDirectory },
+};
+
+router.get('/debug/:section', requireAdmin, async (req, res) => {
+  const section = DEBUG_SECTIONS[req.params.section];
+  if (!section) {
+    return res.status(404).json({ success: false, error: `Unknown section. Try one of: ${Object.keys(DEBUG_SECTIONS).join(', ')}` });
+  }
+
+  try {
+    const page = await fetchPage(section.path);
+    const body = page.body || '';
+
+    const report = {
+      path:        section.path,
+      status:      page.status,
+      finalUrl:    page.url,
+      bytes:       body.length,
+      looksLikeLogin: /name="_token"|<form[^>]+login/i.test(body),
+      pageNotFound:   page.status === 404 || body.includes('Page Not Found'),
+    };
+
+    // For HTML sections, describe every table so a shape change is visible.
+    if (req.params.section !== 'directory') {
+      report.tables = extractTablesPreservingCells(body).map((rows, i) => ({
+        index:      i,
+        rowCount:   rows.length,
+        sampleRows: rows.slice(0, 5).map(r => r.map(c => (c.length > 40 ? c.slice(0, 40) + '…' : c))),
+      }));
+    }
+
+    let parsed;
+    try {
+      parsed = section.parser(body);
+    } catch (err) {
+      report.parseError = err.message;
+    }
+
+    if (parsed !== undefined) {
+      const rows = Array.isArray(parsed) ? parsed : (parsed.assignments ?? []);
+      report.parsed = {
+        shape:  Array.isArray(parsed) ? 'array' : 'object',
+        count:  rows.length,
+        month:  parsed?.month,
+        // Photos are large; report how many were found, not their contents.
+        sample: rows.slice(0, 3).map(r => (r && r.photo ? { ...r, photo: '(photo)' } : r)),
+      };
+
+      if (req.params.section === 'directory') {
+        report.photos = {
+          embedded: rows.filter(r => r.photo?.base64).length,
+          urlOnly:  rows.filter(r => r.photo?.url).length,
+          none:     rows.filter(r => !r.photo).length,
+        };
+      }
+    }
+
+    res.json({ success: true, section: req.params.section, report });
+  } catch (err) {
+    res.status(502).json({ success: false, error: err.message });
+  }
 });
 
 // ─── Core scrape function (used by route + scheduler) ────────────────────────
@@ -343,7 +436,7 @@ async function runUpdate() {
     const data = {
       lastUpdated:    new Date().toISOString(),
       warnings,
-      jobAssignments: tryParse('jobAssignments', jaPage, parseJobAssignments, existing.jobAssignments || []),
+      jobAssignments: tryParse('jobAssignments', jaPage, parseJobAssignments, existing.jobAssignments || EMPTY_JOB_ASSIGNMENTS),
       attendance:     parseAttendance(attPage.body),
       sermons:        tryParse('sermons', serPage, parseSermons, existing.sermons || []),
       visitors:       tryParse('visitors', visPage, parseVisitors, existing.visitors || []),
@@ -387,4 +480,4 @@ router.get('/status', (req, res) => {
 });
 
 
-module.exports = { router, runUpdate, readData, parseCookies, cookieStr, mergeCookieStr };
+module.exports = { router, runUpdate, readData, parseCookies, cookieStr, mergeCookieStr, normaliseJobAssignments };
