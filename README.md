@@ -200,6 +200,152 @@ dropped.
 
 ---
 
+## Workflows
+
+Requests and approvals that need more than one person, tracked as a small state
+machine per workflow. **My Info → Workflows & Inbox** shows an inbox of what is
+waiting on you, the workflows you are involved in, and a flowchart of where
+each one has got to.
+
+### The engine
+
+Definitions live in code (`server/workflows/definitions/`); only running
+instances live in the database. A definition is steps, the actions each step
+offers, and where each action leads:
+
+```js
+steps: {
+  review: {
+    title: 'Deacon review',
+    assign: { role: 'admin' },
+    actions: [
+      { id: 'approve', label: 'Approve', to: 'confirm' },
+      { id: 'decline', label: 'Decline', to: 'declined', requiresNote: true },
+    ],
+  },
+}
+```
+
+`to` names the next step, or a terminal outcome, or is a function of the
+instance data for conditional routing (an approval threshold, say) — declare
+`possibleTo` alongside it so the flowchart can still draw both branches.
+
+**Who gets asked.** A step's `assign` is one of `{ role }` (anyone holding it),
+`{ creator: true }` (whoever started it), `{ userField }`, or `{ personField }`
+(a directory person, reached through their linked login). If a person has no
+linked login the task falls back to the definition's `fallbackRole` rather than
+stalling silently.
+
+**Reaching the rest of the site.** An action may carry an `effect` that reads or
+writes the site database — the job swap updates `job_assignments` on approval.
+An effect that returns an error refuses the action and rolls back, so a failed
+write never leaves the workflow half-advanced. A workflow that touches nothing
+but its own data is equally fine.
+
+**Dynamic form options.** A start field can declare `optionsFrom` and be filled
+from live data, scoped to the person opening the form —
+`myAssignments` offers only the duties you are actually rostered for.
+
+### Who sees what
+
+| | Inbox | Workflows they took part in | Everything |
+|---|---|---|---|
+| `pending` | — | read | — |
+| `approved` (Member) | ✅ | ✅ | — |
+| `admin` | ✅ | ✅ | ✅ |
+
+Participation is earned by starting a workflow, being assigned a task on it, or
+acting on it — and is never revoked, so the history stays readable to the people
+who took part. A pending task aimed at a *role* is visible to everyone who could
+pick it up, so shared queues are discoverable before anyone claims them. A
+definition marked `visibility: 'restricted'` is limited to its participants even
+for other roles, which is what a benevolence request would want.
+
+### The flowchart
+
+`client/src/lib/flowLayout.js` is a pure, dependency-free layered layout: rows
+by longest path (so a step is never drawn above something that leads to it),
+nodes ordered within a row to reduce crossings, and genuine loops routed through
+the gap below their row and out to a lane on the right. Nodes are shaded for
+where the instance is now, where it has already been, and which outcome it
+reached.
+
+### The three seeded workflows
+
+| Workflow | Shape it exercises |
+|---|---|
+| **Facility Use Request** | Role approval, then confirmation back to the requester. Touches no congregation data. |
+| **Job Assignment Swap** | Starts from a duty you are really rostered for, loops while a replacement is found, writes the new name to `job_assignments` on approval. |
+| **Visitor Follow-Up** | Task aimed at a named person, loops on "no answer", hands off to an admin if they decline. |
+
+### Adding a workflow
+
+Drop a definition in `server/workflows/definitions/` and list it in that
+folder's `index.js`. The inbox, the visibility rules, the API and the flowchart
+all work off the definition alone. `validateDefinitions()` runs at start-up and
+logs any action pointing at a step or outcome that does not exist.
+
+---
+
+## Email
+
+Workflow notifications and distribution groups. **Admin → Email Groups** manages
+who is on each list and shows what the site has recently tried to send.
+
+### Test mode is the default
+
+While `MAIL_REDIRECT_TO` is set, **every** message is delivered to that one
+address instead of its real recipient, with the intended recipient recorded on
+the row and stated at the top of the body. It defaults to
+`jblairkiel@gmail.com`, so real delivery has to be opted into rather than
+avoided — a mistake in a workflow, a group, or a test cannot mail the
+congregation. Clearing `MAIL_REDIRECT_TO` is the single explicit step that lets
+this site write to real people.
+
+| Variable | Effect |
+|---|---|
+| `MAIL_REDIRECT_TO` | Everything goes here instead of the real recipient. Defaults to `jblairkiel@gmail.com`. **Clear it to send for real.** |
+| `SMTP_HOST` / `SMTP_PORT` | Mail server. With no host, messages queue but are not sent — nothing is lost. |
+| `SMTP_USER` / `SMTP_PASS` | Credentials, if the server needs them. |
+| `MAIL_FROM` | The From address. |
+
+### The outbox
+
+Messages are queued in `mail_outbox` and sent from there, so a slow or
+unreachable mail server never blocks the request that caused it, and there is a
+record of what the site tried to send. Queueing happens *inside* the database
+transaction that caused it and sending happens *after* it commits — so an
+action that fails and rolls back sends nothing at all. Failures are retried up
+to three times, then marked failed with the error kept. A sweep every five
+minutes picks up anything queued while mail was down.
+
+### Distribution groups
+
+Seeded with **elders, deacons, men, women, announcements** and **groups 1–6**,
+each starting empty. A member is either a directory person — so their address
+follows the directory, and correcting it there fixes every group they are in —
+or a plain address for somebody not in the directory. Anyone with no address on
+file is reported rather than silently skipped, so a gap in the directory does
+not look like a delivery that worked. Somebody in three groups still receives
+one copy.
+
+> **A group is a list this site sends to, not a mailbox.** An address people can
+> write *to* — `elders@capshawchurch.org` — has to be created with your mail
+> provider (Google Workspace, your host's control panel), which no application
+> can do for you. Once such an alias exists you can also just add it to the
+> relevant group here as a plain address.
+
+### What gets sent
+
+- **A task lands on you** — the person named, or everyone holding the role the
+  task is waiting on. Role mail goes only to people holding *exactly* that role,
+  so a member-level task never mails the whole congregation.
+- **A workflow finishes** — the person who started it, plus any distribution
+  group the outcome names. An approved facility request copies the
+  announcements list, via `notifyGroups: ['announcements']` on the outcome.
+
+---
+
 ## Tests
 
 ```bash
@@ -347,6 +493,9 @@ pm2 restart capshaw-dashboard
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Yes (for Bible Class tab) | Anthropic API key for question generation |
 | `ADMIN_EMAIL` | Recommended | Email of the owner account — promoted to admin on every login |
+| `MAIL_REDIRECT_TO` | No | Redirects all outgoing mail to one address. Defaults to `jblairkiel@gmail.com`; clear it to send for real |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` | For email | Mail server. Unset means messages queue but are not sent |
+| `MAIL_FROM` | No | From address on outgoing mail |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | For Google sign-in | Google OAuth credentials |
 | `FACEBOOK_APP_ID` / `FACEBOOK_APP_SECRET` | For Facebook sign-in | Facebook OAuth credentials |
 | `NODE_ENV` | Production only | Set to `production` to serve the React build |

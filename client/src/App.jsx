@@ -19,6 +19,8 @@ import DatabaseAdminView from './components/DatabaseAdminView';
 import DirectoryView from './components/DirectoryView';
 import MyProfileView from './components/MyProfileView';
 import MobileNav from './components/MobileNav';
+import WorkflowsView from './components/WorkflowsView';
+import MailGroupsView from './components/MailGroupsView';
 import { hasWriteAccess, isAdmin } from './lib/roles';
 
 const API = '/api/members';
@@ -59,10 +61,13 @@ const BASE_GROUPS = [
 const PROFILE_GROUP = {
   id: 'me',
   label: 'My Info',
-  items: [{ id: 'profile', label: 'My Info & Preferences' }],
+  items: [
+    { id: 'profile',   label: 'My Info & Preferences' },
+    { id: 'workflows', label: 'Workflows & Inbox' },
+  ],
 };
 
-const STANDALONE_TABS = new Set(['bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database', 'directory', 'profile']);
+const STANDALONE_TABS = new Set(['bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database', 'directory', 'profile', 'workflows', 'mail-groups']);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
 
@@ -191,7 +196,7 @@ function MainApp() {
   const GROUPS = [
     ...BASE_GROUPS,
     ...(user ? [PROFILE_GROUP] : []),
-    ...(admin ? [{ id: 'admin', label: 'Admin', items: [{ id: 'users', label: 'Users & Roles' }, { id: 'database', label: 'Database' }, { id: 'directory', label: 'Directory' }] }] : []),
+    ...(admin ? [{ id: 'admin', label: 'Admin', items: [{ id: 'users', label: 'Users & Roles' }, { id: 'database', label: 'Database' }, { id: 'directory', label: 'Directory' }, { id: 'mail-groups', label: 'Email Groups' }] }] : []),
   ];
 
   const lastUpdated = siteData?.lastUpdated
@@ -341,6 +346,11 @@ function MainApp() {
           <CalendarView />
         </main>
       )}
+      {!updating && activeTab === 'workflows' && user && (
+        <main className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
+          <WorkflowsView user={user} />
+        </main>
+      )}
       {!updating && activeTab === 'profile' && user && (
         <main className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
           <MyProfileView user={user} />
@@ -354,6 +364,11 @@ function MainApp() {
       {!updating && activeTab === 'database' && admin && (
         <main className="w-full px-3 sm:px-4 py-4 sm:py-6 flex-1">
           <DatabaseAdminView />
+        </main>
+      )}
+      {!updating && activeTab === 'mail-groups' && admin && (
+        <main className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
+          <MailGroupsView />
         </main>
       )}
       {!updating && activeTab === 'directory' && admin && (
