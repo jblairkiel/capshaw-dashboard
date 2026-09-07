@@ -3,33 +3,15 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 const API = '/api/admin';
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
-function getLastName(fullName) {
-  const parts = fullName.trim().split(/\s+/);
-  return parts.length > 1 ? parts[parts.length - 1] : parts[0];
-}
-
-// Group flat member list into families by shared address
-function groupByFamily(members) {
-  const map = new Map();
-  for (const m of members) {
-    const addrKey = [m.address?.trim().toLowerCase(), m.zip?.trim()].filter(Boolean).join('|') || `_${m.id}`;
-    if (!map.has(addrKey)) map.set(addrKey, []);
-    map.get(addrKey).push(m);
-  }
-
-  const families = [];
-  for (const mems of map.values()) {
-    const counts = {};
-    for (const m of mems) {
-      const ln = getLastName(m.name);
-      counts[ln] = (counts[ln] || 0) + 1;
-    }
-    const familyName = Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] || '';
-    const first = mems[0];
-    families.push({ familyName, address: first.address, city: first.city, state: first.state, zip: first.zip, members: mems });
-  }
-
-  return families.sort((a, b) => a.familyName.localeCompare(b.familyName));
+// Initials shown when a family has no scraped photo.
+function familyInitials(name) {
+  return (name || '?')
+    .split(',')[0]
+    .split(/\s+/)
+    .slice(0, 2)
+    .map(w => w[0])
+    .join('')
+    .toUpperCase();
 }
 
 // ─── Member modal (add / edit individual) ────────────────────────────────────
@@ -105,15 +87,31 @@ function MemberModal({ member, onSave, onClose }) {
 // ─── Family card ──────────────────────────────────────────────────────────────
 
 function FamilyCard({ family, onEdit, onDelete }) {
-  const { familyName, address, city, state, zip, members } = family;
+  const { name, address, city, state, zip, photoUrl, members } = family;
   const location = [address, city, state, zip].filter(Boolean).join(', ');
+  const [imgFailed, setImgFailed] = useState(false);
 
   return (
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md hover:border-church-gold/30 transition-all flex flex-col">
       {/* Card header */}
-      <div className="px-4 py-3 border-b border-gray-50">
-        <h3 className="font-semibold text-church-navy text-sm leading-snug">{familyName} Family</h3>
-        {location && <p className="text-xs text-gray-400 mt-0.5 leading-tight">{location}</p>}
+      <div className="px-4 py-3 border-b border-gray-50 flex items-center gap-3">
+        {photoUrl && !imgFailed ? (
+          <img
+            src={photoUrl}
+            alt=""
+            loading="lazy"
+            onError={() => setImgFailed(true)}
+            className="w-14 h-14 rounded-lg object-cover bg-gray-100 shrink-0"
+          />
+        ) : (
+          <div className="w-14 h-14 rounded-lg bg-church-navy/5 text-church-navy/40 flex items-center justify-center text-sm font-semibold shrink-0">
+            {familyInitials(name)}
+          </div>
+        )}
+        <div className="min-w-0">
+          <h3 className="font-semibold text-church-navy text-sm leading-snug">{name}</h3>
+          {location && <p className="text-xs text-gray-400 mt-0.5 leading-tight">{location}</p>}
+        </div>
       </div>
 
       {/* Member rows */}
@@ -151,8 +149,8 @@ function FamilyCard({ family, onEdit, onDelete }) {
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export default function DirectoryView() {
-  const [allMembers, setAllMembers] = useState([]);
-  const [families,   setFamilies]   = useState([]);
+  const [allFamilies, setAllFamilies] = useState([]);
+  const [families,    setFamilies]    = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [search,     setSearch]     = useState('');
   const [letter,     setLetter]     = useState('');
@@ -161,37 +159,54 @@ export default function DirectoryView() {
   const [syncing,    setSyncing]    = useState(false);
   const [syncMsg,    setSyncMsg]    = useState('');
 
-  const load = useCallback(async () => {
-    setLoading(true); setError('');
+  // Families come pre-grouped from the server, matching how the church site
+  // groups them, with each family's scraped photo.
+  const load = useCallback(async ({ quiet = false } = {}) => {
+    if (!quiet) setLoading(true);
+    setError('');
     try {
-      const res = await fetch(`${API}/directory?limit=2000&sort=name&dir=asc`, { credentials: 'include' });
+      const res = await fetch(`${API}/directory-families`, { credentials: 'include' });
       const j   = await res.json();
       if (!j.success) throw new Error(j.error);
-      setAllMembers(j.rows);
+      setAllFamilies(j.families);
     } catch (err) { setError(err.message); }
-    finally { setLoading(false); }
+    finally { if (!quiet) setLoading(false); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  // Re-group whenever data, search, or letter changes
+  // Re-filter whenever data, search, or letter changes. A family matches if its
+  // own name/address matches, or any of its members do — but only the matching
+  // members are shown when the search hit a person.
   useEffect(() => {
-    let filtered = allMembers;
+    let result = allFamilies;
+
     if (search) {
       const q = search.toLowerCase();
-      filtered = filtered.filter(m =>
+      const memberHit = m =>
         m.name.toLowerCase().includes(q) ||
         (m.address || '').toLowerCase().includes(q) ||
         (m.city    || '').toLowerCase().includes(q) ||
         (m.phone   || '').includes(q) ||
         (m.cell    || '').includes(q) ||
-        (m.email   || '').toLowerCase().includes(q)
-      );
+        (m.email   || '').toLowerCase().includes(q);
+
+      result = result.reduce((acc, f) => {
+        const familyHit = f.name.toLowerCase().includes(q) ||
+                          [f.address, f.city, f.zip].some(v => (v || '').toLowerCase().includes(q));
+        if (familyHit) { acc.push(f); return acc; }
+        const hits = f.members.filter(memberHit);
+        if (hits.length) acc.push({ ...f, members: hits });
+        return acc;
+      }, []);
     }
-    let grouped = groupByFamily(filtered);
-    if (letter) grouped = grouped.filter(f => f.familyName.toUpperCase().startsWith(letter));
-    setFamilies(grouped);
-  }, [allMembers, search, letter]);
+
+    // Family names are stored surname-first ("Allen, Josh & Tylan"), so the
+    // first character is the surname initial.
+    if (letter) result = result.filter(f => f.name.toUpperCase().startsWith(letter));
+
+    setFamilies(result);
+  }, [allFamilies, search, letter]);
 
   function handleSearch(val) { setSearch(val); setLetter(''); }
   function handleLetter(l)   { setLetter(prev => prev === l ? '' : l); setSearch(''); }
@@ -202,17 +217,19 @@ export default function DirectoryView() {
       const res = await fetch(`${API}/directory/${id}`, { method: 'DELETE', credentials: 'include' });
       const j   = await res.json();
       if (!j.success) throw new Error(j.error);
-      setAllMembers(prev => prev.filter(m => m.id !== id));
+      setAllFamilies(prev => prev.map(f => ({ ...f, members: f.members.filter(m => m.id !== id) })));
     } catch (err) { setError(err.message); }
   }
 
   function handleSaved(row) {
     setModal(null);
-    setAllMembers(prev => {
-      const idx = prev.findIndex(m => m.id === row.id);
-      if (idx >= 0) { const next = [...prev]; next[idx] = row; return next; }
-      return [...prev, row];
-    });
+    const known = allFamilies.some(f => f.members.some(m => m.id === row.id));
+    // A new member has no family yet, so refetch to place it in the right bucket.
+    if (!known) return void load({ quiet: true });
+    setAllFamilies(prev => prev.map(f => ({
+      ...f,
+      members: f.members.map(m => (m.id === row.id ? { ...m, ...row } : m)),
+    })));
   }
 
   async function handleSync() {
@@ -228,8 +245,9 @@ export default function DirectoryView() {
     finally { setSyncing(false); }
   }
 
-  const familyCount = families.length;
-  const memberCount = families.reduce((n, f) => n + f.members.length, 0);
+  const visible     = families.filter(f => f.members.length > 0);
+  const familyCount = visible.length;
+  const memberCount = visible.reduce((n, f) => n + f.members.length, 0);
 
   return (
     <div className="space-y-4">
@@ -301,7 +319,7 @@ export default function DirectoryView() {
         <div className="flex items-center justify-center py-16">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-church-gold" />
         </div>
-      ) : families.length === 0 ? (
+      ) : visible.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
           <p className="text-sm">
             {search || letter
@@ -311,9 +329,9 @@ export default function DirectoryView() {
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {families.map(fam => (
+          {visible.map(fam => (
             <FamilyCard
-              key={`${fam.familyName}|${fam.address || fam.members[0]?.id}`}
+              key={fam.id ?? 'unassigned'}
               family={fam}
               onEdit={setModal}
               onDelete={handleDelete}
