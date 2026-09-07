@@ -334,6 +334,7 @@ function inbox(user) {
       instanceId:   row.instance_id,
       definitionId: row.definition_id,
       workflow:     definition?.title || row.definition_id,
+      page:         definition?.page || '',
       title:        row.instance_title,
       stepId:       row.step_id,
       stepTitle:    step?.title || row.step_id,
@@ -352,6 +353,7 @@ function summarise(row, user) {
     id:           row.id,
     definitionId: row.definition_id,
     workflow:     definition?.title || row.definition_id,
+    page:         definition?.page || '',
     title:        row.title,
     status:       row.status,
     stepId:       row.step_id,
@@ -367,7 +369,7 @@ function summarise(row, user) {
 
 // scope 'mine'  — instances this user can see
 // scope 'all'   — every instance (admins only)
-function list(user, { scope = 'mine', status = 'active' } = {}) {
+function list(user, { scope = 'mine', status = 'active', page = '' } = {}) {
   const wantAll = scope === 'all' && user?.role === 'admin';
   const statusClause = status === 'any' ? '' : 'AND i.status = ?';
   const params = status === 'any' ? [] : [status];
@@ -385,9 +387,39 @@ function list(user, { scope = 'mine', status = 'active' } = {}) {
 
   // The role-task join above is deliberately broad; filter it down to roles
   // this user actually holds, and drop restricted workflows they are not in.
-  return rows
+  const visible = rows
     .filter(row => canViewInstance(user, row, getDefinition(row.definition_id)))
-    .map(row => summarise(row, user));
+    .filter(row => !page || getDefinition(row.definition_id)?.page === page);
+
+  if (visible.length === 0) return [];
+
+  // Pull the pending tasks for this whole page in one go, so a list can offer
+  // the actions inline instead of making people open each workflow to act.
+  const pending = db.prepare(`
+    SELECT * FROM workflow_tasks
+    WHERE status = 'pending' AND instance_id IN (${visible.map(() => '?').join(',')})
+  `).all(...visible.map(r => r.id));
+
+  const mineByInstance = new Map();
+  for (const task of pending) {
+    if (!mineByInstance.has(task.instance_id) && canActOnTask(user, task)) {
+      mineByInstance.set(task.instance_id, task);
+    }
+  }
+
+  return visible.map(row => {
+    const summary = summarise(row, user);
+    const task = mineByInstance.get(row.id);
+    if (!task) return summary;
+
+    const definition = getDefinition(row.definition_id);
+    return {
+      ...summary,
+      myTaskId:  task.id,
+      myActions: (definition?.steps?.[task.step_id]?.actions || [])
+        .map(a => ({ id: a.id, label: a.label, tone: a.tone || 'neutral', requiresNote: !!a.requiresNote })),
+    };
+  });
 }
 
 function detail(id, user) {

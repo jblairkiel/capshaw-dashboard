@@ -4,6 +4,7 @@
 
 module.exports = {
   id: 'visitor-follow-up',
+  page: 'visitors',
   title: 'Visitor Follow-Up',
   description:
     'Ask a member to reach out to a recent visitor, record how it went, and try ' +

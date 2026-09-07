@@ -11,6 +11,7 @@ const ROOMS = [
 
 module.exports = {
   id: 'facility-use',
+  page: 'calendar',
   title: 'Facility Use Request',
   description:
     'Ask to use a room for an event. A deacon checks the calendar for a clash, ' +

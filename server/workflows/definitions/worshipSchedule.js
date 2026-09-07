@@ -24,6 +24,7 @@ function buildDraft(db, { month, services, attempt }) {
 
 module.exports = {
   id: 'worship-schedule',
+  page: 'assignments',
   title: 'Monthly Worship Schedule',
   description:
     'Build a month of worship assignments from the preferences people have set, ' +

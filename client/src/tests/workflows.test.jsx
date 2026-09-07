@@ -2,7 +2,8 @@ import { render, screen, waitFor, fireEvent, within } from '@testing-library/rea
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import { layoutFlow, nodeState, NODE_W, NODE_H } from '../lib/flowLayout';
 import WorkflowChart from '../components/WorkflowChart';
-import WorkflowsView from '../components/WorkflowsView';
+import InboxView from '../components/InboxView';
+import WorkflowPanel from '../components/workflow/WorkflowPanel';
 
 // A graph shaped like the real seed workflows: a couple of steps, a loop
 // back, and terminal outcomes.
@@ -178,7 +179,7 @@ describe('WorkflowChart', () => {
 // ─── The view ─────────────────────────────────────────────────────────────────
 
 const INBOX_TASK = {
-  taskId: 7, instanceId: 3, definitionId: 'facility-use', workflow: 'Facility Use Request',
+  taskId: 7, instanceId: 3, definitionId: 'facility-use', workflow: 'Facility Use Request', page: 'calendar',
   title: 'Kitchen — 2026-05-01', stepId: 'review', stepTitle: 'Deacon review',
   instruction: 'Check the calendar.', assignedRole: 'admin', createdAt: '2026-05-01 10:00:00',
   actions: [
@@ -188,7 +189,7 @@ const INBOX_TASK = {
 };
 
 const INSTANCE = {
-  id: 3, definitionId: 'facility-use', workflow: 'Facility Use Request',
+  id: 3, definitionId: 'facility-use', workflow: 'Facility Use Request', page: 'calendar',
   title: 'Kitchen — 2026-05-01', status: 'active', stepId: 'review', stepTitle: 'Deacon review',
   outcome: '', outcomeLabel: '', outcomeTone: 'neutral', createdAt: '', updatedAt: '', mine: true,
 };
@@ -196,14 +197,16 @@ const INSTANCE = {
 function mockApi(overrides = {}) {
   const routes = {
     inbox:       { success: true, tasks: [INBOX_TASK] },
-    list:        { success: true, scope: 'mine', status: 'active', instances: [INSTANCE] },
-    definitions: { success: true, definitions: [{ id: 'facility-use', title: 'Facility Use Request', description: 'Ask for a room.', fields: [], chart: CHART }] },
+    pages:       { success: true, pages: [{ id: 'calendar', label: 'Calendar' }] },
+    list:        { success: true, scope: 'mine', status: 'active', page: 'calendar', instances: [INSTANCE] },
+    definitions: { success: true, definitions: [{ id: 'facility-use', page: 'calendar', title: 'Facility Use Request', description: 'Ask for a room.', fields: [], chart: CHART }] },
     ...overrides,
   };
 
   const fetchMock = vi.fn((url, options) => {
     let body = routes.list;
     if (url.includes('/inbox'))            body = routes.inbox;
+    else if (url.includes('/pages'))       body = routes.pages;
     else if (url.includes('/definitions')) body = routes.definitions;
     else if (options?.method === 'POST')   body = routes.act ?? { success: true };
     else if (/\/api\/workflows\/\d+$/.test(url)) body = routes.detail ?? { success: true };
@@ -214,20 +217,34 @@ function mockApi(overrides = {}) {
   return fetchMock;
 }
 
-describe('WorkflowsView', () => {
+// ─── Inbox ────────────────────────────────────────────────────────────────────
+// The one place that gathers work from every page.
+
+describe('InboxView', () => {
   beforeEach(() => { mockApi(); });
 
-  test('opens on the inbox, showing what is waiting and its actions', async () => {
-    render(<WorkflowsView user={{ role: 'admin' }} />);
+  test('shows what is waiting and its actions', async () => {
+    render(<InboxView user={{ role: 'admin' }} />);
     expect(await screen.findByText('Kitchen — 2026-05-01')).toBeInTheDocument();
     expect(screen.getByText('Deacon review')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /My Inbox \(1\)/ })).toBeInTheDocument();
+  });
+
+  test('labels each task with the page it came from', async () => {
+    render(<InboxView user={{ role: 'admin' }} />);
+    expect(await screen.findByRole('button', { name: 'on Calendar' })).toBeInTheDocument();
+  });
+
+  test('sends you to the page a task belongs to', async () => {
+    const onGoToPage = vi.fn();
+    render(<InboxView user={{ role: 'admin' }} onGoToPage={onGoToPage} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'on Calendar' }));
+    expect(onGoToPage).toHaveBeenCalledWith('calendar');
   });
 
   test('an action with no note required posts straight away', async () => {
     const fetchMock = mockApi();
-    render(<WorkflowsView user={{ role: 'admin' }} />);
+    render(<InboxView user={{ role: 'admin' }} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
 
     await waitFor(() => {
@@ -240,7 +257,7 @@ describe('WorkflowsView', () => {
 
   test('an action that requires a note asks for one before posting', async () => {
     const fetchMock = mockApi();
-    render(<WorkflowsView user={{ role: 'admin' }} />);
+    render(<InboxView user={{ role: 'admin' }} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Decline' }));
 
     // Nothing posted yet — it is asking for the reason first.
@@ -259,35 +276,87 @@ describe('WorkflowsView', () => {
 
   test('an empty inbox says so rather than showing a blank panel', async () => {
     mockApi({ inbox: { success: true, tasks: [] } });
-    render(<WorkflowsView user={{ role: 'approved' }} />);
+    render(<InboxView user={{ role: 'approved' }} />);
     expect(await screen.findByText(/nothing is waiting on you/i)).toBeInTheDocument();
-  });
-
-  test('only an admin is offered the everyone-else filter', async () => {
-    render(<WorkflowsView user={{ role: 'admin' }} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Workflows' }));
-    expect(screen.getByLabelText('Whose workflows')).toBeInTheDocument();
-  });
-
-  test('a member gets the status filter but not the scope filter', async () => {
-    render(<WorkflowsView user={{ role: 'approved' }} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Workflows' }));
-    expect(screen.queryByLabelText('Whose workflows')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Workflow status')).toBeInTheDocument();
   });
 
   test('surfaces a server error instead of failing silently', async () => {
     mockApi({ inbox: { success: false, error: 'Nope' } });
-    render(<WorkflowsView user={{ role: 'admin' }} />);
+    render(<InboxView user={{ role: 'admin' }} />);
     expect(await screen.findByText('Nope')).toBeInTheDocument();
   });
+});
 
-  test('the start form lists what I can start and previews the flow', async () => {
-    render(<WorkflowsView user={{ role: 'approved' }} />);
-    fireEvent.click(await screen.findByRole('button', { name: /start a workflow/i }));
+// ─── Per-page panel ───────────────────────────────────────────────────────────
+// The same workflows, shown on the page they are about.
 
-    const combo = screen.getByRole('combobox');
-    expect(within(combo).getByRole('option', { name: 'Facility Use Request' })).toBeInTheDocument();
+describe('WorkflowPanel', () => {
+  beforeEach(() => { mockApi(); });
+
+  test('asks the server only for the workflows belonging to its page', async () => {
+    const fetchMock = mockApi();
+    render(<WorkflowPanel page="calendar" user={{ role: 'admin' }} />);
+    await screen.findByText('Kitchen — 2026-05-01');
+
+    const urls = fetchMock.mock.calls.map(c => c[0]);
+    expect(urls).toContain('/api/workflows/definitions?page=calendar');
+    expect(urls.some(u => u.startsWith('/api/workflows?page=calendar'))).toBe(true);
+  });
+
+  test('lists what is in progress on this page', async () => {
+    render(<WorkflowPanel page="calendar" user={{ role: 'admin' }} />);
+    expect(await screen.findByText('Kitchen — 2026-05-01')).toBeInTheDocument();
+    // The step it is sitting on, not just the title.
+    expect(screen.getByText('Deacon review')).toBeInTheDocument();
+  });
+
+  test('offers a task inline so the page itself can be acted on', async () => {
+    const fetchMock = mockApi({
+      list: { success: true, instances: [{ ...INSTANCE, myTaskId: 7, myActions: [{ id: 'approve', label: 'Approve', tone: 'good', requiresNote: false }] }] },
+    });
+    render(<WorkflowPanel page="calendar" user={{ role: 'admin' }} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/workflows/tasks/7',
+        expect.objectContaining({ method: 'POST' })
+      );
+    });
+  });
+
+  test('names the single workflow on the start button rather than saying "a workflow"', async () => {
+    render(<WorkflowPanel page="calendar" user={{ role: 'approved' }} />);
+    expect(await screen.findByRole('button', { name: 'Facility Use Request' })).toBeInTheDocument();
+  });
+
+  test('the start form previews the flow', async () => {
+    render(<WorkflowPanel page="calendar" user={{ role: 'approved' }} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Facility Use Request' }));
     expect(screen.getByText(/what happens after i submit/i)).toBeInTheDocument();
+  });
+
+  test('only an admin is offered the everyone-else filter', async () => {
+    render(<WorkflowPanel page="calendar" user={{ role: 'admin' }} />);
+    await screen.findByText('Kitchen — 2026-05-01');
+    expect(screen.getByLabelText('Whose workflows')).toBeInTheDocument();
+  });
+
+  test('a member gets the status filter but not the scope filter', async () => {
+    render(<WorkflowPanel page="calendar" user={{ role: 'approved' }} />);
+    await screen.findByText('Kitchen — 2026-05-01');
+    expect(screen.queryByLabelText('Whose workflows')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Workflow status')).toBeInTheDocument();
+  });
+
+  test('renders nothing on a page with no workflows and nothing in flight', async () => {
+    mockApi({ definitions: { success: true, definitions: [] }, list: { success: true, instances: [] } });
+    const { container } = render(<WorkflowPanel page="calendar" user={{ role: 'approved' }} />);
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
+  });
+
+  test('renders nothing for a signed-out visitor', () => {
+    const { container } = render(<WorkflowPanel page="calendar" user={null} />);
+    expect(container).toBeEmptyDOMElement();
   });
 });

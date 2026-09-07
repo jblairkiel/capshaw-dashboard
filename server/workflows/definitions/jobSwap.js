@@ -5,6 +5,7 @@
 
 module.exports = {
   id: 'job-swap',
+  page: 'assignments',
   title: 'Job Assignment Swap',
   description:
     'Ask to be replaced on a worship duty you are rostered for. Find your own ' +
