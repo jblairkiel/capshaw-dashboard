@@ -19,7 +19,8 @@ import DatabaseAdminView from './components/DatabaseAdminView';
 import DirectoryView from './components/DirectoryView';
 import MyProfileView from './components/MyProfileView';
 import MobileNav from './components/MobileNav';
-import WorkflowsView from './components/WorkflowsView';
+import InboxView from './components/InboxView';
+import WorkflowPanel from './components/workflow/WorkflowPanel';
 import MailGroupsView from './components/MailGroupsView';
 import { hasWriteAccess, isAdmin } from './lib/roles';
 
@@ -63,11 +64,11 @@ const PROFILE_GROUP = {
   label: 'My Info',
   items: [
     { id: 'profile',   label: 'My Info & Preferences' },
-    { id: 'workflows', label: 'Workflows & Inbox' },
+    { id: 'inbox',     label: 'My Inbox' },
   ],
 };
 
-const STANDALONE_TABS = new Set(['bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database', 'directory', 'profile', 'workflows', 'mail-groups']);
+const STANDALONE_TABS = new Set(['bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database', 'directory', 'profile', 'inbox', 'mail-groups']);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
 
@@ -342,13 +343,14 @@ function MainApp() {
         </main>
       )}
       {!updating && activeTab === 'calendar' && (
-        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
-          <CalendarView />
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 space-y-6">
+          <CalendarView user={user} />
+          <WorkflowPanel page="calendar" user={user} title="Facility requests" />
         </main>
       )}
-      {!updating && activeTab === 'workflows' && user && (
+      {!updating && activeTab === 'inbox' && user && (
         <main className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
-          <WorkflowsView user={user} />
+          <InboxView onGoToPage={setActiveTab} />
         </main>
       )}
       {!updating && activeTab === 'profile' && user && (
@@ -380,10 +382,20 @@ function MainApp() {
       {/* Data-dependent tabs */}
       {siteData && !updating && !STANDALONE_TABS.has(activeTab) && (
         <main className={`${activeTab === 'assignments' ? 'w-full' : 'max-w-6xl mx-auto'} px-3 sm:px-4 py-4 sm:py-6 flex-1`}>
-          {activeTab === 'assignments'   && <JobAssignments data={siteData.jobAssignments} />}
+          {activeTab === 'assignments'   && (
+            <div className="space-y-6">
+              <JobAssignments data={siteData.jobAssignments} />
+              <WorkflowPanel page="assignments" user={user} title="Roster requests" />
+            </div>
+          )}
           {activeTab === 'attendance'    && <AttendanceView data={siteData.attendance} />}
           {activeTab === 'sermons'       && <SermonsView data={siteData.sermons} />}
-          {activeTab === 'visitors'      && <VisitorTracker data={siteData.visitors} />}
+          {activeTab === 'visitors'      && (
+            <div className="space-y-6">
+              <VisitorTracker data={siteData.visitors} />
+              <WorkflowPanel page="visitors" user={user} title="Follow-ups" />
+            </div>
+          )}
           {activeTab === 'anniversaries' && <AnniversariesView data={siteData.anniversaries} />}
           {activeTab === 'leadership'    && <LeadershipView deacons={siteData.deacons} bulletins={siteData.bulletins} />}
         </main>
