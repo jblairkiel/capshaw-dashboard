@@ -350,7 +350,7 @@ function MainApp() {
       )}
       {!updating && activeTab === 'inbox' && user && (
         <main className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
-          <InboxView user={user} onGoToPage={setActiveTab} />
+          <InboxView onGoToPage={setActiveTab} />
         </main>
       )}
       {!updating && activeTab === 'profile' && user && (
