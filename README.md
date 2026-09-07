@@ -122,6 +122,11 @@ A *household* is everyone sharing a street address — the same grouping the
 directory shows as a family. Someone with no address on file is a household of
 one, so a blank address never pulls in strangers.
 
+**Notification settings** sit on the same tab: one row per kind of activity the
+site can raise, each set to email you right away, save it for a digest, or stay
+in your inbox only. See
+[Comments & Notifications](#comments--notifications).
+
 **Worship preferences** are per person, per role — `preferred` ("glad to"),
 `willing`, or `unavailable` ("rather not") — with a free-text note for the
 person building the schedule. Roles come from `server/lib/people.js` and match
@@ -288,6 +293,92 @@ logs any action pointing at a step or outcome that does not exist.
 
 ---
 
+## Comments & Notifications
+
+Announcements and calendar events can be talked about, and everything the site
+does lands in a notification inbox organised by type.
+
+### Comments
+
+Every announcement and every calendar event carries a thread. Both are rows in
+the `announcements` table — the `type` column tells one from the other — so a
+single comments table serves both and is told apart by `subject_type`, which is
+carried through to the notification so an event's conversation groups apart
+from an announcement's.
+
+- **Reading takes a sign-in; writing takes an approved account.** The
+  announcements themselves stay readable by anyone.
+- **Threads are one level deep.** A reply to a reply joins the branch it
+  answers rather than nesting forever.
+- **Deleting is soft.** An author may fix their own wording (marked *edited*);
+  an author or an admin may take a comment down, and replies under a removed
+  comment still read.
+- **Commenting is how you come to follow a thread**, and Following/Mute on the
+  thread is how you leave one without leaving the rest.
+- **`@Ray Harris` tells Ray**, whether or not he was following.
+
+Threads appear under each item on **Announcements** and under the church events
+listed on **Calendar**.
+
+### The notification inbox
+
+Every notification has a **type** (`comment.reply`, `event.cancelled`,
+`workflow.task`, …), and each type belongs to a **category** — the drawer of
+the inbox it lands in and the heading it sits under in the settings. The whole
+catalogue lives in `server/notifications/types.js`; nothing anywhere else
+invents a type string, so the inbox, the unread counts and a person's email
+settings line up by construction.
+
+| Category | Types raised |
+|---|---|
+| **Announcements** | posted · marked urgent · edited |
+| **Calendar events** | posted · date/time/place changed · cancelled |
+| **Comments** | a reply to you · a mention of you · activity on a thread you follow |
+| **Workflows** | a task waiting on you · a workflow you are part of finishing |
+| **Worship schedule** | the turns you are given · the monthly summary |
+| **Site administration** | somebody new waiting to be approved · mail the site could not deliver |
+
+The bell in the header carries the unread count and the newest few;
+**My Info → Notifications** is the full inbox, with a drawer per category, an
+unread-only filter, and *mark read* per item, per drawer or all at once.
+Opening a notification goes to the screen that answers it.
+
+### Email preferences
+
+The inbox is the record; email is one way of being told about it. So a person
+can turn every email off and still have a complete inbox, and nothing is
+emailed that is not also in the inbox.
+
+Settings live on **My Info** and are saved a change at a time — there is no
+Save button to forget. Each type can be set to:
+
+| Choice | Meaning |
+|---|---|
+| **Right away** | Emailed as it happens |
+| **Digest** | Saved for the next digest |
+| **No email** | Inbox only |
+
+Each type also has its own *show these in my inbox* switch, so a type can be
+silenced entirely. Above them sit the account-wide switches: **email me at
+all**, and when the digest arrives — every day or one chosen weekday, at an
+hour they pick.
+
+Defaults differ by type because the right default does: a reply to your comment
+arrives right away, a new event waits for the digest, and an edit to an
+announcement's wording is inbox-only. A person who has said nothing has no
+stored rows at all — the defaults answer for them.
+
+### The digest
+
+Anything marked *digest* waits in the inbox with `email_state = 'digest'` until
+the sweep (every 15 minutes) finds somebody due: their hour has come round, on
+the right day, and they have not already had one today. It gathers what has
+piled up into one email grouped by category, and marks the rows sent so nothing
+goes twice. Reading the digest does not mark the inbox read — it is a copy, not
+a receipt.
+
+---
+
 ## Email
 
 Workflow notifications and distribution groups. **Admin → Email Groups** manages
@@ -338,12 +429,22 @@ one copy.
 
 ### What gets sent
 
+Everything with an account behind it goes through the notification layer, which
+decides — per person, per type — whether it belongs in their inbox, in their
+email now, or in their next digest. Distribution-group addresses have no
+account behind them, so they are written to as the group intends.
+
 - **A task lands on you** — the person named, or everyone holding the role the
   task is waiting on. Role mail goes only to people holding *exactly* that role,
   so a member-level task never mails the whole congregation.
 - **A workflow finishes** — the person who started it, plus any distribution
   group the outcome names. An approved facility request copies the
   announcements list, via `notifyGroups: ['announcements']` on the outcome.
+  This one reaches the person who started it even when they closed it
+  themselves: it is a record of the outcome, not news.
+- **An announcement, an event, a comment, a new sign-in waiting for approval** —
+  raised as notifications, and emailed to whoever asked for that type by email.
+  See [Comments & Notifications](#comments--notifications).
 
 ---
 
@@ -392,9 +493,11 @@ disturbs May, and publishing twice does not double it up.
   directory; anyone who cannot be matched is recorded on the workflow rather
   than dropped in silence.
 - **The whole month** goes to every user who has not opted out. Everyone is
-  opted in by default (`users.wants_monthly_report`); the toggle is on **My
-  Info → Email**, and turning it off does not stop the emails about jobs you
-  are personally given.
+  opted in by default; the switch is *Monthly schedule summary* under **My Info
+  → Notifications**, and turning it off does not stop the emails about jobs you
+  are personally given. That one setting keeps its own column
+  (`users.wants_monthly_report`), which stays the authority for whether it is
+  on — so the workflow, the old toggle and the settings screen always agree.
 
 ---
 
@@ -425,10 +528,18 @@ capshaw-dashboard/
 │   ├── index.js             # Express entry point
 │   ├── db.js                # SQLite init (question library)
 │   ├── lib/
-│   │   └── parsers.js       # HTML parser functions (testable)
+│   │   ├── parsers.js       # HTML parser functions (testable)
+│   │   └── comments.js      # Comments, thread subscriptions, mentions
+│   ├── notifications/
+│   │   ├── types.js         # The catalogue: every type, its category, its default
+│   │   ├── index.js         # emit() + the inbox
+│   │   ├── preferences.js   # Per-person, per-type delivery settings
+│   │   └── digest.js        # The sweep that gathers saved-for-later mail
 │   ├── routes/
 │   │   ├── scraper.js       # Church website scraper + data endpoints
 │   │   ├── documents.js     # .docx upload + OOXML → HTML conversion
+│   │   ├── comments.js      # Threads on announcements and events
+│   │   ├── notifications.js # The inbox and the email preferences
 │   │   └── bibleClass.js    # Question generation + library CRUD
 │   ├── data/                # Runtime data (gitignored)
 │   │   ├── members.json     # Scraped church data cache

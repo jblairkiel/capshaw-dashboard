@@ -12,10 +12,11 @@
 // announcement's wording is not worth one at all.
 
 // How an email may be delivered for a type.
+// `short` is what fits on a button; `label` is the sentence it means.
 const EMAIL_MODES = [
-  { id: 'immediate', label: 'Email me right away' },
-  { id: 'digest',    label: 'Save it for my digest' },
-  { id: 'off',       label: 'No email' },
+  { id: 'immediate', short: 'Right away', label: 'Email me right away' },
+  { id: 'digest',    short: 'Digest',     label: 'Save it for my digest' },
+  { id: 'off',       short: 'No email',   label: 'No email' },
 ];
 
 const CATEGORIES = [

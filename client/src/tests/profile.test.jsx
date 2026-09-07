@@ -15,6 +15,28 @@ const SAM = {
   worship: { preferences: {}, notes: '' },
 };
 
+// My Info also renders the notification settings, which come from their own
+// endpoint, so the mock answers both.
+const SETTINGS = {
+  success: true,
+  settings: {
+    account: { emailEnabled: true, digest: { frequency: 'daily', hour: 7, weekday: 1 } },
+    categories: [{
+      id: 'worship', label: 'Worship schedule', description: 'The monthly roster.', icon: '🎵',
+      types: [{
+        id: 'worship.monthly_report', label: 'Monthly schedule summary', description: '',
+        audience: 'everyone', defaultEmail: 'immediate', inApp: true, email: 'immediate', customised: false,
+      }],
+    }],
+    emailModes: [
+      { id: 'immediate', short: 'Right away', label: 'Email me right away' },
+      { id: 'digest',    short: 'Digest',     label: 'Save it for my digest' },
+      { id: 'off',       short: 'No email',   label: 'No email' },
+    ],
+    digestFrequencies: ['daily', 'weekly'],
+  },
+};
+
 function mockProfile(overrides = {}) {
   const payload = {
     success: true, linked: true, person: RAY, household: [RAY, SAM],
@@ -22,8 +44,8 @@ function mockProfile(overrides = {}) {
     notifications: { monthlyReport: true },
     canEdit: true, canEditAll: false, ...overrides,
   };
-  const fetchMock = vi.fn(() =>
-    Promise.resolve({ json: () => Promise.resolve(payload) })
+  const fetchMock = vi.fn(url =>
+    Promise.resolve({ json: () => Promise.resolve(url.includes('/api/notifications') ? SETTINGS : payload) })
   );
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
@@ -152,43 +174,20 @@ describe('WorshipPreferences', () => {
 
 // ─── Email preferences ────────────────────────────────────────────────────────
 
-describe('MyProfileView — email preferences', () => {
-  beforeEach(() => { mockProfile(); });
-
-  test('shows the monthly summary as on by default', async () => {
+describe('MyProfileView — notification settings', () => {
+  test('the notification settings sit on My Info, drawn from the catalogue', async () => {
+    mockProfile();
     render(<MyProfileView user={{}} />);
-    const box = await screen.findByRole('checkbox', { name: /monthly schedule summary/i });
-    expect(box).toBeChecked();
+
+    expect(await screen.findByText('Worship schedule')).toBeInTheDocument();
+    expect(screen.getByText('Monthly schedule summary')).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /email me at all/i })).toBeChecked();
   });
 
-  test('explains that opting out does not stop personal assignment emails', async () => {
-    render(<MyProfileView user={{}} />);
-    expect(await screen.findByText(/does not stop the\s+emails about jobs you are personally given/i))
-      .toBeInTheDocument();
-  });
-
-  test('opting out PATCHes the preference', async () => {
-    const fetchMock = mockProfile();
-    render(<MyProfileView user={{}} />);
-    fireEvent.click(await screen.findByRole('checkbox', { name: /monthly schedule summary/i }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/api/profile/notifications',
-        expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ monthlyReport: false }) })
-      );
-    });
-  });
-
-  test('shows it as off for somebody who has opted out', async () => {
-    mockProfile({ notifications: { monthlyReport: false } });
-    render(<MyProfileView user={{}} />);
-    expect(await screen.findByRole('checkbox', { name: /monthly schedule summary/i })).not.toBeChecked();
-  });
-
-  test('is offered even to an account not yet linked to the directory', async () => {
+  test('they are offered even to an account not yet linked to the directory', async () => {
     mockProfile({ linked: false, person: null, household: [] });
     render(<MyProfileView user={{ email: 'nobody@example.com' }} />);
-    expect(await screen.findByRole('checkbox', { name: /monthly schedule summary/i })).toBeInTheDocument();
+
+    expect(await screen.findByText('Worship schedule')).toBeInTheDocument();
   });
 });

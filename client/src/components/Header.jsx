@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { roleInfo } from '../lib/roles';
+import NotificationBell from './NotificationBell';
 
 function UserMenu({ user, onLogout }) {
   const [open,     setOpen]     = useState(false);
@@ -62,7 +63,7 @@ function UserMenu({ user, onLogout }) {
   );
 }
 
-export default function Header({ user, onLogout, onSignIn }) {
+export default function Header({ user, onLogout, onSignIn, onOpenInbox }) {
   return (
     <header className="bg-church-navy text-white">
       <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
@@ -89,6 +90,9 @@ export default function Header({ user, onLogout, onSignIn }) {
             <p>{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
             <p className="text-gray-400 mt-0.5">8941 Wall Triana Hwy &bull; Harvest, AL</p>
           </div>
+          {/* The bell is only shown to somebody signed in: there is no inbox
+              without an account for it to belong to. */}
+          {user && <NotificationBell onOpenInbox={onOpenInbox} />}
           {user
             ? <UserMenu user={user} onLogout={onLogout} />
             : (

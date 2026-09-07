@@ -20,6 +20,7 @@ import DirectoryView from './components/DirectoryView';
 import MyProfileView from './components/MyProfileView';
 import MobileNav from './components/MobileNav';
 import WorkflowsView from './components/WorkflowsView';
+import NotificationsView from './components/NotificationsView';
 import MailGroupsView from './components/MailGroupsView';
 import { hasWriteAccess, isAdmin } from './lib/roles';
 
@@ -62,12 +63,13 @@ const PROFILE_GROUP = {
   id: 'me',
   label: 'My Info',
   items: [
-    { id: 'profile',   label: 'My Info & Preferences' },
-    { id: 'workflows', label: 'Workflows & Inbox' },
+    { id: 'profile',       label: 'My Info & Preferences' },
+    { id: 'notifications', label: 'Notifications' },
+    { id: 'workflows',     label: 'Workflows & Inbox' },
   ],
 };
 
-const STANDALONE_TABS = new Set(['bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database', 'directory', 'profile', 'workflows', 'mail-groups']);
+const STANDALONE_TABS = new Set(['bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database', 'directory', 'profile', 'workflows', 'notifications', 'mail-groups']);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
 
@@ -205,7 +207,12 @@ function MainApp() {
 
   return (
     <div className="min-h-screen bg-church-cream flex flex-col">
-      <Header user={user} onLogout={() => setUser(null)} onSignIn={() => setShowLogin(true)} />
+      <Header
+        user={user}
+        onLogout={() => setUser(null)}
+        onSignIn={() => setShowLogin(true)}
+        onOpenInbox={() => setActiveTab('notifications')}
+      />
 
       {/* Pending approval banner */}
       {user?.role === 'pending' && (
@@ -343,12 +350,19 @@ function MainApp() {
       )}
       {!updating && activeTab === 'calendar' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
-          <CalendarView />
+          <CalendarView user={user} />
         </main>
       )}
       {!updating && activeTab === 'workflows' && user && (
         <main className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
           <WorkflowsView user={user} />
+        </main>
+      )}
+      {!updating && activeTab === 'notifications' && user && (
+        <main className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
+          {/* A notification knows which screen answers it, so opening one from
+              the inbox lands on the right tab. */}
+          <NotificationsView onNavigate={tab => tab && setActiveTab(tab)} />
         </main>
       )}
       {!updating && activeTab === 'profile' && user && (

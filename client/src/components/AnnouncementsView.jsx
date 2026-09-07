@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { isAdmin } from '../lib/roles';
+import CommentThread from './CommentThread';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -138,12 +139,17 @@ function ItemEditor({ initial, onSave, onCancel }) {
 
 // ─── Item card (manage view) ──────────────────────────────────────────────────
 
-function ItemCard({ item, onEdit, onDelete, onToggle, canWrite }) {
+function ItemCard({ item, onEdit, onDelete, onToggle, canWrite, canComment, commentCount }) {
   const isEvent  = item.type === 'event';
   const isUrgent = item.priority === 'urgent';
+  const [showComments, setShowComments] = useState(false);
+  const [count, setCount] = useState(commentCount ?? 0);
+
+  useEffect(() => { setCount(commentCount ?? 0); }, [commentCount]);
 
   return (
-    <div className={`card flex gap-4 border-l-4 transition-opacity ${item.active ? 'opacity-100' : 'opacity-50'} ${isUrgent ? 'border-l-red-500' : isEvent ? 'border-l-blue-500' : 'border-l-church-gold'}`}>
+    <div className={`card border-l-4 transition-opacity ${item.active ? 'opacity-100' : 'opacity-50'} ${isUrgent ? 'border-l-red-500' : isEvent ? 'border-l-blue-500' : 'border-l-church-gold'}`}>
+     <div className="flex gap-4">
       <div className="text-2xl pt-0.5">{isEvent ? '📅' : isUrgent ? '⚠️' : '📢'}</div>
 
       <div className="flex-1 min-w-0 space-y-1">
@@ -162,6 +168,19 @@ function ItemCard({ item, onEdit, onDelete, onToggle, canWrite }) {
           </div>
         )}
         {item.body && <p className="text-sm text-gray-500 line-clamp-2">{item.body}</p>}
+
+        {/* Comments take a sign-in to read, so the button is only there for
+            somebody who has one. */}
+        {canComment && (
+          <button
+            onClick={() => setShowComments(open => !open)}
+            aria-expanded={showComments}
+            className="text-xs text-gray-500 hover:text-church-navy pt-0.5"
+          >
+            💬 {count || 'No'} comment{count === 1 ? '' : 's'}
+            <span className="ml-1 text-gray-300">{showComments ? '▲' : '▼'}</span>
+          </button>
+        )}
       </div>
 
       {canWrite && (
@@ -177,6 +196,13 @@ function ItemCard({ item, onEdit, onDelete, onToggle, canWrite }) {
           <button onClick={() => onDelete(item.id)} className="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 border border-transparent hover:border-red-100 transition-colors" title="Delete">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
           </button>
+        </div>
+      )}
+     </div>
+
+      {showComments && (
+        <div className="mt-4 pt-4 border-t border-gray-100">
+          <CommentThread subjectType={item.type} subjectId={item.id} onCountChange={setCount} />
         </div>
       )}
     </div>
@@ -391,6 +417,7 @@ export default function AnnouncementsView({ user }) {
   const [showInactive, setShowInactive] = useState(false);
   const [editing,     setEditing]     = useState(null);        // null | 'new' | itemObject
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [commentCounts, setCommentCounts] = useState({});
 
   useEffect(() => {
     fetch('/api/announcements')
@@ -399,6 +426,23 @@ export default function AnnouncementsView({ user }) {
       .catch(() => setError('Could not load announcements.'))
       .finally(() => setLoading(false));
   }, []);
+
+  // How many comments each item has, in one request per kind rather than one
+  // per card. Signed-out visitors cannot see the conversation at all, so this
+  // is not asked for.
+  useEffect(() => {
+    if (!user || !items.length) return;
+
+    for (const type of ['announcement', 'event']) {
+      const ids = items.filter(i => i.type === type).map(i => i.id);
+      if (!ids.length) continue;
+
+      fetch(`/api/comments/${type}/counts?ids=${ids.join(',')}`, { credentials: 'include' })
+        .then(r => r.json())
+        .then(j => { if (j.success) setCommentCounts(prev => ({ ...prev, ...j.counts })); })
+        .catch(() => {});
+    }
+  }, [user, items]);
 
   const handleSaved = (saved) => {
     setItems(prev => editing?.id ? prev.map(i => i.id === saved.id ? saved : i) : [saved, ...prev]);
@@ -520,6 +564,8 @@ export default function AnnouncementsView({ user }) {
               onDelete={handleDelete}
               onToggle={handleToggle}
               canWrite={canWrite}
+              canComment={!!user}
+              commentCount={commentCounts[item.id] ?? 0}
             />
           ))}
         </div>

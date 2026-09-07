@@ -1,12 +1,88 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import axios from 'axios';
+import CommentThread from './CommentThread';
 
 const API = '/api';
 
-export default function CalendarView() {
+const formatEventDate = (value) => {
+  if (!value) return '';
+  const date = new Date(`${value}T12:00:00`);
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+};
+
+// ─── An event posted on the dashboard ─────────────────────────────────────────
+
+// The events the congregation adds here, as opposed to the ones scraped from
+// capshawchurch.org: these have an id of their own, so they can be talked
+// about.
+function EventCard({ event, canComment }) {
+  const [showComments, setShowComments] = useState(false);
+  const [count, setCount] = useState(event.comment_count ?? 0);
+
+  return (
+    <div className="card border-l-4 border-l-blue-500 space-y-2">
+      <h3 className="font-semibold text-church-navy">{event.title}</h3>
+
+      <div className="flex flex-wrap gap-3 text-xs text-gray-500">
+        {event.event_date && <span>📆 {formatEventDate(event.event_date)}</span>}
+        {event.event_time && <span>🕐 {event.event_time}</span>}
+        {event.location   && <span>📍 {event.location}</span>}
+      </div>
+
+      {event.body && <p className="text-sm text-gray-600 whitespace-pre-wrap">{event.body}</p>}
+
+      {canComment ? (
+        <>
+          <button
+            onClick={() => setShowComments(open => !open)}
+            aria-expanded={showComments}
+            className="text-xs text-gray-500 hover:text-church-navy"
+          >
+            💬 {count || 'No'} comment{count === 1 ? '' : 's'}
+            <span className="ml-1 text-gray-300">{showComments ? '▲' : '▼'}</span>
+          </button>
+
+          {showComments && (
+            <div className="pt-3 border-t border-gray-100">
+              <CommentThread subjectType="event" subjectId={event.id} onCountChange={setCount} />
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="text-xs text-gray-400">Sign in to join the conversation about this event.</p>
+      )}
+    </div>
+  );
+}
+
+export default function CalendarView({ user }) {
+  const [events,  setEvents]  = useState([]);
+  const [counts,  setCounts]  = useState({});
   const [calData, setCalData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState('');
+
+  // Events posted on the dashboard, which is where the conversation happens.
+  useEffect(() => {
+    fetch('/api/announcements')
+      .then(r => r.json())
+      .then(j => {
+        if (!j.success) return;
+        setEvents(j.items.filter(i => i.type === 'event' && i.active));
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!user || !events.length) return;
+    const ids = events.map(e => e.id).join(',');
+    fetch(`/api/comments/event/counts?ids=${ids}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(j => { if (j.success) setCounts(j.counts); })
+      .catch(() => {});
+  }, [user, events]);
 
   async function fetchCalendar() {
     setLoading(true);
@@ -57,7 +133,24 @@ export default function CalendarView() {
         </div>
       )}
 
-      {/* Structured events */}
+      {/* Events posted on the dashboard */}
+      {events.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-sm font-semibold text-church-navy">Church events</h3>
+          {events
+            .slice()
+            .sort((a, b) => String(a.event_date || '').localeCompare(String(b.event_date || '')))
+            .map(event => (
+              <EventCard
+                key={event.id}
+                event={{ ...event, comment_count: counts[event.id] ?? 0 }}
+                canComment={!!user}
+              />
+            ))}
+        </div>
+      )}
+
+      {/* Structured events scraped from capshawchurch.org */}
       {calData?.events?.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {calData.events.map((event, i) => (
