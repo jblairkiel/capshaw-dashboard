@@ -30,3 +30,6 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
+
+# Scraped directory photos — re-downloadable from the church site
+server/data/photos/

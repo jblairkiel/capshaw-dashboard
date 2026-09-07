@@ -174,6 +174,41 @@ function parseDirectory(vcf) {
   return members;
 }
 
+// Parse the family cards on /members/directory. Each card links to a family
+// page and carries the family photo thumbnail. Families without a photo get a
+// shared `no-image` placeholder, flagged here so callers can skip downloading it.
+const NO_IMAGE_RE = /no-image/i;
+
+function parseDirectoryPhotos(html) {
+  const families = [];
+  const cardRe = /<a class="c-card" href="\/members\/directory\/family\/(\d+)">([\s\S]*?)<\/a>/g;
+
+  for (const m of html.matchAll(cardRe)) {
+    const id    = m[1];
+    const inner = m[2];
+    const src   = inner.match(/<img[^>]+src="([^"]+)"/)?.[1];
+    if (!src) continue;
+
+    const name = stripTags(inner.match(/<h2 class="c-title">([\s\S]*?)<\/h2>/)?.[1] || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const [thumbPath, query] = src.split('?');
+    families.push({
+      familyId:    id,
+      familyName:  name,
+      thumbUrl:    src,
+      // Full-size lives at the same path without the /thumbs/ segment.
+      fullUrl:     thumbPath.replace('/thumbs/', '/') + (query ? `?${query}` : ''),
+      // Site-supplied cache-buster; changes when the photo is replaced.
+      version:     new URLSearchParams(query || '').get('h') || '',
+      hasPhoto:    !NO_IMAGE_RE.test(thumbPath),
+    });
+  }
+
+  return families;
+}
+
 module.exports = {
   stripTags,
   extractTables,
@@ -185,4 +220,5 @@ module.exports = {
   parseDeacons,
   parseBulletins,
   parseDirectory,
+  parseDirectoryPhotos,
 };

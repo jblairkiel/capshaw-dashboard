@@ -6,6 +6,7 @@ const {
   parseAnniversaries,
   parseDeacons,
   parseBulletins,
+  parseDirectoryPhotos,
 } = require('../lib/parsers');
 
 // ─── stripTags ────────────────────────────────────────────────────────────────
@@ -182,5 +183,43 @@ describe('parseBulletins', () => {
 
   test('returns empty for html with no bulletin section', () => {
     expect(parseBulletins('<html><h2>Member News</h2></html>')).toEqual([]);
+  });
+});
+
+// ─── parseDirectoryPhotos ─────────────────────────────────────────────────────
+
+describe('parseDirectoryPhotos', () => {
+  const card = (id, src, title) =>
+    `<a class="c-card" href="/members/directory/family/${id}">` +
+    `<div class="c-thumb"><img src="${src}" alt="" loading="lazy"></div>` +
+    `<div class="c-cbody"><h2 class="c-title">${title}</h2></div></a>`;
+
+  const html =
+    card('328', '/media/uploads/photos/families/thumbs/328.jpg?h=1757592046', 'Allen, Josh &amp; Tylan (Lincoln, and Saylor)') +
+    card('999', '/media/frontend/members/no-image.jpg', 'Reaves, Will');
+
+  test('extracts family id, name, and photo urls', () => {
+    const [fam] = parseDirectoryPhotos(html);
+    expect(fam).toMatchObject({
+      familyId:   '328',
+      familyName: 'Allen, Josh & Tylan (Lincoln, and Saylor)',
+      thumbUrl:   '/media/uploads/photos/families/thumbs/328.jpg?h=1757592046',
+      fullUrl:    '/media/uploads/photos/families/328.jpg?h=1757592046',
+      version:    '1757592046',
+      hasPhoto:   true,
+    });
+  });
+
+  test('flags the shared placeholder as having no photo', () => {
+    expect(parseDirectoryPhotos(html)[1]).toMatchObject({ familyId: '999', hasPhoto: false });
+  });
+
+  test('ignores cards without an image', () => {
+    const noImg = '<a class="c-card" href="/members/directory/family/5"><h2 class="c-title">X</h2></a>';
+    expect(parseDirectoryPhotos(noImg)).toEqual([]);
+  });
+
+  test('returns empty for html with no family cards', () => {
+    expect(parseDirectoryPhotos('<html><body>nothing here</body></html>')).toEqual([]);
   });
 });
