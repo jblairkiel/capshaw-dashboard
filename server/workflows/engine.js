@@ -417,12 +417,24 @@ function detail(id, user) {
   const myTask = tasks.find(t => canActOnTask(user, t));
   const step = definition?.steps?.[instance.step_id];
 
+  // A definition may render its own data as a table — a generated schedule,
+  // say — so the screen can show it without knowing what workflow it is.
+  let preview = null;
+  if (definition?.preview) {
+    try {
+      preview = definition.preview(instance.data);
+    } catch (err) {
+      console.error(`[workflows] ${definition.id} preview failed:`, err.message);
+    }
+  }
+
   return {
     instance: {
       ...summarise(instance, user),
       data: instance.data,
       fields: (definition?.fields || []).map(f => ({ key: f.key, label: f.label, value: instance.data[f.key] ?? '' })),
       instruction: step?.instruction || '',
+      preview,
     },
     definition: definition ? describe(definition) : null,
     // Steps already taken, so the chart can shade the path that was walked.

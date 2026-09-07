@@ -1,14 +1,19 @@
 // ─── Role model ───────────────────────────────────────────────────────────────
-// pending  — signed in, read-only
-// approved — member: may use every member function (announcements, songs,
-//            order of service, Bible class, lesson planner, documents)
-// admin    — everything a member can do, plus user/role management and direct
-//            editing of every database table via /api/admin
-
+// pending             — signed in, read-only
+// approved            — member: may use every member function (Bible class,
+//                       lesson planner, site updates, their own household)
+// worship-coordinator — a member who also builds the worship roster: owns the
+//                       worship schedule workflow
+// admin               — everything above, plus user/role management and direct
+//                       editing of every database table via /api/admin
+//
+// Ranked, so an admin can always do a coordinator's job and a coordinator is
+// always also a member.
 const ROLE_RANK = {
-  pending:  0,
-  approved: 1,
-  admin:    2,
+  pending:               0,
+  approved:              1,
+  'worship-coordinator': 2,
+  admin:                 3,
 };
 
 const ROLES = Object.keys(ROLE_RANK);

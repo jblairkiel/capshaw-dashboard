@@ -6,6 +6,7 @@ const definitions = [
   require('./facilityUse'),
   require('./jobSwap'),
   require('./visitorFollowUp'),
+  require('./worshipSchedule'),
 ];
 
 const byId = new Map(definitions.map(d => [d.id, d]));

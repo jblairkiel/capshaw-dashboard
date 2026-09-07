@@ -19,6 +19,7 @@ function mockProfile(overrides = {}) {
   const payload = {
     success: true, linked: true, person: RAY, household: [RAY, SAM],
     roles: WORSHIP_ROLES, levels: ['preferred', 'willing', 'unavailable'],
+    notifications: { monthlyReport: true },
     canEdit: true, canEditAll: false, ...overrides,
   };
   const fetchMock = vi.fn(() =>
@@ -146,5 +147,48 @@ describe('WorshipPreferences', () => {
     render(<WorshipPreferences person={SAM} onSave={onSave} />);
     fireEvent.click(screen.getByRole('button', { name: /save preferences/i }));
     expect(await screen.findByText('Server said no')).toBeInTheDocument();
+  });
+});
+
+// ─── Email preferences ────────────────────────────────────────────────────────
+
+describe('MyProfileView — email preferences', () => {
+  beforeEach(() => { mockProfile(); });
+
+  test('shows the monthly summary as on by default', async () => {
+    render(<MyProfileView user={{}} />);
+    const box = await screen.findByRole('checkbox', { name: /monthly schedule summary/i });
+    expect(box).toBeChecked();
+  });
+
+  test('explains that opting out does not stop personal assignment emails', async () => {
+    render(<MyProfileView user={{}} />);
+    expect(await screen.findByText(/does not stop the\s+emails about jobs you are personally given/i))
+      .toBeInTheDocument();
+  });
+
+  test('opting out PATCHes the preference', async () => {
+    const fetchMock = mockProfile();
+    render(<MyProfileView user={{}} />);
+    fireEvent.click(await screen.findByRole('checkbox', { name: /monthly schedule summary/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/profile/notifications',
+        expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ monthlyReport: false }) })
+      );
+    });
+  });
+
+  test('shows it as off for somebody who has opted out', async () => {
+    mockProfile({ notifications: { monthlyReport: false } });
+    render(<MyProfileView user={{}} />);
+    expect(await screen.findByRole('checkbox', { name: /monthly schedule summary/i })).not.toBeChecked();
+  });
+
+  test('is offered even to an account not yet linked to the directory', async () => {
+    mockProfile({ linked: false, person: null, household: [] });
+    render(<MyProfileView user={{ email: 'nobody@example.com' }} />);
+    expect(await screen.findByRole('checkbox', { name: /monthly schedule summary/i })).toBeInTheDocument();
   });
 });

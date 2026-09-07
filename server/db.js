@@ -342,6 +342,9 @@ addColumn('users', 'directory_id', 'INTEGER REFERENCES directory(id) ON DELETE S
 addColumn('directory', 'edited_fields', "TEXT NOT NULL DEFAULT '[]'");
 // Filename of this person's photo inside server/data/photos, or '' if none.
 addColumn('directory', 'photo', "TEXT NOT NULL DEFAULT ''");
+// Everyone gets the monthly schedule summary unless they turn it off on My
+// Info, so a new account is opted in by default.
+addColumn('users', 'wants_monthly_report', 'INTEGER NOT NULL DEFAULT 1');
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_users_directory ON users(directory_id);`);
 
