@@ -287,6 +287,40 @@ function Detail({ detail, onAct, onBack, busy }) {
         </div>
       )}
 
+      {/* A workflow that generates something shows it here for review. */}
+      {instance.preview?.rows?.length > 0 && (
+        <div className="card">
+          <h3 className="font-semibold text-church-navy text-sm mb-3">
+            Draft <span className="text-gray-400 font-normal">({instance.preview.rows.length} rows)</span>
+          </h3>
+          <div className="overflow-x-auto max-h-96 overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-white">
+                <tr className="text-left text-xs text-gray-500 uppercase tracking-wide border-b border-gray-100">
+                  {instance.preview.columns.map(col => (
+                    <th key={col} className="px-2 py-1.5 font-medium">{col}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {instance.preview.rows.map((row, i) => (
+                  <tr key={i} className={i % 2 ? 'bg-gray-50/60' : ''}>
+                    {row.map((cell, j) => (
+                      <td
+                        key={j}
+                        className={`px-2 py-1.5 ${String(cell).startsWith('—') ? 'text-amber-700' : 'text-church-navy'}`}
+                      >
+                        {cell}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {definition && (
         <div className="card">
           <h3 className="font-semibold text-church-navy text-sm mb-3">How this workflow runs</h3>

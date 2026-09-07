@@ -107,7 +107,7 @@ describe('requireAdmin', () => {
 
 describe('role model', () => {
   test('ROLES is ordered from least to most privileged', () => {
-    expect(ROLES).toEqual(['pending', 'approved', 'admin']);
+    expect(ROLES).toEqual(['pending', 'approved', 'worship-coordinator', 'admin']);
   });
 
   test('isRole accepts known roles and rejects anything else', () => {
@@ -115,6 +115,13 @@ describe('role model', () => {
     expect(isRole('superuser')).toBe(false);
     expect(isRole(undefined)).toBe(false);
     expect(isRole('toString')).toBe(false);
+  });
+
+  test('a worship coordinator outranks a member but not an admin', () => {
+    expect(hasRole({ role: 'worship-coordinator' }, 'approved')).toBe(true);
+    expect(hasRole({ role: 'worship-coordinator' }, 'admin')).toBe(false);
+    expect(hasRole({ role: 'admin' }, 'worship-coordinator')).toBe(true);
+    expect(hasRole({ role: 'approved' }, 'worship-coordinator')).toBe(false);
   });
 
   test('hasRole compares ranks rather than exact roles', () => {

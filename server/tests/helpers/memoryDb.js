@@ -31,6 +31,7 @@ function createMemoryDb() {
       created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
       last_login   TEXT,
       directory_id INTEGER REFERENCES directory(id) ON DELETE SET NULL,
+      wants_monthly_report INTEGER NOT NULL DEFAULT 1,
       UNIQUE(provider, provider_id)
     );
     CREATE TABLE worship_preferences (

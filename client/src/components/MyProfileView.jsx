@@ -135,6 +135,56 @@ function PersonCard({ person, isSelf, canEdit, onSaved, defaultOpen }) {
   );
 }
 
+// ─── Email preferences ────────────────────────────────────────────────────────
+
+// About the signed-in account rather than the directory entry, so it sits
+// apart from the household cards.
+function EmailPreferences({ notifications, onSaved }) {
+  const [busy, setBusy]   = useState(false);
+  const [error, setError] = useState('');
+  const wants = notifications?.monthlyReport !== false;
+
+  async function toggle(next) {
+    setBusy(true); setError('');
+    try {
+      const json = await send(`${API}/notifications`, {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ monthlyReport: next }),
+      });
+      onSaved(json.notifications);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="card">
+      <h3 className="font-semibold text-church-navy text-sm">Email</h3>
+      <label className="flex items-start gap-3 mt-3 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={wants}
+          disabled={busy}
+          onChange={e => toggle(e.target.checked)}
+          className="mt-0.5 w-4 h-4 rounded border-gray-300 text-church-gold focus:ring-church-gold"
+        />
+        <span className="min-w-0">
+          <span className="text-sm text-church-navy block">Monthly schedule summary</span>
+          <span className="text-xs text-gray-500 block mt-0.5">
+            The whole month&apos;s worship assignments, sent when a new schedule is published.
+            Everyone gets this unless they turn it off. Turning it off does not stop the
+            emails about jobs you are personally given.
+          </span>
+        </span>
+      </label>
+      {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
+    </div>
+  );
+}
+
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export default function MyProfileView({ user }) {
@@ -178,9 +228,14 @@ export default function MyProfileView({ user }) {
     return (
       <div className="space-y-4">
         <h2 className="section-heading mb-0">My Info</h2>
+        <EmailPreferences
+          notifications={data.notifications}
+          onSaved={notifications => setData(prev => prev && ({ ...prev, notifications }))}
+        />
+
         <div className="card text-center py-10">
           <p className="text-sm text-gray-600">
-            Your sign-in isn&apos;t matched to a directory entry yet, so there is nothing to edit here.
+            Your sign-in isn&apos;t matched to a directory entry yet, so there is nothing else to edit here.
           </p>
           <p className="text-xs text-gray-400 mt-2">
             We match automatically when your sign-in email is the one in the directory
@@ -209,6 +264,11 @@ export default function MyProfileView({ user }) {
           Your account is pending approval, so this is read-only for now.
         </div>
       )}
+
+      <EmailPreferences
+        notifications={data.notifications}
+        onSaved={notifications => setData(prev => prev && ({ ...prev, notifications }))}
+      />
 
       <PersonCard
         person={data.person}

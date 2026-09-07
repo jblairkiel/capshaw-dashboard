@@ -2,9 +2,10 @@
 // authority — these helpers only decide what to show.
 
 export const ROLE_RANK = {
-  pending:  0,
-  approved: 1,
-  admin:    2,
+  pending:               0,
+  approved:              1,
+  'worship-coordinator': 2,
+  admin:                 3,
 };
 
 export const ROLES = [
@@ -23,10 +24,17 @@ export const ROLES = [
     tone:        'bg-green-100 text-green-700',
   },
   {
+    id:          'worship-coordinator',
+    label:       'Worship Coordinator',
+    badge:       'Worship Coordinator',
+    description: 'Everything a member can do, plus building the worship roster — they own the worship schedule workflow.',
+    tone:        'bg-indigo-100 text-indigo-800',
+  },
+  {
     id:          'admin',
     label:       'Admin',
     badge:       'Admin',
-    description: 'Everything a member can do, plus writing announcements, songs and the order of service, managing user roles, and editing every database table directly.',
+    description: 'Everything above, plus writing announcements, songs and the order of service, managing user roles, and editing every database table directly.',
     tone:        'bg-church-gold/20 text-church-navy',
   },
 ];

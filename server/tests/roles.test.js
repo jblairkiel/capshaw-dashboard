@@ -53,7 +53,7 @@ describe('GET /api/auth/users', () => {
     const res = await request(buildApp(ADMIN)).get('/api/auth/users');
     expect(res.status).toBe(200);
     expect(res.body.users).toHaveLength(3);
-    expect(res.body.roles).toEqual(['pending', 'approved', 'admin']);
+    expect(res.body.roles).toEqual(['pending', 'approved', 'worship-coordinator', 'admin']);
     expect(res.body.users.every(u => 'is_owner' in u)).toBe(true);
   });
 

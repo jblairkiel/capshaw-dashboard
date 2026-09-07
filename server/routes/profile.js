@@ -79,6 +79,9 @@ router.get('/me', requireAuth, (req, res) => {
     roles:        WORSHIP_ROLES,
     levels:       PREFERENCE_LEVELS,
     fields:       EDITABLE_FIELDS,
+    // Everyone is opted into the monthly worship summary until they say
+    // otherwise, so this reflects the column's default of on.
+    notifications: { monthlyReport: req.user.wants_monthly_report !== 0 },
     // Admins edit from the directory screen; members edit their own household.
     canEditAll:   req.user.role === 'admin',
     canEdit:      req.user.role === 'admin' || (!!person && req.user.role !== 'pending'),
@@ -94,6 +97,20 @@ router.get('/person/:id', requireApproved, (req, res) => {
     return res.status(403).json({ success: false, error: 'You can only view profiles in your own household' });
   }
   res.json({ success: true, person: personPayload(person), household: householdOf(person).map(personPayload) });
+});
+
+// ─── PATCH /api/profile/notifications ─────────────────────────────────────────
+// Anyone signed in can turn their own emails off; nobody can change anyone
+// else's.
+
+router.patch('/notifications', requireAuth, (req, res) => {
+  const wanted = req.body?.monthlyReport;
+  if (typeof wanted !== 'boolean') {
+    return res.status(400).json({ success: false, error: 'monthlyReport must be true or false' });
+  }
+
+  db.prepare('UPDATE users SET wants_monthly_report = ? WHERE id = ?').run(wanted ? 1 : 0, req.user.id);
+  res.json({ success: true, notifications: { monthlyReport: wanted } });
 });
 
 // ─── GET /api/profile/person/:id/photo ────────────────────────────────────────

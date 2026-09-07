@@ -67,7 +67,8 @@ role includes everything below it.
 |---|---|
 | `pending` | View the dashboard. Cannot create or edit anything. |
 | `approved` (Member) | Everything a pending user sees, plus: Bible class questions, the lesson planner, site updates, and editing their own household's details and worship preferences. |
-| `admin` | Everything a member can do, plus writing announcements, the song tracker and the order of service, and the Admin tabs — user roles, the congregation directory, and direct editing of every database table. |
+| `worship-coordinator` | Everything a member can do, plus building the worship roster — they own the Monthly Worship Schedule workflow. |
+| `admin` | Everything above, plus writing announcements, the song tracker and the order of service, and the Admin tabs — user roles, the congregation directory, and direct editing of every database table. |
 
 Read and write are separate: **announcements, the song tracker and the order of
 service are read-only for members** — everyone can see them, only admins can
@@ -343,6 +344,57 @@ one copy.
 - **A workflow finishes** — the person who started it, plus any distribution
   group the outcome names. An approved facility request copies the
   announcements list, via `notifyGroups: ['announcements']` on the outcome.
+
+---
+
+## Monthly Worship Schedule
+
+A workflow that builds a month of worship assignments from the preferences
+people set on My Info, owned by the **worship coordinator** role.
+
+### How a month is built
+
+`server/workflows/scheduling.js` is pure and deterministic — the same month and
+preferences always give the same schedule. Its rules, in order:
+
+1. Never schedule somebody who marked themselves **unavailable** for that role.
+2. Never schedule the same person twice in one service.
+3. **Spread the load** — whoever has had the fewest turns goes next.
+4. On equal turns, someone who said they are *glad to* goes ahead of someone
+   merely *willing*.
+5. Any remaining tie breaks by name, so the result is stable.
+
+Load deliberately beats keenness. Ordering by keenness first would hand the one
+eager song leader every Sunday in the month while a willing volunteer sat idle,
+which is not what a coordinator would do by hand.
+
+A role nobody can cover is **reported as unfilled** rather than left quietly
+blank, since an empty slot is the thing a coordinator most needs to see.
+
+### Running it
+
+Start it from Workflows, choose a month and which services to fill, and a draft
+appears as a table on the workflow screen. From there:
+
+- **Try a different draft** regenerates — a different but equally fair split.
+- **Publish to the roster** writes it and sends the emails.
+- **Abandon** closes it, having written nothing.
+
+Nothing reaches `job_assignments` until publish, so a draft can be regenerated
+freely. Publishing replaces only its own month, so publishing June never
+disturbs May, and publishing twice does not double it up.
+
+### Who hears about it
+
+- **Everyone given a turn** gets their own assignments — just theirs, not the
+  whole month — with a pointer to the Job Assignment Swap workflow if they
+  cannot make one. Addresses come from matching the roster name back to the
+  directory; anyone who cannot be matched is recorded on the workflow rather
+  than dropped in silence.
+- **The whole month** goes to every user who has not opted out. Everyone is
+  opted in by default (`users.wants_monthly_report`); the toggle is on **My
+  Info → Email**, and turning it off does not stop the emails about jobs you
+  are personally given.
 
 ---
 
