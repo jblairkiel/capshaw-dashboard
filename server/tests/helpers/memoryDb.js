@@ -32,6 +32,11 @@ function createMemoryDb() {
       last_login   TEXT,
       directory_id INTEGER REFERENCES directory(id) ON DELETE SET NULL,
       wants_monthly_report INTEGER NOT NULL DEFAULT 1,
+      email_enabled    INTEGER NOT NULL DEFAULT 1,
+      digest_frequency TEXT    NOT NULL DEFAULT 'daily',
+      digest_hour      INTEGER NOT NULL DEFAULT 7,
+      digest_weekday   INTEGER NOT NULL DEFAULT 1,
+      last_digest_at   TEXT,
       UNIQUE(provider, provider_id)
     );
     CREATE TABLE worship_preferences (
@@ -133,6 +138,63 @@ function createMemoryDb() {
       error        TEXT    NOT NULL DEFAULT '',
       created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
       sent_at      TEXT
+    );
+  `);
+
+  db.exec(`
+    CREATE TABLE announcements (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      type       TEXT    NOT NULL DEFAULT 'announcement',
+      title      TEXT    NOT NULL,
+      body       TEXT    NOT NULL DEFAULT '',
+      event_date TEXT,
+      event_time TEXT,
+      location   TEXT,
+      priority   TEXT    NOT NULL DEFAULT 'normal',
+      active     INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE comments (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      subject_type TEXT    NOT NULL,
+      subject_id   INTEGER NOT NULL,
+      parent_id    INTEGER REFERENCES comments(id) ON DELETE CASCADE,
+      user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      body         TEXT    NOT NULL,
+      deleted_at   TEXT,
+      edited_at    TEXT,
+      created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE comment_subscriptions (
+      subject_type TEXT    NOT NULL,
+      subject_id   INTEGER NOT NULL,
+      user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      state        TEXT    NOT NULL DEFAULT 'on',
+      created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (subject_type, subject_id, user_id)
+    );
+    CREATE TABLE notifications (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type          TEXT    NOT NULL,
+      category      TEXT    NOT NULL,
+      title         TEXT    NOT NULL,
+      body          TEXT    NOT NULL DEFAULT '',
+      subject_type  TEXT    NOT NULL DEFAULT '',
+      subject_id    INTEGER,
+      actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      actor_name    TEXT    NOT NULL DEFAULT '',
+      read_at       TEXT,
+      email_state   TEXT    NOT NULL DEFAULT 'none',
+      created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE notification_preferences (
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      type       TEXT    NOT NULL,
+      in_app     INTEGER NOT NULL DEFAULT 1,
+      email      TEXT    NOT NULL DEFAULT 'immediate',
+      updated_at TEXT    NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, type)
     );
   `);
 

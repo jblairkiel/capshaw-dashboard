@@ -4,6 +4,8 @@ const { Strategy: GoogleStrategy }   = require('passport-google-oauth20');
 const { Strategy: FacebookStrategy } = require('passport-facebook');
 const db = require('../db');
 const { requireAuth, requireAdmin, ROLES, isRole } = require('../middleware/auth');
+const notifications = require('../notifications');
+const mailer = require('../mail/mailer');
 
 const isProd     = process.env.NODE_ENV === 'production';
 const CLIENT_URL = isProd ? 'https://capshaw.jblairkiel.com' : 'http://localhost:5173';
@@ -66,7 +68,34 @@ function upsertUser(provider, profileId, email, name, photo) {
   const { lastInsertRowid: id } = db.prepare(
     'INSERT INTO users (provider, provider_id, email, name, photo, role, directory_id, last_login) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))'
   ).run(provider, profileId, email || null, name, photo || null, role, findPersonByEmail(email));
-  return db.prepare('SELECT * FROM users WHERE id=?').get(id);
+
+  const user = db.prepare('SELECT * FROM users WHERE id=?').get(id);
+  if (user.role === 'pending') tellAdminsSomebodyIsWaiting(user);
+  return user;
+}
+
+// A new sign-in can do nothing until an admin approves it, so the admins hear
+// about it the same way they hear about everything else on the site.
+function tellAdminsSomebodyIsWaiting(user) {
+  try {
+    notifications.emit({
+      type:        'admin.user_pending',
+      title:       `${user.name} signed in and is waiting to be approved`,
+      body: [
+        `${user.name}${user.email ? ` <${user.email}>` : ''} signed in with ${user.provider}.`,
+        '',
+        'Until somebody approves them they can read the site but change nothing.',
+        'Approve or decline them under Admin → Users & Roles.',
+      ].join('\n'),
+      subjectType: 'user',
+      subjectId:   user.id,
+      actor:       user,
+      context:     `user:${user.id}:pending`,
+    });
+    mailer.drainOutbox().catch(err => console.error('[mail] drain failed:', err.message));
+  } catch (err) {
+    console.error('[auth] could not raise the pending-approval notification:', err.message);
+  }
 }
 
 // ─── Google strategy ──────────────────────────────────────────────────────────

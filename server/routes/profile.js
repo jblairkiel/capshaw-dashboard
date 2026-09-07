@@ -3,6 +3,7 @@ const router  = express.Router();
 const db      = require('../db');
 const { requireAuth, requireApproved } = require('../middleware/auth');
 const photoStore = require('../lib/photoStore');
+const notificationPrefs = require('../notifications/preferences');
 const {
   sameHousehold,
   WORSHIP_ROLES, PREFERENCE_LEVELS, isWorshipRole, isPreferenceLevel,
@@ -80,7 +81,9 @@ router.get('/me', requireAuth, (req, res) => {
     levels:       PREFERENCE_LEVELS,
     fields:       EDITABLE_FIELDS,
     // Everyone is opted into the monthly worship summary until they say
-    // otherwise, so this reflects the column's default of on.
+    // otherwise, so this reflects the default of on. The full per-type
+    // settings live at /api/notifications/preferences; this is the one
+    // switch My Info has always shown.
     notifications: { monthlyReport: req.user.wants_monthly_report !== 0 },
     // Admins edit from the directory screen; members edit their own household.
     canEditAll:   req.user.role === 'admin',
@@ -100,8 +103,9 @@ router.get('/person/:id', requireApproved, (req, res) => {
 });
 
 // ─── PATCH /api/profile/notifications ─────────────────────────────────────────
-// Anyone signed in can turn their own emails off; nobody can change anyone
-// else's.
+// The one-switch shorthand for the monthly summary, which predates the full
+// settings screen at /api/notifications/preferences and still answers the
+// quick toggle on My Info. Both write the same setting, so they agree.
 
 router.patch('/notifications', requireAuth, (req, res) => {
   const wanted = req.body?.monthlyReport;
@@ -109,7 +113,11 @@ router.patch('/notifications', requireAuth, (req, res) => {
     return res.status(400).json({ success: false, error: 'monthlyReport must be true or false' });
   }
 
-  db.prepare('UPDATE users SET wants_monthly_report = ? WHERE id = ?').run(wanted ? 1 : 0, req.user.id);
+  const result = notificationPrefs.save(req.user, {
+    types: { [notificationPrefs.LEGACY_COLUMN_TYPE]: { email: wanted ? 'immediate' : 'off' } },
+  });
+  if (result.error) return res.status(400).json({ success: false, error: result.error });
+
   res.json({ success: true, notifications: { monthlyReport: wanted } });
 });
 

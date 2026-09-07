@@ -1,24 +1,8 @@
 // Swap db.js for an in-memory SQLite instance before any route requires it.
-// jest.mock is hoisted above imports, so the routes pick up the mocked db.
-jest.mock('../db', () => {
-  const Database = require('better-sqlite3');
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS announcements (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      type       TEXT    NOT NULL DEFAULT 'announcement',
-      title      TEXT    NOT NULL,
-      body       TEXT    NOT NULL DEFAULT '',
-      event_date TEXT,
-      event_time TEXT,
-      location   TEXT,
-      priority   TEXT    NOT NULL DEFAULT 'normal',
-      active     INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT    NOT NULL DEFAULT (datetime('now'))
-    );
-  `);
-  return db;
-});
+// jest.mock is hoisted above imports, so the routes pick up the mocked db. The
+// routes talk to the notification system as well as to the announcements
+// table, so they get the whole in-memory schema rather than a table of their own.
+jest.mock('../db', () => require('./helpers/memoryDb').createMemoryDb());
 
 const request          = require('supertest');
 const express          = require('express');

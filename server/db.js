@@ -325,6 +325,79 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_mail_members_group ON mail_group_members(group_id);
   CREATE INDEX IF NOT EXISTS idx_mail_outbox_status ON mail_outbox(status, id);
+
+  -- ── Comments ────────────────────────────────────────────────────────────────
+  -- A comment hangs off a subject: (subject_type, subject_id). Announcements
+  -- and calendar events are both rows in "announcements", so they share the
+  -- table and are told apart by subject_type — which is also what the
+  -- notification inbox groups by.
+
+  CREATE TABLE IF NOT EXISTS comments (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject_type TEXT    NOT NULL,              -- 'announcement' | 'event'
+    subject_id   INTEGER NOT NULL,
+    parent_id    INTEGER REFERENCES comments(id) ON DELETE CASCADE,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    body         TEXT    NOT NULL,
+    -- Deleting is soft: a reply hanging off a removed comment still reads.
+    deleted_at   TEXT,
+    edited_at    TEXT,
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- Who hears about later activity on one subject. A row appears the moment
+  -- somebody comments; 'off' is how they mute a thread without leaving it.
+  CREATE TABLE IF NOT EXISTS comment_subscriptions (
+    subject_type TEXT    NOT NULL,
+    subject_id   INTEGER NOT NULL,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    state        TEXT    NOT NULL DEFAULT 'on',   -- on | off
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (subject_type, subject_id, user_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_comments_subject ON comments(subject_type, subject_id, id);
+  CREATE INDEX IF NOT EXISTS idx_comments_parent  ON comments(parent_id);
+
+  -- ── Notifications ───────────────────────────────────────────────────────────
+  -- One row per person per thing that happened. "type" is the fine-grained
+  -- kind ('comment.reply'), "category" the drawer of the inbox it lands in
+  -- ('comments'); both come from server/notifications/types.js.
+
+  CREATE TABLE IF NOT EXISTS notifications (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type          TEXT    NOT NULL,
+    category      TEXT    NOT NULL,
+    title         TEXT    NOT NULL,
+    body          TEXT    NOT NULL DEFAULT '',
+    subject_type  TEXT    NOT NULL DEFAULT '',
+    subject_id    INTEGER,
+    actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    actor_name    TEXT    NOT NULL DEFAULT '',
+    read_at       TEXT,
+    -- none  — in-app only, no email wanted
+    -- sent  — an email was queued for it there and then
+    -- digest— waiting to be gathered into this person's next digest
+    email_state   TEXT    NOT NULL DEFAULT 'none',
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_notifications_user   ON notifications(user_id, id DESC);
+  CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id, read_at);
+  CREATE INDEX IF NOT EXISTS idx_notifications_digest ON notifications(email_state, user_id);
+
+  -- One row per person per notification type they have an opinion about.
+  -- Absent means "whatever the type's default is", so a new account is set up
+  -- sensibly without writing a row per type.
+  CREATE TABLE IF NOT EXISTS notification_preferences (
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type       TEXT    NOT NULL,
+    in_app     INTEGER NOT NULL DEFAULT 1,
+    email      TEXT    NOT NULL DEFAULT 'immediate',  -- off | immediate | digest
+    updated_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (user_id, type)
+  );
 `);
 
 // ─── Migrations ───────────────────────────────────────────────────────────────
@@ -345,6 +418,20 @@ addColumn('directory', 'photo', "TEXT NOT NULL DEFAULT ''");
 // Everyone gets the monthly schedule summary unless they turn it off on My
 // Info, so a new account is opted in by default.
 addColumn('users', 'wants_monthly_report', 'INTEGER NOT NULL DEFAULT 1');
+
+// ─── Notification delivery settings, per account ──────────────────────────────
+// The per-type choices live in notification_preferences; these are the
+// account-wide switches that sit above them.
+
+// A master off switch: nothing at all is emailed while this is 0, whatever
+// the individual types say.
+addColumn('users', 'email_enabled', 'INTEGER NOT NULL DEFAULT 1');
+// When the "save it for my digest" choice actually goes out: daily, or on one
+// chosen weekday. The hour is the site server's local hour, 0-23.
+addColumn('users', 'digest_frequency', "TEXT NOT NULL DEFAULT 'daily'");
+addColumn('users', 'digest_hour', 'INTEGER NOT NULL DEFAULT 7');
+addColumn('users', 'digest_weekday', 'INTEGER NOT NULL DEFAULT 1');
+addColumn('users', 'last_digest_at', 'TEXT');
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_users_directory ON users(directory_id);`);
 
