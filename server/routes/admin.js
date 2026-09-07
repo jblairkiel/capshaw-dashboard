@@ -2,7 +2,10 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
 const { requireAuth } = require('../middleware/auth');
-const { readData } = require('./scraper');
+const { readData, saveScraped } = require('./scraper');
+const { PHOTO_DIR } = require('../lib/directory');
+const fs   = require('fs');
+const path = require('path');
 
 function requireAdmin(req, res, next) {
   if (req.user?.role !== 'admin') return res.status(403).json({ success: false, error: 'Admin only' });
@@ -71,8 +74,14 @@ const TABLES = {
     order:    'id DESC',
   },
   directory: {
-    columns:  ['id', 'name', 'address', 'city', 'state', 'zip', 'phone', 'cell', 'email', 'notes'],
-    writable: ['name', 'address', 'city', 'state', 'zip', 'phone', 'cell', 'email', 'notes'],
+    columns:  ['id', 'name', 'address', 'city', 'state', 'zip', 'phone', 'cell', 'email', 'notes', 'family_id'],
+    writable: ['name', 'address', 'city', 'state', 'zip', 'phone', 'cell', 'email', 'notes', 'family_id'],
+    search:   'name',
+    order:    'name ASC',
+  },
+  directory_families: {
+    columns:  ['id', 'name', 'address', 'city', 'state', 'zip', 'photo_file', 'photo_version'],
+    writable: ['name', 'address', 'city', 'state', 'zip'],
     search:   'name',
     order:    'name ASC',
   },
@@ -103,64 +112,10 @@ router.post('/import-cache', (req, res) => {
     const data = readData();
     if (!data) return res.status(404).json({ success: false, error: 'No cached data found. Run a scrape first.' });
 
-    // Use the same _saveScraped logic — require it directly
-    const { runUpdate: _unused, ...scraperModule } = require('./scraper');
-    // We need to call saveData — re-expose via a thin wrapper
-    const saveScraped = db.transaction((d) => {
-      db.prepare('DELETE FROM attendance').run();
-      const insA = db.prepare('INSERT INTO attendance (date, service, count) VALUES (?, ?, ?)');
-      for (const r of (d.attendance || [])) insA.run(r.date, r.service, r.count);
-
-      db.prepare('DELETE FROM sermons').run();
-      const insS = db.prepare('INSERT INTO sermons (date, title, speaker, type, series, service) VALUES (?, ?, ?, ?, ?, ?)');
-      for (const r of (d.sermons || [])) insS.run(r.date, r.title, r.speaker, r.type, r.series, r.service);
-
-      db.prepare('DELETE FROM job_assignments').run();
-      const insJA = db.prepare('INSERT INTO job_assignments (month, date, service, job, name) VALUES (?, ?, ?, ?, ?)');
-      const ja = d.jobAssignments;
-      if (ja && ja.assignments) {
-        for (const r of ja.assignments) insJA.run(ja.month || '', r.date, r.service, r.job, r.name);
-      }
-
-      db.prepare('DELETE FROM visitor_visits').run();
-      db.prepare('DELETE FROM visitors').run();
-      const insV  = db.prepare('INSERT INTO visitors (name) VALUES (?)');
-      const insVV = db.prepare('INSERT INTO visitor_visits (visitor_id, date, service) VALUES (?, ?, ?)');
-      for (const v of (d.visitors || [])) {
-        const vid = insV.run(v.name).lastInsertRowid;
-        for (const vv of (v.visits || [])) insVV.run(vid, vv.date, vv.service);
-      }
-
-      db.prepare('DELETE FROM anniversaries').run();
-      const insAnn = db.prepare('INSERT INTO anniversaries (month, date, names, month_num, day) VALUES (?, ?, ?, ?, ?)');
-      for (const r of (d.anniversaries || [])) insAnn.run(r.month || '', r.date, r.names, r.monthNum || 0, r.day || 0);
-
-      db.prepare('DELETE FROM deacon_duties').run();
-      db.prepare('DELETE FROM deacons').run();
-      const insD  = db.prepare('INSERT INTO deacons (name) VALUES (?)');
-      const insDd = db.prepare('INSERT INTO deacon_duties (deacon_id, duty, position) VALUES (?, ?, ?)');
-      for (const d2 of (d.deacons || [])) {
-        const did = insD.run(d2.name).lastInsertRowid;
-        (d2.duties || []).forEach((duty, i) => insDd.run(did, duty, i));
-      }
-
-      db.prepare('DELETE FROM bulletins').run();
-      const insB = db.prepare('INSERT INTO bulletins (url, label) VALUES (?, ?)');
-      for (const b of (d.bulletins || [])) insB.run(b.url, b.label);
-
-      db.prepare('DELETE FROM directory').run();
-      const insDir = db.prepare('INSERT INTO directory (name, address, city, state, zip, phone, cell, email, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
-      for (const dir of (data.directory || [])) insDir.run(dir.name, dir.address||'', dir.city||'', dir.state||'', dir.zip||'', dir.phone||'', dir.cell||'', dir.email||'', dir.notes||'');
-
-      db.prepare('INSERT OR REPLACE INTO scraped_meta (id, last_updated, last_warnings) VALUES (1, ?, ?)').run(
-        d.lastUpdated || new Date().toISOString(), JSON.stringify(d.warnings || [])
-      );
-    });
-
     saveScraped(data);
 
     const counts = {};
-    for (const table of ['attendance', 'sermons', 'job_assignments', 'visitors', 'anniversaries', 'deacons', 'bulletins', 'directory']) {
+    for (const table of ['attendance', 'sermons', 'job_assignments', 'visitors', 'anniversaries', 'deacons', 'bulletins', 'directory_families', 'directory']) {
       counts[table] = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n;
     }
     res.json({ success: true, counts });
@@ -168,6 +123,48 @@ router.post('/import-cache', (req, res) => {
     console.error('[admin] import-cache failed:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// ─── Directory families ───────────────────────────────────────────────────────
+
+// The directory grouped the way the church site groups it, with each family's
+// scraped photo. Members with no family_id are collected under a null-id bucket
+// so hand-added rows stay visible.
+router.get('/directory-families', (req, res) => {
+  try {
+    const families = db.prepare('SELECT * FROM directory_families ORDER BY name ASC').all();
+    const members  = db.prepare('SELECT * FROM directory ORDER BY name ASC').all();
+
+    const byFamily = new Map(families.map(f => [f.id, { ...f, photoUrl: f.photo_file ? `/api/admin/directory-photo/${f.id}` : null, members: [] }]));
+    const unassigned = [];
+    for (const m of members) {
+      const fam = m.family_id != null ? byFamily.get(m.family_id) : null;
+      (fam ? fam.members : unassigned).push(m);
+    }
+
+    const rows = [...byFamily.values()];
+    if (unassigned.length) {
+      rows.push({ id: null, name: 'Unassigned', address: '', city: '', state: '', zip: '', photo_file: '', photoUrl: null, members: unassigned });
+    }
+    res.json({ success: true, families: rows, memberCount: members.length });
+  } catch (err) {
+    console.error('[admin] directory-families failed:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Photos live on disk (server/data/photos), not in the DB — they are re-scraped
+// rather than backed up, and the source CDN links expire.
+router.get('/directory-photo/:familyId', (req, res) => {
+  const fam = db.prepare('SELECT photo_file FROM directory_families WHERE id = ?').get(req.params.familyId);
+  if (!fam || !fam.photo_file) return res.status(404).json({ success: false, error: 'No photo for this family' });
+
+  // photo_file is written by our own scraper, but never trust a stored path.
+  const file = path.basename(fam.photo_file);
+  const full = path.join(PHOTO_DIR, file);
+  if (!fs.existsSync(full)) return res.status(404).json({ success: false, error: 'Photo file missing — re-run the directory scrape' });
+
+  res.sendFile(full, { maxAge: '1h' });
 });
 
 // ─── Scrape status ────────────────────────────────────────────────────────────
@@ -181,6 +178,7 @@ const SCRAPE_SECTIONS = [
   { key: 'deacons',        label: 'Deacons',         table: 'deacons',         dateCol: null },
   { key: 'bulletins',      label: 'Bulletins',       table: 'bulletins',       dateCol: null },
   { key: 'directory',     label: 'Directory',       table: 'directory',       dateCol: null },
+  { key: 'directoryFamilies', label: 'Directory Families', table: 'directory_families', dateCol: null },
 ];
 
 router.get('/scrape-status', (req, res) => {

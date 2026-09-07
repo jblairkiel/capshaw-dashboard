@@ -1,7 +1,7 @@
 const fs   = require('fs');
 const path = require('path');
 const { fetchPage, fetchBinary } = require('./capshawClient');
-const { parseDirectoryPhotos } = require('./parsers');
+const { parseDirectory, parseDirectoryFamilies } = require('./parsers');
 
 const PHOTO_DIR = path.join(__dirname, '../data/photos');
 const MANIFEST  = path.join(PHOTO_DIR, 'manifest.json');
@@ -44,11 +44,11 @@ async function mapLimit(items, limit, worker) {
   return results;
 }
 
-async function listFamilyPhotos() {
+async function listFamilies() {
   const page = await fetchPage('/members/directory');
   if (page.url.includes('login')) throw new Error('Session expired or login failed — check credentials in .env');
   if (page.status !== 200) throw new Error(`/members/directory returned ${page.status}`);
-  return parseDirectoryPhotos(page.body);
+  return parseDirectoryFamilies(page.body);
 }
 
 /**
@@ -60,7 +60,7 @@ async function syncDirectoryPhotos({ size = 'full', force = false, concurrency =
   fs.mkdirSync(PHOTO_DIR, { recursive: true });
 
   const manifest = readManifest();
-  const all      = await listFamilyPhotos();
+  const all      = await listFamilies();
   const withPhoto = all.filter(f => f.hasPhoto);
   const targets   = limit > 0 ? withPhoto.slice(0, limit) : withPhoto;
 
@@ -123,4 +123,82 @@ async function syncDirectoryPhotos({ size = 'full', force = false, concurrency =
   };
 }
 
-module.exports = { PHOTO_DIR, MANIFEST, sniffExt, readManifest, listFamilyPhotos, syncDirectoryPhotos };
+
+/**
+ * Scrape the directory as the church site structures it: one record per family,
+ * with members attached. Replaces address-based grouping — the global vCard
+ * export silently omits members that the per-family exports include.
+ *
+ * Costs one request for the family list plus one per family, so it is meant for
+ * the scheduled scrape rather than per-page-load.
+ */
+async function scrapeDirectory({ photos = true, concurrency = 5 } = {}) {
+  const listed   = await listFamilies();
+  const warnings = [];
+
+  // Photo files are downloaded first so each family can carry its filename.
+  let photoSummary = null;
+  if (photos) {
+    try {
+      ({ summary: photoSummary } = await syncDirectoryPhotos({ concurrency }));
+    } catch (e) {
+      warnings.push(`directory photos: ${e.message}`);
+    }
+  }
+  const manifest = readManifest();
+
+  const families = [];
+  const members  = [];
+
+  await mapLimit(listed, concurrency, async fam => {
+    let famMembers = [];
+    try {
+      const res = await fetchPage(`/members/directory/vcard/${fam.familyId}`);
+      if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
+      famMembers = parseDirectory(res.body);
+    } catch (e) {
+      warnings.push(`family ${fam.familyId} (${fam.familyName}): ${e.message}`);
+      return;
+    }
+
+    if (famMembers.length === 0) {
+      warnings.push(`family ${fam.familyId} (${fam.familyName}): no members in vCard`);
+      return;
+    }
+
+    // Members of a family share a mailing address; take it from the first.
+    const [first] = famMembers;
+    const entry   = manifest.families[fam.familyId];
+
+    families.push({
+      id:           Number(fam.familyId),
+      name:         fam.familyName,
+      address:      first.address || '',
+      city:         first.city    || '',
+      state:        first.state   || '',
+      zip:          first.zip     || '',
+      photoFile:    fam.hasPhoto && entry ? entry.file : '',
+      photoVersion: fam.hasPhoto && entry ? entry.version : '',
+    });
+
+    for (const m of famMembers) members.push({ ...m, familyId: Number(fam.familyId) });
+  });
+
+  families.sort((a, b) => a.name.localeCompare(b.name));
+  members.sort((a, b) => a.name.localeCompare(b.name));
+
+  return {
+    families,
+    members,
+    warnings,
+    summary: {
+      families:     families.length,
+      members:      members.length,
+      listed:       listed.length,
+      withPhoto:    families.filter(f => f.photoFile).length,
+      photos:       photoSummary,
+    },
+  };
+}
+
+module.exports = { PHOTO_DIR, MANIFEST, sniffExt, readManifest, listFamilies, syncDirectoryPhotos, scrapeDirectory };

@@ -179,7 +179,7 @@ function parseDirectory(vcf) {
 // shared `no-image` placeholder, flagged here so callers can skip downloading it.
 const NO_IMAGE_RE = /no-image/i;
 
-function parseDirectoryPhotos(html) {
+function parseDirectoryFamilies(html) {
   const families = [];
   const cardRe = /<a class="c-card" href="\/members\/directory\/family\/(\d+)">([\s\S]*?)<\/a>/g;
 
@@ -220,5 +220,5 @@ module.exports = {
   parseDeacons,
   parseBulletins,
   parseDirectory,
-  parseDirectoryPhotos,
+  parseDirectoryFamilies,
 };

@@ -199,6 +199,36 @@ db.exec(`
     notes   TEXT NOT NULL DEFAULT ''
   );
   CREATE INDEX IF NOT EXISTS idx_directory_name ON directory(name);
+
+  -- Families as the church site defines them; id is the site's own family id.
+  CREATE TABLE IF NOT EXISTS directory_families (
+    id            INTEGER PRIMARY KEY,
+    name          TEXT NOT NULL DEFAULT '',
+    address       TEXT NOT NULL DEFAULT '',
+    city          TEXT NOT NULL DEFAULT '',
+    state         TEXT NOT NULL DEFAULT '',
+    zip           TEXT NOT NULL DEFAULT '',
+    photo_file    TEXT NOT NULL DEFAULT '',
+    photo_version TEXT NOT NULL DEFAULT ''
+  );
+  CREATE INDEX IF NOT EXISTS idx_directory_families_name ON directory_families(name);
 `);
+
+// ─── Migrations ───────────────────────────────────────────────────────────────
+
+// Add a column to an existing table if it isn't there yet. SQLite has no
+// `ADD COLUMN IF NOT EXISTS`, and CREATE TABLE IF NOT EXISTS above is a no-op
+// for databases created before the column existed.
+function addColumnIfMissing(table, column, definition) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (cols.some(c => c.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  console.log(`[db] migrated: ${table}.${column} added`);
+}
+
+// Members are linked to a scraped family; NULL means unassigned (e.g. added by
+// hand in the admin UI, or scraped before family data existed).
+addColumnIfMissing('directory', 'family_id', 'INTEGER');
+db.exec('CREATE INDEX IF NOT EXISTS idx_directory_family ON directory(family_id);');
 
 module.exports = db;

@@ -6,7 +6,7 @@ const {
   parseAnniversaries,
   parseDeacons,
   parseBulletins,
-  parseDirectoryPhotos,
+  parseDirectoryFamilies,
 } = require('../lib/parsers');
 
 // ─── stripTags ────────────────────────────────────────────────────────────────
@@ -186,9 +186,9 @@ describe('parseBulletins', () => {
   });
 });
 
-// ─── parseDirectoryPhotos ─────────────────────────────────────────────────────
+// ─── parseDirectoryFamilies ─────────────────────────────────────────────────────
 
-describe('parseDirectoryPhotos', () => {
+describe('parseDirectoryFamilies', () => {
   const card = (id, src, title) =>
     `<a class="c-card" href="/members/directory/family/${id}">` +
     `<div class="c-thumb"><img src="${src}" alt="" loading="lazy"></div>` +
@@ -199,7 +199,7 @@ describe('parseDirectoryPhotos', () => {
     card('999', '/media/frontend/members/no-image.jpg', 'Reaves, Will');
 
   test('extracts family id, name, and photo urls', () => {
-    const [fam] = parseDirectoryPhotos(html);
+    const [fam] = parseDirectoryFamilies(html);
     expect(fam).toMatchObject({
       familyId:   '328',
       familyName: 'Allen, Josh & Tylan (Lincoln, and Saylor)',
@@ -211,15 +211,15 @@ describe('parseDirectoryPhotos', () => {
   });
 
   test('flags the shared placeholder as having no photo', () => {
-    expect(parseDirectoryPhotos(html)[1]).toMatchObject({ familyId: '999', hasPhoto: false });
+    expect(parseDirectoryFamilies(html)[1]).toMatchObject({ familyId: '999', hasPhoto: false });
   });
 
   test('ignores cards without an image', () => {
     const noImg = '<a class="c-card" href="/members/directory/family/5"><h2 class="c-title">X</h2></a>';
-    expect(parseDirectoryPhotos(noImg)).toEqual([]);
+    expect(parseDirectoryFamilies(noImg)).toEqual([]);
   });
 
   test('returns empty for html with no family cards', () => {
-    expect(parseDirectoryPhotos('<html><body>nothing here</body></html>')).toEqual([]);
+    expect(parseDirectoryFamilies('<html><body>nothing here</body></html>')).toEqual([]);
   });
 });

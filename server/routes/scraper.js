@@ -16,6 +16,7 @@ const {
   resetSession,
   fetchPage,
 } = require('../lib/capshawClient');
+const { scrapeDirectory } = require('../lib/directory');
 
 // ─── HTML parsers ─────────────────────────────────────────────────────────────
 
@@ -27,7 +28,6 @@ const {
   parseAnniversaries,
   parseDeacons,
   parseBulletins,
-  parseDirectory,
 } = require('../lib/parsers');
 
 // ─── Persistence (SQLite primary, JSON backup) ────────────────────────────────
@@ -81,10 +81,17 @@ const _saveScraped = db.transaction((data) => {
   const insBulletin = db.prepare('INSERT INTO bulletins (url, label) VALUES (?, ?)');
   for (const b of (data.bulletins || [])) insBulletin.run(b.url, b.label);
 
-  // Directory
+  // Directory — families first, then members pointing at them
   db.prepare('DELETE FROM directory').run();
-  const insDir = db.prepare('INSERT INTO directory (name, address, city, state, zip, phone, cell, email, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
-  for (const d of (data.directory || [])) insDir.run(d.name, d.address || '', d.city || '', d.state || '', d.zip || '', d.phone || '', d.cell || '', d.email || '', d.notes || '');
+  db.prepare('DELETE FROM directory_families').run();
+  const insFam = db.prepare('INSERT INTO directory_families (id, name, address, city, state, zip, photo_file, photo_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+  for (const f of (data.directoryFamilies || [])) {
+    insFam.run(f.id, f.name || '', f.address || '', f.city || '', f.state || '', f.zip || '', f.photoFile || '', f.photoVersion || '');
+  }
+  const insDir = db.prepare('INSERT INTO directory (name, address, city, state, zip, phone, cell, email, notes, family_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+  for (const d of (data.directory || [])) {
+    insDir.run(d.name, d.address || '', d.city || '', d.state || '', d.zip || '', d.phone || '', d.cell || '', d.email || '', d.notes || '', d.familyId ?? null);
+  }
 
   // Meta
   db.prepare('INSERT OR REPLACE INTO scraped_meta (id, last_updated, last_warnings) VALUES (1, ?, ?)').run(
@@ -183,9 +190,8 @@ async function runUpdate() {
       fetchPage('/members/anniversaries-members-non-members').catch(e => ({ body: '', status: 0, _err: e.message })),
       fetchPage('/members/deacons').catch(e => ({ body: '', status: 0, _err: e.message })),
       fetchPage('/members'),
-      fetchPage('/members/directory/vcard').catch(e => ({ body: '', status: 0, _err: e.message })),
     ]);
-    const [jaPage, attPage, serPage, visPage, annPage, deaPage, dashPage, dirPage] = pages;
+    const [jaPage, attPage, serPage, visPage, annPage, deaPage, dashPage] = pages;
 
     if (attPage.url && attPage.url.includes('login')) {
       throw new Error('Session expired or login failed — check credentials in .env');
@@ -210,17 +216,30 @@ async function runUpdate() {
 
     const existing = readData() || {};
 
+    // The directory is scraped per family (see lib/directory.js): the site's own
+    // grouping, and it includes members the global vCard export leaves out.
+    let directory = { families: existing.directoryFamilies || [], members: existing.directory || [] };
+    try {
+      const scraped = await scrapeDirectory();
+      warnings.push(...scraped.warnings);
+      if (scraped.families.length === 0) throw new Error('no families returned');
+      directory = { families: scraped.families, members: scraped.members };
+    } catch (e) {
+      warnings.push(`directory: scrape failed — ${e.message}`);
+    }
+
     const data = {
       lastUpdated:    new Date().toISOString(),
       warnings,
-      jobAssignments: tryParse('jobAssignments', jaPage, parseJobAssignments, existing.jobAssignments || []),
-      attendance:     parseAttendance(attPage.body),
-      sermons:        tryParse('sermons', serPage, parseSermons, existing.sermons || []),
-      visitors:       tryParse('visitors', visPage, parseVisitors, existing.visitors || []),
-      anniversaries:  tryParse('anniversaries', annPage, parseAnniversaries, existing.anniversaries || []),
-      deacons:        tryParse('deacons', deaPage, parseDeacons, existing.deacons || []),
-      bulletins:      parseBulletins(dashPage.body),
-      directory:      tryParse('directory', dirPage, parseDirectory, existing.directory || []),
+      jobAssignments:    tryParse('jobAssignments', jaPage, parseJobAssignments, existing.jobAssignments || []),
+      attendance:        parseAttendance(attPage.body),
+      sermons:           tryParse('sermons', serPage, parseSermons, existing.sermons || []),
+      visitors:          tryParse('visitors', visPage, parseVisitors, existing.visitors || []),
+      anniversaries:     tryParse('anniversaries', annPage, parseAnniversaries, existing.anniversaries || []),
+      deacons:           tryParse('deacons', deaPage, parseDeacons, existing.deacons || []),
+      bulletins:         parseBulletins(dashPage.body),
+      directory:         directory.members,
+      directoryFamilies: directory.families,
     };
 
     saveData(data);
@@ -257,4 +276,4 @@ router.get('/status', (req, res) => {
 });
 
 
-module.exports = { router, runUpdate, readData, parseCookies, cookieStr, mergeCookieStr };
+module.exports = { router, runUpdate, readData, saveScraped: _saveScraped, parseCookies, cookieStr, mergeCookieStr };
