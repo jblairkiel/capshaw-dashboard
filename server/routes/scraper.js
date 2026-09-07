@@ -3,148 +3,20 @@ const express = require('express');
 const router  = express.Router();
 const { requireApproved, requireAdmin } = require('../middleware/auth');
 const { syncDirectory } = require('../lib/directorySync');
-const https   = require('https');
-const http    = require('http');
-const qs      = require('querystring');
 const fs      = require('fs');
 const path    = require('path');
 const db      = require('../db');
 
 const DATA_FILE = path.join(__dirname, '../data/members.json');
 
-const httpsAgent = new https.Agent({ keepAlive: false });
-const httpAgent  = new http.Agent({ keepAlive: false });
-
-// ─── HTTP helpers ─────────────────────────────────────────────────────────────
-
-function parseCookies(headers) {
-  const c = {};
-  if (!headers) return c;
-  (Array.isArray(headers) ? headers : [headers]).forEach(h => {
-    const [pair] = h.split(';');
-    const idx = pair.indexOf('=');
-    if (idx > 0) c[pair.slice(0, idx).trim()] = pair.slice(idx + 1).trim();
-  });
-  return c;
-}
-
-function cookieStr(obj) {
-  return Object.entries(obj).map(([k, v]) => `${k}=${v}`).join('; ');
-}
-
-function mergeCookieStr(existingStr, newObj) {
-  const map = {};
-  (existingStr || '').split(';').forEach(p => {
-    const t = p.trim(); const i = t.indexOf('=');
-    if (i > 0) map[t.slice(0, i)] = t.slice(i + 1);
-  });
-  return cookieStr({ ...map, ...newObj });
-}
-
-function rawGet(urlStr, cookieHeader) {
-  return new Promise((resolve, reject) => {
-    const u     = new URL(urlStr);
-    const lib   = u.protocol === 'https:' ? https : http;
-    const agent = u.protocol === 'https:' ? httpsAgent : httpAgent;
-    lib.get({
-      agent, hostname: u.hostname, path: u.pathname + u.search,
-      headers: { 'User-Agent': 'Mozilla/5.0', 'Connection': 'close', 'Cookie': cookieHeader || '' },
-    }, res => {
-      const sc  = parseCookies(res.headers['set-cookie']);
-      const loc = res.headers.location;
-      let body  = '';
-      res.on('data', d => (body += d));
-      res.on('end', () => resolve({ status: res.statusCode, url: urlStr, body, setCookies: sc, location: loc }));
-    }).on('error', reject);
-  });
-}
-
-async function getFollowingRedirects(urlStr, cookieHeader, max = 8) {
-  let current = urlStr;
-  let ck      = cookieHeader;
-  for (let i = 0; i < max; i++) {
-    const r = await rawGet(current, ck);
-    if (!r.location || r.status < 300 || r.status >= 400) return r;
-    ck      = mergeCookieStr(ck, r.setCookies);
-    current = r.location.startsWith('http') ? r.location : new URL(current).origin + r.location;
-  }
-  return rawGet(current, ck);
-}
-
-// ─── Auth ─────────────────────────────────────────────────────────────────────
-
-let _sessionCookies = null;
-let _sessionExpiry  = 0;
-let _loginPromise   = null;
-
-async function getSession() {
-  if (_sessionCookies && Date.now() < _sessionExpiry) return _sessionCookies;
-  if (_loginPromise) return _loginPromise;
-
-  _loginPromise = (async () => {
-    const username = process.env.CAPSHAW_MEMBER_USERNAME;
-    const password = process.env.CAPSHAW_MEMBER_PASSWORD;
-    if (!username || !password) throw new Error('CAPSHAW_MEMBER_USERNAME / PASSWORD not set in .env');
-
-    const loginGet = await rawGet('https://capshawchurch.org/members/login', '');
-    let cookies    = loginGet.setCookies;
-    const csrf     = loginGet.body.match(/name="_token"\s+value="([^"]+)"/)?.[1];
-    if (!csrf) throw new Error('Could not find CSRF token on login page');
-
-    const body = qs.stringify({ _token: csrf, username, password, remember: '1' });
-
-    const postResult = await new Promise((resolve, reject) => {
-      const req = https.request({
-        agent: httpsAgent,
-        hostname: 'capshawchurch.org',
-        path: '/members/login',
-        method: 'POST',
-        headers: {
-          'User-Agent': 'Mozilla/5.0',
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Content-Length': Buffer.byteLength(body),
-          'Cookie': cookieStr(cookies),
-          'Referer': 'https://capshawchurch.org/members/login',
-          'Origin': 'https://capshawchurch.org',
-          'Connection': 'close',
-        },
-      }, res => {
-        const sc = parseCookies(res.headers['set-cookie']);
-        let b    = '';
-        res.on('data', d => (b += d));
-        res.on('end', () => resolve({ status: res.statusCode, setCookies: sc, location: res.headers.location, body: b }));
-      });
-      req.on('error', reject);
-      req.write(body);
-      req.end();
-    });
-
-    if (postResult.status !== 302 || !postResult.location) {
-      const msg = postResult.body.match(/class="[^"]*alert[^"]*"[^>]*>\s*([^<]{5,})/)?.[1] || 'Login failed';
-      throw new Error(msg.trim());
-    }
-
-    cookies = { ...cookies, ...postResult.setCookies };
-    let loc = postResult.location;
-    if (!loc.startsWith('http')) loc = 'https://capshawchurch.org' + loc;
-
-    const warm = await getFollowingRedirects(loc, cookieStr(cookies));
-    const all  = { ...cookies, ...warm.setCookies };
-
-    _sessionCookies = cookieStr(all);
-    _sessionExpiry  = Date.now() + 90 * 60 * 1000;
-    _loginPromise   = null;
-    return _sessionCookies;
-  })();
-
-  _loginPromise.catch(() => { _loginPromise = null; });
-  return _loginPromise;
-}
-
-async function fetchPage(path) {
-  const ck = await getSession();
-  return getFollowingRedirects(`https://capshawchurch.org${path}`, ck);
-}
+const {
+  parseCookies,
+  cookieStr,
+  mergeCookieStr,
+  resetSession,
+  fetchPage,
+} = require('../lib/capshawClient');
+const { scrapeDirectory } = require('../lib/directoryPhotos');
 
 // ─── HTML parsers ─────────────────────────────────────────────────────────────
 
@@ -156,7 +28,7 @@ const {
   parseAnniversaries,
   parseDeacons,
   parseBulletins,
-  parseDirectory,
+  parseDirectoryFamilies,
   extractTablesPreservingCells,
 } = require('../lib/parsers');
 
@@ -225,7 +97,15 @@ const _saveScraped = db.transaction((data) => {
 
   // Directory — upserted, never wiped: accounts and worship preferences are
   // keyed on these ids, and hand-edited fields must survive a re-scrape.
-  syncDirectory(db, data.directory || []);
+  //
+  // syncDirectory removes people the site no longer lists, so an empty list
+  // would clear the directory and prune its photos. A failed scrape looks
+  // exactly like an empty one, so it is skipped rather than trusted.
+  if (Array.isArray(data.directory) && data.directory.length > 0) {
+    syncDirectory(db, data.directory);
+  } else {
+    console.warn('[scraper] directory not synced — the scrape returned nobody');
+  }
 
   // Meta
   db.prepare('INSERT OR REPLACE INTO scraped_meta (id, last_updated, last_warnings) VALUES (1, ?, ?)').run(
@@ -322,7 +202,7 @@ const DEBUG_SECTIONS = {
   visitors:       { path: '/members/visitor-tracker',                       parser: parseVisitors },
   anniversaries:  { path: '/members/anniversaries-members-non-members',     parser: parseAnniversaries },
   deacons:        { path: '/members/deacons',                               parser: parseDeacons },
-  directory:      { path: '/members/directory/vcard',                       parser: parseDirectory },
+  directory:      { path: '/members/directory',                             parser: parseDirectoryFamilies },
 };
 
 router.get('/debug/:section', requireAdmin, async (req, res) => {
@@ -370,11 +250,14 @@ router.get('/debug/:section', requireAdmin, async (req, res) => {
         sample: rows.slice(0, 3).map(r => (r && r.photo ? { ...r, photo: '(photo)' } : r)),
       };
 
+      // Photos hang off families, so the useful question for this section is
+      // how many families the page offered and how many carry a real portrait
+      // rather than the shared placeholder.
       if (req.params.section === 'directory') {
         report.photos = {
-          embedded: rows.filter(r => r.photo?.base64).length,
-          urlOnly:  rows.filter(r => r.photo?.url).length,
-          none:     rows.filter(r => !r.photo).length,
+          families:    rows.length,
+          withPhoto:   rows.filter(r => r.hasPhoto).length,
+          placeholder: rows.filter(r => !r.hasPhoto).length,
         };
       }
     }
@@ -394,9 +277,7 @@ async function runUpdate() {
   _updateInProgress = true;
   const warnings = [];
   try {
-    _sessionCookies = null;
-    _sessionExpiry  = 0;
-    _loginPromise   = null;
+    resetSession();
 
     const pages = await Promise.all([
       fetchPage('/members/job-assignments').catch(e => ({ body: '', status: 0, _err: e.message })),
@@ -406,9 +287,8 @@ async function runUpdate() {
       fetchPage('/members/anniversaries-members-non-members').catch(e => ({ body: '', status: 0, _err: e.message })),
       fetchPage('/members/deacons').catch(e => ({ body: '', status: 0, _err: e.message })),
       fetchPage('/members'),
-      fetchPage('/members/directory/vcard').catch(e => ({ body: '', status: 0, _err: e.message })),
     ]);
-    const [jaPage, attPage, serPage, visPage, annPage, deaPage, dashPage, dirPage] = pages;
+    const [jaPage, attPage, serPage, visPage, annPage, deaPage, dashPage] = pages;
 
     if (attPage.url && attPage.url.includes('login')) {
       throw new Error('Session expired or login failed — check credentials in .env');
@@ -433,6 +313,31 @@ async function runUpdate() {
 
     const existing = readData() || {};
 
+    // The directory is scraped family by family (see lib/directoryPhotos.js):
+    // that is where the photos are, and the per-family vCards list people the
+    // global export leaves out. If it fails we keep the last good copy rather
+    // than handing syncDirectory an empty list.
+    let directory = _readDataFromJson()?.directory || [];
+    try {
+      // Photos already downloaded keep their file unless the site's version
+      // changed. readData() rebuilds from SQLite, which carries neither the
+      // family id nor the photo version, so the previous scrape's own copy is
+      // the only place this can come from.
+      const previous = _readDataFromJson()?.directory || [];
+      const known = new Map(
+        previous
+          .filter(p => p.familyId && p.photo?.file)
+          .map(p => [p.familyId, p.photo])
+      );
+      const scraped = await scrapeDirectory({ known });
+      warnings.push(...scraped.warnings);
+      directory = scraped.people;
+      console.log(`[scraper] directory — ${scraped.summary.people} people in ${scraped.summary.families} families, ` +
+                  `${scraped.summary.photos} photos downloaded, ${scraped.summary.photosReused} unchanged`);
+    } catch (e) {
+      warnings.push(`directory: scrape failed — ${e.message}`);
+    }
+
     const data = {
       lastUpdated:    new Date().toISOString(),
       warnings,
@@ -443,7 +348,7 @@ async function runUpdate() {
       anniversaries:  tryParse('anniversaries', annPage, parseAnniversaries, existing.anniversaries || []),
       deacons:        tryParse('deacons', deaPage, parseDeacons, existing.deacons || []),
       bulletins:      parseBulletins(dashPage.body),
-      directory:      tryParse('directory', dirPage, parseDirectory, existing.directory || []),
+      directory:      directory,
     };
 
     saveData(data);
