@@ -36,6 +36,9 @@
     "testEnvironment": "node",
     "testMatch": [
       "**/server/tests/**/*.test.js"
+    ],
+    "setupFiles": [
+      "<rootDir>/server/tests/helpers/isolatePhotos.js"
     ]
   }
 }
