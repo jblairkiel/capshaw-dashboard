@@ -33,9 +33,14 @@ function syncDirectory(db, people, options = {}) {
     const match = candidates.find(c => !seen.has(c.id) && c.address === (person.address || ''))
                ?? candidates.find(c => !seen.has(c.id));
 
-    // A photo may arrive inline as base64, or as a URL we do not download.
+    // A photo arrives either already in the store (the directory scrape
+    // downloads family portraits and hands back the filename), inline as
+    // base64, or as a URL we do not download.
     let photoFile = null;
-    if (person.photo?.base64 && savePhoto) {
+    if (person.photo?.file) {
+      photoFile = person.photo.file;
+      summary.photos++;
+    } else if (person.photo?.base64 && savePhoto) {
       photoFile = savePhoto(person.photo);
       if (photoFile) summary.photos++;
     } else if (person.photo?.url) {
@@ -88,10 +93,15 @@ function syncDirectory(db, people, options = {}) {
   const del = db.prepare('DELETE FROM directory WHERE id = ?');
   for (const id of removable) { del.run(id); summary.removed++; }
 
-  // Drop photo files nothing points at any more.
+  // Drop photo files nothing points at any more — but never on the strength of
+  // an empty reference set. A directory with no photos in it is what a fresh
+  // database, a failed scrape, or a test fixture all look like, and none of
+  // them is a reason to empty the store.
   if (savePhoto === defaultSavePhoto) {
     const referenced = db.prepare("SELECT photo FROM directory WHERE photo <> ''").all().map(r => r.photo);
-    try { require('./photoStore').pruneUnreferenced(referenced); } catch { /* non-fatal */ }
+    if (referenced.length > 0) {
+      try { require('./photoStore').pruneUnreferenced(referenced); } catch { /* non-fatal */ }
+    }
   }
 
   return summary;
