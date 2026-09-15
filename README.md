@@ -85,8 +85,19 @@ change them.
 | Directory, Database, User roles | — | ✅ |
 
 New sign-ins land on `pending`. An admin promotes them from **Admin → Users &
-Roles**, either with the one-click **Approve** button or the per-user role
-selector.
+Roles**, either with the one-click **Approve** button in the grid or from the
+user's detail panel.
+
+**The users grid.** Accounts are listed in a sortable, filterable grid. Every
+column carries its own filter — free text for names, emails, directory links
+and dates, a picker for role and sign-in provider — and the filters combine.
+Clicking a row (or its **Manage** button) opens a detail panel holding
+everything you can do to that account: assign a role, link it to a directory
+entry, or remove it. The **Columns** menu chooses which columns are shown and
+remembers the choice in a cookie (`capshaw.users.columns`, a preference only —
+no account data), so the grid comes back the way it was left. Columns the build
+no longer has are dropped when the cookie is read, and the name column is always
+shown.
 
 Roles are enforced on the server by `server/middleware/auth.js`:
 `requireApproved` guards the member routes (Bible class, lesson planner, site
