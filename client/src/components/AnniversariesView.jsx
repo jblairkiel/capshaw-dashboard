@@ -50,7 +50,7 @@ export default function AnniversariesView({ data }) {
 
   return (
     <div className="space-y-5">
-      <h2 className="section-heading">Anniversaries</h2>
+      <h2 className="section-heading">Birthdays &amp; Anniversaries</h2>
 
       {/* Metrics */}
       <div className="grid grid-cols-3 gap-4">

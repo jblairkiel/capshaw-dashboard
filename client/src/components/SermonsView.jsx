@@ -27,7 +27,7 @@ export default function SermonsView({ data }) {
 
   return (
     <div className="space-y-4">
-      <h2 className="section-heading">Sermon Archive</h2>
+      <h2 className="section-heading">Sermons</h2>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-center">

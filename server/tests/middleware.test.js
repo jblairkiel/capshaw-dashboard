@@ -1,4 +1,4 @@
-const { requireAuth, requireApproved, requireAdmin, requireRole, hasRole, isRole, ROLES } = require('../middleware/auth');
+const { requireAuth, requireApproved, requireAdmin, requireRole, requireSiteAuth, isPublicApiPath, hasRole, isRole, ROLES } = require('../middleware/auth');
 
 function mockRes() {
   const res = {};
@@ -141,5 +141,45 @@ describe('role model', () => {
     expect(next).not.toHaveBeenCalled();
     expect(res.status).toHaveBeenCalledWith(403);
     expect(res.json).toHaveBeenCalledWith({ success: false, error: 'Nope' });
+  });
+});
+
+// ─── requireSiteAuth ─────────────────────────────────────────────────────────
+
+describe('requireSiteAuth', () => {
+  const gate = (path, user = null) => {
+    const res  = mockRes();
+    const next = jest.fn();
+    requireSiteAuth({ path, user }, res, next);
+    return { res, next };
+  };
+
+  test('lets the sign-in flow through while signed out', () => {
+    for (const path of ['/auth', '/auth/me', '/auth/google', '/auth/google/callback', '/health']) {
+      const { res, next } = gate(path);
+      expect(next).toHaveBeenCalledTimes(1);
+      expect(res.status).not.toHaveBeenCalled();
+    }
+  });
+
+  test('refuses every other API path while signed out', () => {
+    for (const path of ['/members/data', '/announcements', '/songs', '/profile/me', '/workflows']) {
+      const { res, next } = gate(path);
+      expect(next).not.toHaveBeenCalled();
+      expect(res.status).toHaveBeenCalledWith(401);
+    }
+  });
+
+  test('lets a signed-in member through anywhere', () => {
+    const { res, next } = gate('/members/data', { id: 1, role: 'pending' });
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(res.status).not.toHaveBeenCalled();
+  });
+
+  test('a path that merely starts with a public name is not public', () => {
+    for (const path of ['/authors', '/health-records']) {
+      expect(isPublicApiPath(path)).toBe(false);
+      expect(gate(path).next).not.toHaveBeenCalled();
+    }
   });
 });

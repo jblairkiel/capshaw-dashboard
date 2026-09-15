@@ -1,5 +1,6 @@
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
+import App from '../App';
 import LoginPage from '../components/LoginPage';
 import AnnouncementsView from '../components/AnnouncementsView';
 import UsersView from '../components/UsersView';
@@ -20,6 +21,61 @@ describe('LoginPage', () => {
     const link = screen.getByRole('link', { name: /sign in with facebook/i });
     expect(link).toBeInTheDocument();
     expect(link.getAttribute('href')).toBe('/api/auth/facebook');
+  });
+
+  test('welcomes the church family rather than staff', () => {
+    render(<LoginPage />);
+    expect(screen.getByText(/member portal/i)).toBeInTheDocument();
+    expect(screen.getByText(/members and friends of Capshaw Church of Christ/i)).toBeInTheDocument();
+    expect(screen.queryByText(/staff/i)).not.toBeInTheDocument();
+  });
+
+  test('offers no way past the sign-in', () => {
+    render(<LoginPage />);
+    expect(screen.queryByText(/continue without signing in/i)).not.toBeInTheDocument();
+  });
+});
+
+// ─── App — the site is signed-in only ─────────────────────────────────────────
+
+function mockApi(user) {
+  const fetchMock = vi.fn(url => {
+    if (url.startsWith('/api/auth/me')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ user }) });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true, data: null }) });
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+describe('App — site-wide sign-in gate', () => {
+  const portalFooter = /Capshaw Church of Christ — Member Portal/;
+
+  test('shows the sign-in page, and no portal content, when signed out', async () => {
+    mockApi(null);
+    render(<App />);
+    expect(await screen.findByRole('link', { name: /sign in with google/i })).toBeInTheDocument();
+    expect(screen.queryByText(portalFooter)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /refresh/i })).not.toBeInTheDocument();
+  });
+
+  test('shows the portal once a member is signed in', async () => {
+    mockApi({ id: 1, name: 'Mel', role: 'approved' });
+    render(<App />);
+    expect(await screen.findByText(portalFooter)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /sign in with google/i })).not.toBeInTheDocument();
+  });
+
+  test('signing out drops straight back to the sign-in page', async () => {
+    mockApi({ id: 1, name: 'Mel', role: 'approved' });
+    render(<App />);
+    await screen.findByText(portalFooter);
+
+    fireEvent.click(screen.getByRole('button', { name: /Mel/ }));
+    fireEvent.click(screen.getByRole('button', { name: /sign out/i }));
+
+    expect(await screen.findByRole('link', { name: /sign in with google/i })).toBeInTheDocument();
   });
 });
 

@@ -206,7 +206,7 @@ export default function UsersView({ currentUser }) {
   }
 
   async function remove(id, name) {
-    if (!window.confirm(`Remove ${name} from the dashboard? They will need to sign in and be re-approved.`)) return;
+    if (!window.confirm(`Remove ${name} from the member portal? They will need to sign in again and be confirmed.`)) return;
     setNotice('');
     const res  = await fetch(`/api/auth/users/${id}`, { method: 'DELETE' });
     const json = await res.json().catch(() => ({}));
@@ -249,7 +249,7 @@ export default function UsersView({ currentUser }) {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h2 className="section-heading mb-0">Users &amp; Roles</h2>
+        <h2 className="section-heading mb-0">Members &amp; Access</h2>
         <button onClick={load} className="text-sm text-church-gold hover:text-church-navy transition-colors">
           Refresh
         </button>

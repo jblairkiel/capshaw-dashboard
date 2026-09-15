@@ -38,7 +38,7 @@ describe('MyProfileView', () => {
     render(<MyProfileView user={{ email: 'ray@example.com' }} />);
     expect(await screen.findByText('Ray Harris')).toBeInTheDocument();
     expect(screen.getByText('Sam Harris')).toBeInTheDocument();
-    expect(screen.getByText(/my household/i)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: /my household/i })).toBeInTheDocument();
   });
 
   test('marks which entry is you', async () => {
@@ -71,7 +71,7 @@ describe('MyProfileView', () => {
   test('tells an unlinked account how to get matched', async () => {
     mockProfile({ linked: false, person: null, household: [] });
     render(<MyProfileView user={{ email: 'nobody@example.com' }} />);
-    expect(await screen.findByText(/isn't matched to a directory entry/i)).toBeInTheDocument();
+    expect(await screen.findByText(/isn't matched to anyone in the church directory/i)).toBeInTheDocument();
     expect(screen.getByText(/nobody@example.com/)).toBeInTheDocument();
   });
 

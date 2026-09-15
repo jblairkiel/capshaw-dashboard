@@ -155,7 +155,7 @@ export default function BibleClassView({ user }) {
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between">
-        <h2 className="section-heading mb-0">Bible Class Apps</h2>
+        <h2 className="section-heading mb-0">Bible Class</h2>
         <p className="text-sm text-gray-400 hidden sm:block">Powered by AI</p>
       </div>
 

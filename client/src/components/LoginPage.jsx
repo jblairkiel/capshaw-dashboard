@@ -3,7 +3,7 @@ const AUTH_ERROR_MESSAGES = {
   facebook: 'Facebook sign-in failed. Please try again.',
 };
 
-export default function LoginPage({ authError, onBack }) {
+export default function LoginPage({ authError }) {
   return (
     <div className="min-h-screen bg-church-cream flex flex-col items-center justify-center px-4">
       <div className="w-full max-w-sm">
@@ -17,9 +17,9 @@ export default function LoginPage({ authError, onBack }) {
             </svg>
           </div>
           <h1 className="text-2xl font-bold text-church-navy" style={{ fontFamily: 'Georgia, serif' }}>
-            Capshaw Dashboard
+            Capshaw Church of Christ
           </h1>
-          <p className="text-gray-500 text-sm mt-1">Church of Christ — Staff Portal</p>
+          <p className="text-gray-500 text-sm mt-1">Member Portal</p>
         </div>
 
         {/* Auth error banner */}
@@ -32,7 +32,8 @@ export default function LoginPage({ authError, onBack }) {
         {/* Sign-in card */}
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-8 space-y-4">
           <p className="text-center text-sm text-gray-600 mb-6">
-            Sign in with your church-approved account to continue.
+            Welcome home. Sign in to see this Sunday&rsquo;s service, our calendar,
+            and everything else our church family shares here.
           </p>
 
           {/* Google */}
@@ -62,17 +63,13 @@ export default function LoginPage({ authError, onBack }) {
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-6">
-          Access is limited to approved church staff.<br />
-          New accounts require manual approval after sign-in.
+          This portal is for members and friends of Capshaw Church of Christ.<br />
+          New to us? Sign in and the church office will confirm you shortly.
         </p>
 
-        {onBack && (
-          <div className="text-center mt-4">
-            <button onClick={onBack} className="text-xs text-gray-400 hover:text-church-navy transition-colors underline underline-offset-2">
-              ← Continue without signing in
-            </button>
-          </div>
-        )}
+        <p className="text-center text-xs text-gray-400 mt-4">
+          8941 Wall Triana Hwy &bull; Harvest, AL
+        </p>
       </div>
     </div>
   );

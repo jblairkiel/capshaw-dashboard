@@ -26,34 +26,36 @@ import { hasWriteAccess, isAdmin } from './lib/roles';
 
 const API = '/api/members';
 
+// Every tab id is unchanged — only the wording is, so the portal reads as a
+// place for the whole church family rather than an internal staff tool.
 const BASE_GROUPS = [
   {
     id: 'worship',
     label: 'Worship',
     items: [
-      { id: 'order',         label: 'Order of Service' },
-      { id: 'songs',         label: 'Song Tracker' },
+      { id: 'order',         label: 'This Sunday' },
+      { id: 'songs',         label: 'Songs We Sing' },
       { id: 'announcements', label: 'Announcements' },
     ],
   },
   {
     id: 'congregation',
-    label: 'Congregation',
+    label: 'Our Church Family',
     items: [
-      { id: 'assignments',   label: 'Job Assignments' },
+      { id: 'assignments',   label: 'Serving Schedule' },
       { id: 'attendance',    label: 'Attendance' },
-      { id: 'visitors',      label: 'Visitors' },
-      { id: 'anniversaries', label: 'Anniversaries' },
-      { id: 'leadership',    label: 'Leadership' },
+      { id: 'visitors',      label: 'Guests' },
+      { id: 'anniversaries', label: 'Birthdays & Anniversaries' },
+      { id: 'leadership',    label: 'Elders & Deacons' },
       { id: 'sermons',       label: 'Sermons' },
     ],
   },
   {
     id: 'resources',
-    label: 'Resources',
+    label: 'Grow',
     items: [
       { id: 'bible-class', label: 'Bible Class' },
-      { id: 'calendar',    label: 'Calendar' },
+      { id: 'calendar',    label: 'Church Calendar' },
     ],
   },
 ];
@@ -61,10 +63,22 @@ const BASE_GROUPS = [
 // Shown to anyone signed in: their own details and worship preferences.
 const PROFILE_GROUP = {
   id: 'me',
-  label: 'My Info',
+  label: 'My Church',
   items: [
-    { id: 'profile',   label: 'My Info & Preferences' },
+    { id: 'profile',   label: 'My Household & Preferences' },
     { id: 'inbox',     label: 'My Inbox' },
+  ],
+};
+
+// Everything the church office looks after on the congregation's behalf.
+const OFFICE_GROUP = {
+  id: 'admin',
+  label: 'Church Office',
+  items: [
+    { id: 'users',       label: 'Members & Access' },
+    { id: 'database',    label: 'Church Records' },
+    { id: 'directory',   label: 'Member Directory' },
+    { id: 'mail-groups', label: 'Email Groups' },
   ],
 };
 
@@ -129,30 +143,15 @@ function NavDropdown({ group, activeTab, onSelect }) {
 }
 
 
-function MainApp() {
-  const [activeTab,   setActiveTab]   = useState('assignments');
+function MainApp({ user, onLogout }) {
+  const [activeTab,   setActiveTab]   = useState('order');
   const [siteData,    setSiteData]    = useState(null);
   const [updating,    setUpdating]    = useState(false);
   const [updateError,    setUpdateError]    = useState('');
   const [updateWarnings, setUpdateWarnings] = useState([]);
-  const [user,        setUser]        = useState(undefined); // undefined=loading, null=not authed
-  const [showLogin,   setShowLogin]   = useState(() =>
-    !!new URLSearchParams(window.location.search).get('auth_error')
-  );
 
-  const authError = new URLSearchParams(window.location.search).get('auth_error');
-
-  // Load current auth session
+  // Load scraped data. Everyone here is signed in — the app root sees to that.
   useEffect(() => {
-    fetch('/api/auth/me')
-      .then(r => r.ok ? r.json() : null)
-      .then(j => setUser(j?.user ?? null))
-      .catch(() => setUser(null));
-  }, []);
-
-  // Load scraped data — re-runs when auth resolves so a login mid-session still loads data
-  useEffect(() => {
-    if (user === undefined) return; // still checking auth, wait
     fetch(`${API}/data`, { credentials: 'include' })
       .then(r => r.json())
       .then(j => { if (j.success && j.data) setSiteData(j.data); })
@@ -178,26 +177,12 @@ function MainApp() {
     }
   }, []);
 
-  // Auth loading
-  if (user === undefined) {
-    return (
-      <div className="min-h-screen bg-church-cream flex items-center justify-center">
-        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-church-gold" />
-      </div>
-    );
-  }
-
-  // Show login page when explicitly requested or after an OAuth redirect error
-  if (user === null && showLogin) {
-    return <LoginPage authError={authError} onBack={() => setShowLogin(false)} />;
-  }
-
   const canWrite = hasWriteAccess(user);
   const admin    = isAdmin(user);
   const GROUPS = [
     ...BASE_GROUPS,
-    ...(user ? [PROFILE_GROUP] : []),
-    ...(admin ? [{ id: 'admin', label: 'Admin', items: [{ id: 'users', label: 'Users & Roles' }, { id: 'database', label: 'Database' }, { id: 'directory', label: 'Directory' }, { id: 'mail-groups', label: 'Email Groups' }] }] : []),
+    PROFILE_GROUP,
+    ...(admin ? [OFFICE_GROUP] : []),
   ];
 
   const lastUpdated = siteData?.lastUpdated
@@ -206,7 +191,7 @@ function MainApp() {
 
   return (
     <div className="min-h-screen bg-church-cream flex flex-col">
-      <Header user={user} onLogout={() => setUser(null)} onSignIn={() => setShowLogin(true)} />
+      <Header user={user} onLogout={onLogout} />
 
       {/* Pending approval banner */}
       {user?.role === 'pending' && (
@@ -215,7 +200,7 @@ function MainApp() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
           </svg>
           <span>
-            <strong>Your account is pending approval.</strong> You can view everything, but creating and editing content requires an admin to approve you as a member.
+            <strong>Welcome! Your account is waiting to be confirmed.</strong> You can look around the whole portal — once the church office confirms you as a member, you will be able to add and edit as well.
           </span>
         </div>
       )}
@@ -263,7 +248,7 @@ function MainApp() {
                       d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                   </svg>
                 )}
-                <span className="hidden sm:inline">{updating ? 'Updating…' : 'Update'}</span>
+                <span className="hidden sm:inline">{updating ? 'Refreshing…' : 'Refresh'}</span>
               </button>
             )}
           </div>
@@ -273,7 +258,7 @@ function MainApp() {
       {/* Error banner */}
       {updateError && (
         <div className="bg-red-50 border-b border-red-200 px-4 py-2 text-sm text-red-700 text-center">
-          Update failed: {updateError}
+          Refresh failed: {updateError}
           <button onClick={() => setUpdateError('')} className="ml-3 underline">dismiss</button>
         </div>
       )}
@@ -282,7 +267,7 @@ function MainApp() {
       {updateWarnings.length > 0 && (
         <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-sm text-amber-800">
           <div className="max-w-6xl mx-auto flex items-start gap-2">
-            <span className="font-medium shrink-0">Update warnings:</span>
+            <span className="font-medium shrink-0">Refresh warnings:</span>
             <ul className="list-disc list-inside space-y-0.5 flex-1">
               {updateWarnings.map((w, i) => <li key={i}>{w}</li>)}
             </ul>
@@ -299,12 +284,14 @@ function MainApp() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                 d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-            <h2 className="text-lg font-semibold text-church-navy mb-2">No data yet</h2>
+            <h2 className="text-lg font-semibold text-church-navy mb-2">Nothing here yet</h2>
             <p className="text-gray-500 text-sm mb-4">
-              Click <strong>Update</strong> to pull the latest data from capshawchurch.org.
+              {canWrite
+                ? <>Choose <strong>Refresh</strong> to pull the latest from capshawchurch.org.</>
+                : <>This page fills in once the church office refreshes it from capshawchurch.org.</>}
             </p>
             {canWrite && (
-              <button onClick={handleUpdate} className="btn-primary">Update Site</button>
+              <button onClick={handleUpdate} className="btn-primary">Refresh from capshawchurch.org</button>
             )}
           </div>
         </div>
@@ -315,8 +302,8 @@ function MainApp() {
         <div className="max-w-6xl mx-auto px-4 py-16 text-center">
           <div className="inline-block bg-white rounded-xl shadow p-8 border border-gray-100">
             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-church-gold mx-auto mb-4" />
-            <p className="text-church-navy font-medium">Scraping capshawchurch.org…</p>
-            <p className="text-gray-400 text-sm mt-1">Logging in and fetching all sections</p>
+            <p className="text-church-navy font-medium">Refreshing from capshawchurch.org…</p>
+            <p className="text-gray-400 text-sm mt-1">Gathering the latest from every section</p>
           </div>
         </div>
       )}
@@ -402,18 +389,44 @@ function MainApp() {
       )}
 
       <footer className="py-6 text-center text-sm text-gray-500 border-t border-gray-200 mt-auto">
-        Capshaw Church of Christ &mdash; Internal Worship Dashboard
+        <p>Capshaw Church of Christ &mdash; Member Portal</p>
+        <p className="text-xs text-gray-400 mt-1">
+          8941 Wall Triana Hwy &bull; Harvest, AL &mdash; for our church family
+        </p>
       </footer>
     </div>
   );
 }
 
+// The whole portal — every page, including the announcement board — is for
+// signed-in members only. Nothing renders until we know who is here.
 export default function App() {
+  const [user, setUser] = useState(undefined); // undefined=checking, null=signed out
+
+  const authError = new URLSearchParams(window.location.search).get('auth_error');
+
+  useEffect(() => {
+    fetch('/api/auth/me', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(j => setUser(j?.user ?? null))
+      .catch(() => setUser(null));
+  }, []);
+
+  if (user === undefined) {
+    return (
+      <div className="min-h-screen bg-church-cream flex items-center justify-center">
+        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-church-gold" />
+      </div>
+    );
+  }
+
+  if (!user) return <LoginPage authError={authError} />;
+
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/display" element={<AnnouncementsDisplay />} />
-        <Route path="/*" element={<MainApp />} />
+        <Route path="/*" element={<MainApp user={user} onLogout={() => setUser(null)} />} />
       </Routes>
     </BrowserRouter>
   );

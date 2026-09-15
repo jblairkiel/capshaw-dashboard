@@ -34,7 +34,7 @@ export default function AttendanceView({ data }) {
 
   return (
     <div className="space-y-4">
-      <h2 className="section-heading">Attendance Records</h2>
+      <h2 className="section-heading">Attendance</h2>
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">

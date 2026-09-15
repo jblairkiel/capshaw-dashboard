@@ -227,7 +227,7 @@ export default function MyProfileView({ user }) {
   if (!data.linked) {
     return (
       <div className="space-y-4">
-        <h2 className="section-heading mb-0">My Info</h2>
+        <h2 className="section-heading mb-0">My Household</h2>
         <EmailPreferences
           notifications={data.notifications}
           onSaved={notifications => setData(prev => prev && ({ ...prev, notifications }))}
@@ -235,12 +235,12 @@ export default function MyProfileView({ user }) {
 
         <div className="card text-center py-10">
           <p className="text-sm text-gray-600">
-            Your sign-in isn&apos;t matched to a directory entry yet, so there is nothing else to edit here.
+            Your sign-in isn&apos;t matched to anyone in the church directory yet, so there is nothing else to edit here.
           </p>
           <p className="text-xs text-gray-400 mt-2">
             We match automatically when your sign-in email is the one in the directory
-            {user?.email ? ` (yours is ${user.email})` : ''}. Ask an admin to link your account from
-            Admin → Users &amp; Roles.
+            {user?.email ? ` (yours is ${user.email})` : ''}. Ask the church office to link your account from
+            Church Office → Members &amp; Access.
           </p>
         </div>
       </div>
@@ -253,7 +253,7 @@ export default function MyProfileView({ user }) {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="section-heading mb-0">My Info</h2>
+        <h2 className="section-heading mb-0">My Household</h2>
         <p className="text-xs text-gray-400 mt-0.5">
           Your details and worship preferences, and those of everyone at your address.
         </p>
@@ -261,7 +261,7 @@ export default function MyProfileView({ user }) {
 
       {!canEdit && (
         <div className="card bg-amber-50 border border-amber-200 text-sm text-amber-800">
-          Your account is pending approval, so this is read-only for now.
+          Your account is still being confirmed, so this is read-only for now.
         </div>
       )}
 
@@ -297,7 +297,7 @@ export default function MyProfileView({ user }) {
 
       <p className="text-xs text-gray-400">
         Household is everyone sharing your street address. If someone is missing or listed at the
-        wrong address, an admin can fix it from the Directory.
+        wrong address, the church office can fix it from the Member Directory.
       </p>
     </div>
   );
