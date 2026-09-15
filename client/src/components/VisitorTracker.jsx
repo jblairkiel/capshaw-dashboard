@@ -23,16 +23,16 @@ export default function VisitorTracker({ data }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h2 className="section-heading mb-0">Visitor Tracker</h2>
+        <h2 className="section-heading mb-0">Our Guests</h2>
         <div className="flex items-center gap-3">
           <input
             type="text"
-            placeholder="Search visitors…"
+            placeholder="Search guests…"
             value={search}
             onChange={e => setSearch(e.target.value)}
             className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-church-navy w-48"
           />
-          <span className="text-xs text-gray-400">{filtered.length} visitor{filtered.length !== 1 ? 's' : ''}</span>
+          <span className="text-xs text-gray-400">{filtered.length} guest{filtered.length !== 1 ? 's' : ''}</span>
         </div>
       </div>
 

@@ -18,6 +18,7 @@ const profileRoutes = require('./routes/profile');
 const workflowRoutes = require('./routes/workflows');
 const mailRoutes = require('./routes/mailGroups');
 const adminRoutes          = require('./routes/admin');
+const { requireSiteAuth }  = require('./middleware/auth');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -54,6 +55,10 @@ app.use(session({
 }));
 app.use(passport.initialize());
 app.use(passport.session());
+
+// Nothing under /api is readable until you have signed in — only the sign-in
+// flow itself and the health check stay open.
+app.use('/api', requireSiteAuth);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/scraper', scraperRoutes);

@@ -88,7 +88,7 @@ export default function JobAssignments({ data }) {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="section-heading mb-1">Job Assignments</h2>
+          <h2 className="section-heading mb-1">Serving Schedule</h2>
           {data.month && <p className="text-sm text-gray-500">{data.month}</p>}
         </div>
         <input

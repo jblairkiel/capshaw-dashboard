@@ -138,7 +138,7 @@ describe('CalendarView', () => {
     expect(screen.queryByRole('button', { name: 'Add event' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByText(/Fellowship Breakfast/));
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
-    expect(screen.getByText(/ask an admin to add or change one/i)).toBeInTheDocument();
+    expect(screen.getByText(/ask the church office to add or change one/i)).toBeInTheDocument();
   });
 
   test('surfaces a load failure instead of an empty grid', async () => {

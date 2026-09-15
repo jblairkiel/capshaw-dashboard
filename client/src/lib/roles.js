@@ -12,15 +12,15 @@ export const ROLES = [
   {
     id:          'pending',
     label:       'Pending',
-    badge:       'Pending approval',
-    description: 'Can view the dashboard, but cannot create or edit anything.',
+    badge:       'Awaiting confirmation',
+    description: 'Can look around the whole portal, but cannot create or edit anything yet.',
     tone:        'bg-orange-100 text-orange-700',
   },
   {
     id:          'approved',
     label:       'Member',
     badge:       'Member',
-    description: 'Bible class and lesson tools, site updates, and their own household\'s details and worship preferences. Announcements, songs and the order of service are read-only.',
+    description: 'Bible class and lesson tools, refreshing the site, and their own household\'s details and worship preferences. Announcements, songs and this Sunday\'s service are read-only.',
     tone:        'bg-green-100 text-green-700',
   },
   {
@@ -34,7 +34,7 @@ export const ROLES = [
     id:          'admin',
     label:       'Admin',
     badge:       'Admin',
-    description: 'Everything above, plus writing announcements, songs and the order of service, managing user roles, and editing every database table directly.',
+    description: 'Everything above, plus writing announcements, songs and this Sunday\'s service, managing who may sign in, and editing every database table directly.',
     tone:        'bg-church-gold/20 text-church-navy',
   },
 ];
@@ -47,7 +47,7 @@ export function hasRole(user, minRole) {
   return (ROLE_RANK[user?.role] ?? -1) >= ROLE_RANK[minRole];
 }
 
-/** Member functions: creating and editing dashboard content. */
+/** Member functions: creating and editing content in the portal. */
 export function hasWriteAccess(user) {
   return hasRole(user, 'approved');
 }

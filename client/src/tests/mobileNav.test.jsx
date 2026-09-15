@@ -5,16 +5,16 @@ import MobileNav from '../components/MobileNav';
 // The same shape App.jsx builds for an admin: five groups, fifteen items. As a
 // row of whitespace-nowrap dropdowns this forced a 375px phone to 681px wide.
 const GROUPS = [
-  { id: 'worship',      label: 'Worship',      items: [
-    { id: 'order', label: 'Order of Service' }, { id: 'songs', label: 'Song Tracker' },
+  { id: 'worship',      label: 'Worship',           items: [
+    { id: 'order', label: 'This Sunday' }, { id: 'songs', label: 'Songs We Sing' },
     { id: 'announcements', label: 'Announcements' } ] },
-  { id: 'congregation', label: 'Congregation', items: [
-    { id: 'assignments', label: 'Job Assignments' }, { id: 'attendance', label: 'Attendance' } ] },
-  { id: 'resources',    label: 'Resources',    items: [{ id: 'calendar', label: 'Calendar' }] },
-  { id: 'me',           label: 'My Info',      items: [{ id: 'profile', label: 'My Info & Preferences' }] },
-  { id: 'admin',        label: 'Admin',        items: [
-    { id: 'users', label: 'Users & Roles' }, { id: 'database', label: 'Database' },
-    { id: 'directory', label: 'Directory' } ] },
+  { id: 'congregation', label: 'Our Church Family', items: [
+    { id: 'assignments', label: 'Serving Schedule' }, { id: 'attendance', label: 'Attendance' } ] },
+  { id: 'resources',    label: 'Grow',              items: [{ id: 'calendar', label: 'Church Calendar' }] },
+  { id: 'me',           label: 'My Church',         items: [{ id: 'profile', label: 'My Household & Preferences' }] },
+  { id: 'admin',        label: 'Church Office',     items: [
+    { id: 'users', label: 'Members & Access' }, { id: 'database', label: 'Church Records' },
+    { id: 'directory', label: 'Member Directory' } ] },
 ];
 
 const panel = () => document.getElementById('mobile-nav-panel');
@@ -24,8 +24,8 @@ describe('MobileNav', () => {
     render(<MobileNav groups={GROUPS} activeTab="assignments" onSelect={vi.fn()} />);
     expect(panel()).toBeNull();
     const button = screen.getByRole('button');
-    expect(button).toHaveTextContent('Job Assignments');
-    expect(button).toHaveTextContent('Congregation');
+    expect(button).toHaveTextContent('Serving Schedule');
+    expect(button).toHaveTextContent('Our Church Family');
     expect(button).toHaveAttribute('aria-expanded', 'false');
   });
 
@@ -49,7 +49,7 @@ describe('MobileNav', () => {
   test('marks the current item', () => {
     render(<MobileNav groups={GROUPS} activeTab="assignments" onSelect={vi.fn()} />);
     fireEvent.click(screen.getByRole('button'));
-    expect(within(panel()).getByRole('button', { name: 'Job Assignments' }).className).toMatch(/font-semibold/);
+    expect(within(panel()).getByRole('button', { name: 'Serving Schedule' }).className).toMatch(/font-semibold/);
     expect(within(panel()).getByRole('button', { name: 'Attendance' }).className).not.toMatch(/font-semibold/);
   });
 
@@ -57,7 +57,7 @@ describe('MobileNav', () => {
     const onSelect = vi.fn();
     render(<MobileNav groups={GROUPS} activeTab="assignments" onSelect={onSelect} />);
     fireEvent.click(screen.getByRole('button'));
-    fireEvent.click(within(panel()).getByRole('button', { name: 'Directory' }));
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Member Directory' }));
 
     expect(onSelect).toHaveBeenCalledWith('directory');
     expect(panel()).toBeNull();
@@ -78,7 +78,7 @@ describe('MobileNav', () => {
         <button>elsewhere</button>
       </div>
     );
-    fireEvent.click(screen.getByRole('button', { name: /Job Assignments/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Serving Schedule/ }));
     expect(panel()).not.toBeNull();
     fireEvent.mouseDown(screen.getByRole('button', { name: 'elsewhere' }));
     expect(panel()).toBeNull();
@@ -91,11 +91,11 @@ describe('MobileNav', () => {
     expect(panel()).not.toBeNull();
   });
 
-  test('renders only the groups it is given, so a member sees no Admin folder', () => {
+  test('renders only the groups it is given, so a member sees no Church Office folder', () => {
     const memberGroups = GROUPS.filter(g => g.id !== 'admin');
     render(<MobileNav groups={memberGroups} activeTab="assignments" onSelect={vi.fn()} />);
     fireEvent.click(screen.getByRole('button'));
-    expect(within(panel()).queryByText('Admin')).toBeNull();
-    expect(within(panel()).queryByRole('button', { name: 'Database' })).toBeNull();
+    expect(within(panel()).queryByText('Church Office')).toBeNull();
+    expect(within(panel()).queryByRole('button', { name: 'Church Records' })).toBeNull();
   });
 });

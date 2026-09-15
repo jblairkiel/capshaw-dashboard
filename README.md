@@ -1,6 +1,12 @@
-# Capshaw Dashboard
+# Capshaw Member Portal
 
-Internal dashboard for Capshaw Church of Christ. Displays job assignments, attendance, sermons, anniversaries, leadership, and Bible class tools — all pulled from the church website.
+The member portal for Capshaw Church of Christ. Signed-in members see this
+Sunday's service, the serving schedule, attendance, sermons, birthdays and
+anniversaries, our elders and deacons, the church calendar and the Bible class
+tools — all pulled from the church website.
+
+**The whole site is members-only.** Nothing renders and no API answers until
+you have signed in; see [Signing in](#signing-in) below.
 
 ## Stack
 
@@ -52,9 +58,26 @@ Open `http://localhost:5173` in your browser.
 
 ### Scraper
 
-On first start the server will attempt to scrape the church website. It re-scrapes automatically every 4 hours. Scraped data is cached to `server/data/members.json` (gitignored). The scraper requires valid church website credentials — without them the dashboard tabs that depend on scraped data will be empty.
+On first start the server will attempt to scrape the church website. It re-scrapes automatically every 4 hours. Scraped data is cached to `server/data/members.json` (gitignored). The scraper requires valid church website credentials — without them the portal tabs that depend on scraped data will be empty.
 
 See [Scraper](#scraper-1) below for family photos and for diagnosing a section that comes back empty.
+
+---
+
+## Signing in
+
+Every page and every API route is behind sign-in — there is no signed-out view
+of the portal, not even the `/display` announcement board.
+
+- **Client** — `client/src/App.jsx` resolves `/api/auth/me` before it renders
+  anything. Without a user it shows `LoginPage` and nothing else; signing out
+  drops straight back to it.
+- **Server** — `requireSiteAuth` (in `server/middleware/auth.js`) is mounted on
+  `/api` ahead of every router. Only `/api/auth/*` (the sign-in flow itself)
+  and `/api/health` stay open; everything else answers `401` without a session.
+
+A lobby screen showing `/display` therefore needs to be signed in once as a
+member — the session cookie lasts seven days.
 
 ---
 
@@ -65,10 +88,10 @@ role includes everything below it.
 
 | Role | Can do |
 |---|---|
-| `pending` | View the dashboard. Cannot create or edit anything. |
+| `pending` | Look around the whole portal. Cannot create or edit anything. |
 | `approved` (Member) | Everything a pending user sees, plus: Bible class questions, the lesson planner, site updates, and editing their own household's details and worship preferences. |
 | `worship-coordinator` | Everything a member can do, plus building the worship roster — they own the Monthly Worship Schedule workflow. |
-| `admin` | Everything above, plus writing announcements, the song tracker and the order of service, and the Admin tabs — user roles, the congregation directory, and direct editing of every database table. |
+| `admin` | Everything above, plus writing announcements, the song tracker and the order of service, and the Church Office tabs — member access, the member directory, and direct editing of every database table. |
 
 Read and write are separate: **announcements, the song tracker and the order of
 service are read-only for members** — everyone can see them, only admins can
@@ -80,13 +103,13 @@ change them.
 | Song Tracker | read | read + write |
 | Order of Service | read | read + write |
 | Bible Class & Lesson Planner | read + write | read + write |
-| My Info (own household) | read + write | read + write (anyone) |
+| My Household (own household) | read + write | read + write (anyone) |
 | Site update (re-scrape) | ✅ | ✅ |
-| Directory, Database, User roles | — | ✅ |
+| Member Directory, Church Records, Members & Access | — | ✅ |
 
-New sign-ins land on `pending`. An admin promotes them from **Admin → Users &
-Roles**, either with the one-click **Approve** button or the per-user role
-selector.
+New sign-ins land on `pending`. An admin promotes them from **Church Office →
+Members & Access**, either with the one-click **Approve** button or the
+per-user role selector.
 
 Roles are enforced on the server by `server/middleware/auth.js`:
 `requireApproved` guards the member routes (Bible class, lesson planner, site
@@ -107,8 +130,8 @@ Three guardrails keep an admin from locking everyone out:
 ## Personal Info & Worship Preferences
 
 Every member can keep their own details current instead of asking an admin.
-The **My Info** tab shows the person's directory entry, everyone else at the
-same address, and each person's worship role preferences.
+The **My Household** tab shows the person's directory entry, everyone else at
+the same address, and each person's worship role preferences.
 
 **Who may edit what**
 
@@ -116,7 +139,7 @@ same address, and each person's worship role preferences.
 |---|---|---|---|
 | `pending` | read-only | read-only | — |
 | `approved` (Member) | ✅ | ✅ | — |
-| `admin` | ✅ | ✅ | ✅ (from **Admin → Directory**) |
+| `admin` | ✅ | ✅ | ✅ (from **Church Office → Member Directory**) |
 
 A *household* is everyone sharing a street address — the same grouping the
 directory shows as a family. Someone with no address on file is a household of
@@ -129,9 +152,10 @@ the job names the scraper reads off the church website.
 
 **Linking an account to a person.** A login is matched to its directory entry
 by email at sign-in, but only when exactly one entry matches — a shared family
-email is never guessed at. Admins can set the link by hand from **Admin →
-Users & Roles**; an existing link is never re-pointed automatically. Until an
-account is linked, My Info explains that and points the person at an admin.
+email is never guessed at. Admins can set the link by hand from **Church
+Office → Members & Access**; an existing link is never re-pointed
+automatically. Until an account is linked, My Household explains that and
+points the person at the church office.
 
 **Edits survive re-scraping.** The scraper used to wipe the directory and
 re-insert it every four hours. It now upserts by name, so row ids stay stable
@@ -176,7 +200,7 @@ Diagnose button reports how many, and downloading them is a small change.
 ### Diagnosing a section that looks empty
 
 A parse that silently matches nothing looks exactly like a genuinely empty
-page. **Admin → Database → Scrape Status** has a **Diagnose** button on every
+page. **Church Office → Church Records → Scrape Status** has a **Diagnose** button on every
 section: it re-fetches that page and reports the HTTP status, size, every table
 it found with a preview of the first rows, and what the parser made of them.
 It distinguishes:
@@ -204,7 +228,7 @@ dropped.
 ## Workflows
 
 Requests and approvals that need more than one person, tracked as a small state
-machine per workflow. **My Info → Workflows & Inbox** shows an inbox of what is
+machine per workflow. **My Church → My Inbox** shows an inbox of what is
 waiting on you, the workflows you are involved in, and a flowchart of where
 each one has got to.
 
@@ -290,7 +314,7 @@ logs any action pointing at a step or outcome that does not exist.
 
 ## Email
 
-Workflow notifications and distribution groups. **Admin → Email Groups** manages
+Workflow notifications and distribution groups. **Church Office → Email Groups** manages
 who is on each list and shows what the site has recently tried to send.
 
 ### Test mode is the default
@@ -350,7 +374,7 @@ one copy.
 ## Monthly Worship Schedule
 
 A workflow that builds a month of worship assignments from the preferences
-people set on My Info, owned by the **worship coordinator** role.
+people set on My Household, owned by the **worship coordinator** role.
 
 ### How a month is built
 
