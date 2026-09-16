@@ -9,7 +9,7 @@ const db      = require('../db');
 
 // Redirectable for the same reason as the photo directory (lib/photoStore.js):
 // a test run must never be able to overwrite the congregation's own cache.
-const DATA_FILE = process.env.CAPSHAW_DATA_FILE || path.join(__dirname, '../data/members.json');
+const DATA_FILE = require('../lib/paths').scrapeCache;
 
 const {
   parseCookies,

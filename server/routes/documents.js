@@ -51,7 +51,9 @@ async function docxToHtml(filePath) {
   return { html, warnings: mammothResult.messages };
 }
 
-const uploadsDir = path.join(__dirname, '../uploads');
+// Uploaded orders of service. server/uploads by default; a container points
+// this at a volume so an upload survives the next deploy.
+const uploadsDir = require('../lib/paths').uploads;
 
 // ─── Path traversal guard ─────────────────────────────────────────────────────
 // Express decodes a route param *after* matching it against the URL, so a

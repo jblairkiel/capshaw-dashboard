@@ -112,6 +112,103 @@ jobs:
             }
 
   # ── Deploy ───────────────────────────────────────────────────────────────────
+  # ── The container image ──────────────────────────────────────────────────────
+  # A Dockerfile nothing builds is a Dockerfile that has stopped working, so
+  # this builds it on every PR — and then runs it, because building proves
+  # only that the layers assemble. The native SQLite addon, the client build
+  # landing where the server looks for it, and the app actually serving are
+  # each things a successful build would not have caught.
+  image:
+    name: Container image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: capshaw-dashboard:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Start it
+        run: |
+          set -e
+          # The app refuses to boot in production without a session secret, so
+          # give it a throwaway one. Everything else is optional: no scraper
+          # credentials, no mail server, no API key — this is about whether the
+          # image serves, not about what it can reach.
+          docker run -d --name capshaw --init \
+            -e SESSION_SECRET=ci-only-not-a-real-secret \
+            -p 3001:3001 \
+            capshaw-dashboard:ci
+
+      - name: Wait for it to report healthy
+        run: |
+          set -e
+          for i in $(seq 1 30); do
+            status=$(docker inspect --format='{{.State.Health.Status}}' capshaw 2>/dev/null || echo missing)
+            echo "attempt $i: $status"
+            [ "$status" = "healthy" ] && exit 0
+            if [ "$(docker inspect --format='{{.State.Running}}' capshaw)" != "true" ]; then
+              echo "::error::The container stopped on its own."
+              docker logs capshaw
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "::error::The container never reported healthy."
+          docker logs capshaw
+          docker inspect --format='{{json .State.Health}}' capshaw
+          exit 1
+
+      - name: Check what it serves
+        run: |
+          set -e
+          # The health endpoint, which is outside the sign-in gate.
+          curl -fsS http://127.0.0.1:3001/api/health | tee /dev/stderr | grep -q '"status":"ok"'
+
+          # The React build, which only exists in the image if the client stage
+          # ran and the runtime stage copied it where the server looks.
+          curl -fsS http://127.0.0.1:3001/ | grep -qi '<div id="root"'
+
+          # The portal itself is members-only, and stays that way in a
+          # container: an unauthenticated API call is refused, not served.
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/api/members/data)
+          [ "$code" = "401" ] || { echo "::error::Expected 401 from a signed-out API call, got $code"; exit 1; }
+
+      - name: Check it wrote to the volume rather than into the image
+        run: |
+          set -e
+          # The database is created on first boot. It has to land in /data, or
+          # a redeploy would take the congregation's records with it.
+          docker exec capshaw sh -c 'test -f /data/bible_questions.db' \
+            || { echo "::error::No database under /data — check CAPSHAW_DATA_DIR in the Dockerfile."; exit 1; }
+
+          # And the process must not be root, so a compromise inside the
+          # container is not root inside the container.
+          who=$(docker exec capshaw id -un)
+          [ "$who" = "node" ] || { echo "::error::The app runs as $who, expected node"; exit 1; }
+
+      - name: Logs, whatever happened
+        if: always()
+        run: docker logs capshaw || true
+
+      - name: Stop it
+        if: always()
+        run: docker rm -f capshaw || true
+
+  # Still the SSH deploy: the image is built and exercised on every change, but
+  # switching the droplet over to it is a separate decision — see README →
+  # Running in Docker.
   deploy:
     name: Deploy to capshaw.jblairkiel.com
     needs: test
