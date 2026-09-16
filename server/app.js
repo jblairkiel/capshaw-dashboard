@@ -21,6 +21,7 @@ const songRoutes                 = require('./routes/songTracker');
 const profileRoutes              = require('./routes/profile');
 const workflowRoutes             = require('./routes/workflows');
 const mailRoutes                 = require('./routes/mailGroups');
+const livestreamRoutes           = require('./routes/livestreams');
 const adminRoutes                = require('./routes/admin');
 const { requireSiteAuth }        = require('./middleware/auth');
 const { requireTrustedOrigin }   = require('./middleware/csrf');
@@ -112,6 +113,7 @@ function createApp() {
   app.use('/api/profile',         profileRoutes);
   app.use('/api/workflows',       workflowRoutes);
   app.use('/api/mail',            mailRoutes);
+  app.use('/api/livestreams',     livestreamRoutes);
 
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });

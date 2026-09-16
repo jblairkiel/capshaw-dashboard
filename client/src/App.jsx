@@ -5,7 +5,7 @@ import OrderOfService from './components/OrderOfService';
 import CalendarView from './components/CalendarView';
 import JobAssignments from './components/JobAssignments';
 import AttendanceView from './components/AttendanceView';
-import SermonsView from './components/SermonsView';
+import LivestreamsView from './components/LivestreamsView';
 import VisitorTracker from './components/VisitorTracker';
 import AnniversariesView from './components/AnniversariesView';
 import LeadershipView from './components/LeadershipView';
@@ -20,7 +20,7 @@ import DirectoryView from './components/DirectoryView';
 import MyProfileView from './components/MyProfileView';
 import MobileNav from './components/MobileNav';
 import InboxView from './components/InboxView';
-import WorkflowPanel from './components/workflow/WorkflowPanel';
+import WorkflowDialogButton from './components/WorkflowDialogButton';
 import MailGroupsView from './components/MailGroupsView';
 import { hasWriteAccess, isAdmin } from './lib/roles';
 
@@ -47,7 +47,7 @@ const BASE_GROUPS = [
       { id: 'visitors',      label: 'Guests' },
       { id: 'anniversaries', label: 'Birthdays & Anniversaries' },
       { id: 'leadership',    label: 'Elders & Deacons' },
-      { id: 'sermons',       label: 'Sermons' },
+      { id: 'livestreams',   label: 'Livestreams' },
     ],
   },
   {
@@ -82,7 +82,7 @@ const OFFICE_GROUP = {
   ],
 };
 
-const STANDALONE_TABS = new Set(['bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database', 'directory', 'profile', 'inbox', 'mail-groups']);
+const STANDALONE_TABS = new Set(['bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database', 'directory', 'profile', 'inbox', 'mail-groups', 'livestreams']);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
 
@@ -330,9 +330,13 @@ function MainApp({ user, onLogout }) {
         </main>
       )}
       {!updating && activeTab === 'calendar' && (
-        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 space-y-6">
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           <CalendarView user={user} />
-          <WorkflowPanel page="calendar" user={user} title="Facility requests" />
+        </main>
+      )}
+      {!updating && activeTab === 'livestreams' && (
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <LivestreamsView />
         </main>
       )}
       {!updating && activeTab === 'inbox' && user && (
@@ -368,19 +372,22 @@ function MainApp({ user, onLogout }) {
 
       {/* Data-dependent tabs */}
       {siteData && !updating && !STANDALONE_TABS.has(activeTab) && (
-        <main className={`${activeTab === 'assignments' ? 'w-full' : 'max-w-6xl mx-auto'} px-3 sm:px-4 py-4 sm:py-6 flex-1`}>
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           {activeTab === 'assignments'   && (
-            <div className="space-y-6">
+            <div className="space-y-4">
+              <div className="flex justify-end">
+                <WorkflowDialogButton page="assignments" user={user} label="Roster requests" title="Roster requests" />
+              </div>
               <JobAssignments data={siteData.jobAssignments} />
-              <WorkflowPanel page="assignments" user={user} title="Roster requests" />
             </div>
           )}
           {activeTab === 'attendance'    && <AttendanceView data={siteData.attendance} />}
-          {activeTab === 'sermons'       && <SermonsView data={siteData.sermons} />}
           {activeTab === 'visitors'      && (
-            <div className="space-y-6">
+            <div className="space-y-4">
+              <div className="flex justify-end">
+                <WorkflowDialogButton page="visitors" user={user} label="Follow-ups" title="Guest follow-ups" />
+              </div>
               <VisitorTracker data={siteData.visitors} />
-              <WorkflowPanel page="visitors" user={user} title="Follow-ups" />
             </div>
           )}
           {activeTab === 'anniversaries' && <AnniversariesView data={siteData.anniversaries} />}

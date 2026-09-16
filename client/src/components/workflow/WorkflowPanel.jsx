@@ -6,7 +6,11 @@ import { ActionBar, StartForm, Detail } from './parts';
 // The workflows belonging to one page, shown on that page. Renders nothing at
 // all when a page has no workflows to start and none in flight, so it can be
 // dropped onto a page without cluttering it.
-export default function WorkflowPanel({ page, user, title = 'Requests & approvals' }) {
+//
+// `embedded` is for the panel inside a dialog: the dialog already carries the
+// heading and its own frame, and having been opened deliberately it should say
+// "nothing here" rather than silently render nothing.
+export default function WorkflowPanel({ page, user, title = 'Requests & approvals', embedded = false }) {
   const [definitions, setDefinitions] = useState([]);
   const [instances,   setInstances]   = useState([]);
   const [openId,      setOpenId]      = useState(null);
@@ -65,11 +69,13 @@ export default function WorkflowPanel({ page, user, title = 'Requests & approval
 
   // Signed-out visitors, and pages with nothing going on, get no panel.
   if (!user || loading) return null;
-  if (!definitions.length && !instances.length && !error) return null;
+  if (!embedded && !definitions.length && !instances.length && !error) return null;
+
+  const frame = embedded ? 'space-y-3' : 'space-y-3 border-t border-gray-200 pt-6';
 
   if (detail) {
     return (
-      <section className="space-y-4 border-t border-gray-200 pt-6">
+      <section className={embedded ? 'space-y-4' : 'space-y-4 border-t border-gray-200 pt-6'}>
         {error && <div className="card border border-red-200 bg-red-50 text-sm text-red-700">{error}</div>}
         <Detail detail={detail} busy={busyTask !== null} onAct={act} onBack={() => setOpenId(null)} />
       </section>
@@ -77,15 +83,17 @@ export default function WorkflowPanel({ page, user, title = 'Requests & approval
   }
 
   return (
-    <section className="space-y-3 border-t border-gray-200 pt-6">
+    <section className={frame}>
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="section-heading mb-0">{title}</h2>
-          <p className="text-xs text-gray-400 mt-0.5">
-            Steps that need more than one person, kept with the page they are about.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+        {!embedded && (
+          <div>
+            <h2 className="section-heading mb-0">{title}</h2>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Steps that need more than one person, kept with the page they are about.
+            </p>
+          </div>
+        )}
+        <div className="flex items-center gap-2 ml-auto">
           {isAdmin(user) && (
             <select
               value={scope}

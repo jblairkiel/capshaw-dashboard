@@ -232,50 +232,71 @@ describe('notification recipients', () => {
 // ─── End to end through a workflow ────────────────────────────────────────────
 
 describe('workflow notifications', () => {
-  let MEMBER, ADMIN;
+  let MEMBER, ADMIN, RAY, ORPHAN, VISITOR;
 
   beforeEach(() => {
-    const ray = addPerson('Ray Harris', 'ray@example.com');
-    MEMBER = addUser('Ray', 'approved', 'ray@example.com', ray.id);
+    RAY    = addPerson('Ray Harris', 'ray@example.com');
+    ORPHAN = addPerson('Unlinked Person');
+    MEMBER = addUser('Ray', 'approved', 'ray@example.com', RAY.id);
     ADMIN  = addUser('Ada', 'admin', 'ada@example.com');
+
+    const { lastInsertRowid } = db.prepare('INSERT INTO visitors (name) VALUES (?)').run('Sam Visitor');
+    VISITOR = db.prepare('SELECT * FROM visitors WHERE id = ?').get(lastInsertRowid);
   });
 
-  const REQUEST = { room: 'Kitchen', date: '2026-05-01', time: '6pm', purpose: 'Potluck' };
+  // Aimed by default at somebody with no login, so the first task lands on the
+  // admin queue; naming a person instead is how the handover is exercised.
+  function followUp({ assignee = ORPHAN, user = MEMBER } = {}) {
+    return engine.start({
+      definitionId: 'visitor-follow-up',
+      data: { visitorId: String(VISITOR.id), assigneePersonId: String(assignee.id), notes: '' },
+      user,
+    });
+  }
 
   function pendingTask(instanceId) {
     return db.prepare("SELECT * FROM workflow_tasks WHERE instance_id = ? AND status = 'pending'").get(instanceId);
   }
 
   test('starting one emails whoever the first task lands on', () => {
-    engine.start({ definitionId: 'facility-use', data: REQUEST, user: MEMBER });
+    followUp();
 
     const rows = outbox();
     expect(rows).toHaveLength(1);
     expect(rows[0].intended_for).toBe('ada@example.com');   // the admin queue
-    expect(rows[0].subject).toContain('Kitchen — 2026-05-01');
-    expect(rows[0].body).toContain('Deacon review');
+    expect(rows[0].subject).toContain('Follow up with Sam Visitor');
+    expect(rows[0].body).toContain('Reach out');
   });
 
   test('each handover emails the next person', () => {
-    const { id } = engine.start({ definitionId: 'facility-use', data: REQUEST, user: MEMBER });
+    const { id } = followUp({ assignee: RAY });             // lands on Ray himself
     db.prepare('DELETE FROM mail_outbox').run();
 
-    engine.act({ taskId: pendingTask(id).id, actionId: 'approve', user: ADMIN });
+    engine.act({ taskId: pendingTask(id).id, actionId: 'spoke', user: MEMBER });
 
     const rows = outbox();
     expect(rows).toHaveLength(1);
-    expect(rows[0].intended_for).toBe('ray@example.com');   // back to the requester
+    expect(rows[0].intended_for).toBe('ada@example.com');   // on to the admins
   });
 
   test('finishing tells the requester and copies the group the outcome names', () => {
     const elder = addPerson('Ann Elder', 'ann@example.com');
     groups.addMember(groups.getGroup('announcements').id, { directoryId: elder.id });
 
-    const { id } = engine.start({ definitionId: 'facility-use', data: REQUEST, user: MEMBER });
-    engine.act({ taskId: pendingTask(id).id, actionId: 'approve', user: ADMIN });
+    const { id } = followUp();
+    const instance = db.prepare('SELECT * FROM workflow_instances WHERE id = ?').get(id);
     db.prepare('DELETE FROM mail_outbox').run();
 
-    engine.act({ taskId: pendingTask(id).id, actionId: 'confirm', user: MEMBER });
+    // Any workflow may copy a distribution list when it reaches an outcome.
+    notify.workflowCompleted({
+      instance,
+      definition: {
+        title: 'Something the church should hear about',
+        outcomes: { approved: { label: 'Approved', tone: 'good', notifyGroups: ['announcements'] } },
+      },
+      outcomeId: 'approved',
+      actorName: 'Ada',
+    });
 
     const rows = outbox();
     expect(rows.map(r => r.intended_for).sort()).toEqual(['ann@example.com', 'ray@example.com']);
@@ -283,10 +304,11 @@ describe('workflow notifications', () => {
   });
 
   test('an outcome that names no group only tells the requester', () => {
-    const { id } = engine.start({ definitionId: 'facility-use', data: REQUEST, user: MEMBER });
+    const { id } = followUp();
+    engine.act({ taskId: pendingTask(id).id, actionId: 'spoke', user: ADMIN });
     db.prepare('DELETE FROM mail_outbox').run();
 
-    engine.act({ taskId: pendingTask(id).id, actionId: 'decline', note: 'Already booked', user: ADMIN });
+    engine.act({ taskId: pendingTask(id).id, actionId: 'not-interested', user: ADMIN });
 
     expect(outbox().map(r => r.intended_for)).toEqual(['ray@example.com']);
   });
@@ -311,7 +333,7 @@ describe('workflow notifications', () => {
   });
 
   test('every workflow message carries its instance in the context', () => {
-    const { id } = engine.start({ definitionId: 'facility-use', data: REQUEST, user: MEMBER });
+    const { id } = followUp();
     expect(outbox()[0].context).toContain(`workflow:${id}`);
   });
 });

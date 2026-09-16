@@ -1,9 +1,9 @@
 # Capshaw Member Portal
 
 The member portal for Capshaw Church of Christ. Signed-in members see this
-Sunday's service, the serving schedule, attendance, sermons, birthdays and
-anniversaries, our elders and deacons, the church calendar and the Bible class
-tools — all pulled from the church website.
+Sunday's service, the serving schedule, attendance, our guests, birthdays and
+anniversaries, our elders and deacons, the church calendar, recent livestreams
+and the Bible class tools — most of it pulled from the church website.
 
 **The whole site is members-only.** Nothing renders and no API answers until
 you have signed in; see [Signing in](#signing-in) below.
@@ -331,12 +331,12 @@ offers, and where each action leads:
 
 ```js
 steps: {
-  review: {
-    title: 'Deacon review',
+  approve: {
+    title: 'Approve and update the roster',
     assign: { role: 'admin' },
     actions: [
-      { id: 'approve', label: 'Approve', to: 'confirm' },
-      { id: 'decline', label: 'Decline', to: 'declined', requiresNote: true },
+      { id: 'apply',  label: 'Approve', to: 'covered' },
+      { id: 'reject', label: 'Not suitable', to: 'find-replacement', requiresNote: true },
     ],
   },
 }
@@ -386,13 +386,17 @@ the gap below their row and out to a lane on the right. Nodes are shaded for
 where the instance is now, where it has already been, and which outcome it
 reached.
 
-### The three seeded workflows
+### The seeded workflows
 
 | Workflow | Shape it exercises |
 |---|---|
-| **Facility Use Request** | Role approval, then confirmation back to the requester. Touches no congregation data. |
 | **Job Assignment Swap** | Starts from a duty you are really rostered for, loops while a replacement is found, writes the new name to `job_assignments` on approval. |
 | **Visitor Follow-Up** | Task aimed at a named person, loops on "no answer", hands off to an admin if they decline. |
+| **Monthly Worship Schedule** | Owned by the worship coordinator; builds a draft from everyone's preferences and publishes it to the roster. |
+
+Each one is reached from the page it belongs to, behind a **Roster requests** or
+**Follow-ups** button at the top of that page, so the page itself stays the
+roster or the guest list.
 
 ### Adding a workflow
 
@@ -400,6 +404,20 @@ Drop a definition in `server/workflows/definitions/` and list it in that
 folder's `index.js`. The inbox, the visibility rules, the API and the flowchart
 all work off the definition alone. `validateDefinitions()` runs at start-up and
 logs any action pointing at a step or outcome that does not exist.
+
+---
+
+## Livestreams
+
+The **Livestreams** tab is the church's YouTube channel, newest first. There is
+no API key: `server/lib/youtube.js` asks the channel page for its `UC…` id once,
+then reads the public RSS feed YouTube publishes for every channel. The id is
+kept for the life of the process and the feed for half an hour, so a page view
+normally costs nothing.
+
+If YouTube cannot be reached the page says so and still offers the channel
+link — the tab never becomes an error screen. Set `YOUTUBE_CHANNEL` to point at
+a different handle, or `YOUTUBE_CHANNEL_ID` to skip the lookup entirely.
 
 ---
 
@@ -469,8 +487,8 @@ one copy.
   task is waiting on. Role mail goes only to people holding *exactly* that role,
   so a member-level task never mails the whole congregation.
 - **A workflow finishes** — the person who started it, plus any distribution
-  group the outcome names. An approved facility request copies the
-  announcements list, via `notifyGroups: ['announcements']` on the outcome.
+  group the outcome names. An outcome copies a list by naming it:
+  `notifyGroups: ['announcements']`.
 
 ---
 
@@ -677,5 +695,7 @@ pm2 restart capshaw-dashboard
 | `MAIL_FROM` | No | From address on outgoing mail |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | For Google sign-in | Google OAuth credentials |
 | `FACEBOOK_APP_ID` / `FACEBOOK_APP_SECRET` | For Facebook sign-in | Facebook OAuth credentials |
+| `YOUTUBE_CHANNEL` | No | Channel handle for the Livestreams tab (default `@CapshawChurch`) |
+| `YOUTUBE_CHANNEL_ID` | No | Skips the handle lookup by giving the `UC…` channel id outright |
 | `NODE_ENV` | Production only | Set to `production` to serve the React build |
 | `PORT` | No | API port (default `3001`) |
