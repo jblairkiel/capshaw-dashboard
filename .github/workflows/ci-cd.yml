@@ -149,6 +149,25 @@ jobs:
             # Server deps (production only)
             npm ci --omit=dev
 
+            # The native SQLite addon is the one dependency that can install
+            # cleanly and still be unusable: a binary that does not match this
+            # Node's ABI loads fine, serves requests, and then aborts the whole
+            # process from a statement destructor during garbage collection —
+            # SIGABRT, no JS stack, nothing in dmesg. Prove it survives being
+            # used and collected here, while the old process is still serving,
+            # rather than finding out from the health check after we have
+            # already replaced a working app with a crashing one.
+            node --expose-gc -e "
+              const Database = require('better-sqlite3');
+              const db = new Database('server/data/bible_questions.db', { readonly: true });
+              for (let i = 0; i < 200; i++) db.prepare('SELECT ' + i).get();
+              if (global.gc) { global.gc(); global.gc(); }
+              db.close();
+              console.log('better-sqlite3 ' + require('better-sqlite3/package.json').version +
+                          ' OK on Node ' + process.versions.node +
+                          ' (ABI ' + process.versions.modules + ')');
+            "
+
             # Build React
             cd client
             npm ci
