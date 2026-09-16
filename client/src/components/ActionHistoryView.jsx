@@ -37,9 +37,23 @@ function when(value) {
 
 function areaLabel(area) {
   if (!area) return 'Elsewhere';
-  if (area === 'accounts')     return 'Members & Access';
-  if (area === 'my-household') return 'Their own household';
+  if (area === 'accounts')      return 'Members & Access';
+  if (area === 'my-household')  return 'Their own household';
+  if (area === 'impersonation') return 'Viewing as somebody';
   return areaInfo(area).label;
+}
+
+// Who to credit a change to. Ordinarily the account that made it; while an
+// admin was viewing the portal as a member, the change is the member's and the
+// admin is who was really at the keyboard, so both are named.
+function Who({ row }) {
+  if (!row.acting_user_name) return <span className="text-church-navy">{row.user_name || 'Somebody'}</span>;
+  return (
+    <span className="text-church-navy">
+      {row.acting_user_name}
+      <span className="block text-xs text-amber-700">viewing as {row.user_name || 'somebody'}</span>
+    </span>
+  );
 }
 
 // What actually changed, for the entry somebody opens. Kept as a plain list of
@@ -114,7 +128,8 @@ export default function ActionHistoryView() {
 
   const onPhone = useIsNarrow();
 
-  const [filters, setFilters] = useState({ area: '', action: '', userId: '', search: '' });
+  const [impersonated, setImpersonated] = useState(0);
+  const [filters, setFilters] = useState({ area: '', action: '', userId: '', search: '', actingOnly: '' });
   const [offset, setOffset]   = useState(0);
 
   const load = useCallback(async () => {
@@ -132,6 +147,7 @@ export default function ActionHistoryView() {
       setTotal(json.total);
       setActors(json.actors);
       setAreas(json.areas);
+      setImpersonated(json.impersonated ?? 0);
       setError('');
     } catch (err) {
       setError(err.message);
@@ -202,6 +218,18 @@ export default function ActionHistoryView() {
           </select>
         </label>
 
+        {impersonated > 0 && (
+          <label className="flex items-center gap-2 text-sm text-gray-600 pb-2">
+            <input
+              type="checkbox"
+              checked={filters.actingOnly === 'true'}
+              onChange={e => setFilter('actingOnly', e.target.checked ? 'true' : '')}
+              className="accent-church-gold"
+            />
+            Only while viewing as somebody ({impersonated})
+          </label>
+        )}
+
         <label className="block flex-1 min-w-48">
           <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Search</span>
           <input
@@ -234,7 +262,11 @@ export default function ActionHistoryView() {
                   <span className="text-xs text-gray-400">{areaLabel(row.area)}</span>
                 </div>
                 <p className="text-sm text-church-navy mt-1">{row.summary}</p>
-                <p className="text-xs text-gray-400 mt-0.5">{row.user_name || 'Somebody'} · {when(row.created_at)}</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {row.acting_user_name
+                    ? `${row.acting_user_name} viewing as ${row.user_name || 'somebody'}`
+                    : (row.user_name || 'Somebody')} · {when(row.created_at)}
+                </p>
               </button>
             ))}
             {rows.length === 0 && <p className="card text-center text-gray-400 text-sm py-8">Nothing matches these filters.</p>}
@@ -260,7 +292,7 @@ export default function ActionHistoryView() {
                     className={`cursor-pointer hover:bg-blue-50/60 transition-colors ${i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}`}
                   >
                     <td className="px-4 py-2 text-gray-500 whitespace-nowrap">{when(row.created_at)}</td>
-                    <td className="px-4 py-2 text-church-navy">{row.user_name || 'Somebody'}</td>
+                    <td className="px-4 py-2"><Who row={row} /></td>
                     <td className="px-4 py-2 text-gray-500">{areaLabel(row.area)}</td>
                     <td className="px-4 py-2">
                       <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${ACTION_TONE[row.action] || ACTION_TONE.other}`}>
@@ -306,7 +338,13 @@ export default function ActionHistoryView() {
       {open && (
         <Dialog
           title={open.summary}
-          subtitle={`${open.user_name || 'Somebody'} · ${when(open.created_at)} · ${areaLabel(open.area)}`}
+          subtitle={[
+            open.acting_user_name
+              ? `${open.acting_user_name}, viewing as ${open.user_name || 'somebody'}`
+              : (open.user_name || 'Somebody'),
+            when(open.created_at),
+            areaLabel(open.area),
+          ].join(' · ')}
           onClose={() => setOpen(null)}
           width="max-w-lg"
         >

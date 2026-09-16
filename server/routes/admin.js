@@ -158,6 +158,8 @@ router.get('/action-log', (req, res) => {
       entity: req.query.entity || '',
       userId: req.query.userId || null,
       search: req.query.search?.trim() || '',
+      // Just the changes made by an admin viewing the portal as somebody else.
+      actingOnly: req.query.actingOnly === 'true',
       limit:  req.query.limit,
       offset: req.query.offset,
     });
@@ -168,11 +170,14 @@ router.get('/action-log', (req, res) => {
       SELECT user_id AS id, user_name AS name, COUNT(*) AS entries
         FROM action_log GROUP BY user_id, user_name ORDER BY name ASC
     `).all();
+    // How many entries were made while viewing the portal as somebody else, so
+    // the filter for them is only offered when there are any.
+    const impersonated = db.prepare('SELECT COUNT(*) AS n FROM action_log WHERE acting_user_id IS NOT NULL').get().n;
     const areas = db.prepare(
       'SELECT area, COUNT(*) AS entries FROM action_log WHERE area <> \'\' GROUP BY area ORDER BY area ASC'
     ).all();
 
-    res.json({ success: true, rows, total, actors, areas });
+    res.json({ success: true, rows, total, actors, areas, impersonated });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

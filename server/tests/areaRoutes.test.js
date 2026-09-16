@@ -34,8 +34,13 @@ function seedAccounts() {
   const insert = db.prepare(
     'INSERT INTO users (id, provider, provider_id, email, name, role) VALUES (?,?,?,?,?,?)'
   );
+  // The grants go in the table as well as on the request user: anything that
+  // reaches for the account rather than the request — the workflow engine
+  // deciding who may action a task — reads them from there.
+  const grant = db.prepare('INSERT OR IGNORE INTO user_areas (user_id, area) VALUES (?, ?)');
   for (const u of [ADMIN, MEMBER, ATTENDANCE, GUESTS, LEADERS, PENDING]) {
     insert.run(u.id, 'google', `${u.name}-id`, `${u.name.toLowerCase()}@example.com`, u.name, u.role);
+    for (const area of (u.areas || [])) grant.run(u.id, area);
   }
 }
 
@@ -298,5 +303,134 @@ describe('table names are ours, not the caller\'s', () => {
     expect(res.status).toBe(200);
     expect(res.body.rows).toHaveLength(1);
     expect(db.prepare('SELECT COUNT(*) n FROM users').get().n).toBeGreaterThan(0);
+  });
+});
+
+// ─── Guests, and the follow-up that closes when somebody reaches them ─────────
+
+describe('a guest\'s follow-up', () => {
+  const engine = require('../workflows/engine');
+
+  function addGuest(fields = {}) {
+    const row = { name: 'Sam Rivers', phone: '256-555-0199', email: 'sam@example.com', ...fields };
+    const keys = Object.keys(row);
+    const { lastInsertRowid: id } = db.prepare(
+      `INSERT INTO visitors (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})`
+    ).run(...keys.map(k => row[k]));
+    return db.prepare('SELECT * FROM visitors WHERE id = ?').get(id);
+  }
+
+  function addPerson(name) {
+    const { lastInsertRowid: id } = db.prepare('INSERT INTO directory (name) VALUES (?)').run(name);
+    return db.prepare('SELECT * FROM directory WHERE id = ?').get(id);
+  }
+
+  function startFollowUp(guest, assignee, user = GUESTS) {
+    return engine.start({
+      definitionId: 'visitor-follow-up',
+      data: { visitorId: String(guest.id), assigneePersonId: String(assignee.id), notes: '' },
+      user: db.prepare('SELECT * FROM users WHERE id = ?').get(user.id),
+    });
+  }
+
+  function pendingTask(instanceId) {
+    return db.prepare("SELECT * FROM workflow_tasks WHERE instance_id = ? AND status = 'pending'").get(instanceId);
+  }
+
+  beforeEach(() => {
+    for (const t of ['workflow_participants', 'workflow_events', 'workflow_tasks', 'workflow_instances', 'directory']) {
+      db.prepare(`DELETE FROM ${t}`).run();
+    }
+  });
+
+  test('carries the guest\'s number and address, so whoever is asked can act on it', () => {
+    const guest  = addGuest();
+    const person = addPerson('Ray Harris');
+    const { id } = startFollowUp(guest, person);
+
+    const data = JSON.parse(db.prepare('SELECT data FROM workflow_instances WHERE id = ?').get(id).data);
+    expect(data).toMatchObject({
+      visitorName: 'Sam Rivers', visitorPhone: '256-555-0199', visitorEmail: 'sam@example.com',
+    });
+  });
+
+  test('emailing them closes it, and is written onto the guest', () => {
+    const guest  = addGuest();
+    const person = addPerson('Ray Harris');
+    const { id } = startFollowUp(guest, person);
+
+    const actor = db.prepare('SELECT * FROM users WHERE id = ?').get(GUESTS.id);
+    engine.act({ taskId: pendingTask(id).id, actionId: 'emailed', user: actor });
+
+    const instance = db.prepare('SELECT * FROM workflow_instances WHERE id = ?').get(id);
+    expect(instance.status).toBe('completed');
+    expect(instance.outcome).toBe('contacted');
+
+    const after = db.prepare('SELECT * FROM visitors WHERE id = ?').get(guest.id);
+    expect(after.last_contact_method).toBe('email');
+    expect(after.last_contacted_by).toBe('Gus');
+    expect(after.last_contacted_at).toBeTruthy();
+    expect(after.status).toBe('Contacted');
+  });
+
+  test('phoning them does the same, and says so', () => {
+    const guest  = addGuest();
+    const person = addPerson('Ray Harris');
+    const { id } = startFollowUp(guest, person);
+
+    const actor = db.prepare('SELECT * FROM users WHERE id = ?').get(GUESTS.id);
+    engine.act({ taskId: pendingTask(id).id, actionId: 'phoned', user: actor });
+
+    expect(db.prepare('SELECT last_contact_method FROM visitors WHERE id = ?').get(guest.id).last_contact_method)
+      .toBe('phone');
+    expect(db.prepare('SELECT outcome FROM workflow_instances WHERE id = ?').get(id).outcome).toBe('contacted');
+  });
+
+  test('a follow-up status somebody typed is left alone', () => {
+    const guest  = addGuest({ status: 'Moving away in June' });
+    const person = addPerson('Ray Harris');
+    const { id } = startFollowUp(guest, person);
+
+    const actor = db.prepare('SELECT * FROM users WHERE id = ?').get(GUESTS.id);
+    engine.act({ taskId: pendingTask(id).id, actionId: 'phoned', user: actor });
+
+    expect(db.prepare('SELECT status FROM visitors WHERE id = ?').get(guest.id).status).toBe('Moving away in June');
+  });
+
+  test('no answer leaves the guest untouched and the follow-up open', () => {
+    const guest  = addGuest();
+    const person = addPerson('Ray Harris');
+    const { id } = startFollowUp(guest, person);
+
+    const actor = db.prepare('SELECT * FROM users WHERE id = ?').get(GUESTS.id);
+    engine.act({ taskId: pendingTask(id).id, actionId: 'no-answer', user: actor });
+
+    expect(db.prepare('SELECT last_contacted_at FROM visitors WHERE id = ?').get(guest.id).last_contacted_at).toBe('');
+    expect(db.prepare('SELECT status FROM workflow_instances WHERE id = ?').get(id).status).toBe('active');
+  });
+
+  test('the guest list says whether one is in flight, and how it ended', async () => {
+    const guest  = addGuest();
+    const person = addPerson('Ray Harris');
+    const { id } = startFollowUp(guest, person);
+
+    const during = await request(buildApp(MEMBER)).get('/api/visitors');
+    expect(during.body.visitors[0].followUp.active).toMatchObject({ id, step: 'reach-out' });
+
+    const actor = db.prepare('SELECT * FROM users WHERE id = ?').get(GUESTS.id);
+    engine.act({ taskId: pendingTask(id).id, actionId: 'emailed', user: actor });
+
+    const after = await request(buildApp(MEMBER)).get('/api/visitors');
+    expect(after.body.visitors[0].followUp.active).toBeNull();
+    expect(after.body.visitors[0].followUp.lastDone).toMatchObject({ id, outcome: 'contacted' });
+    expect(after.body.visitors[0].last_contact_method).toBe('email');
+  });
+
+  test('a guest who has been removed cannot be followed up', () => {
+    const guest  = addGuest();
+    const person = addPerson('Ray Harris');
+    db.prepare('DELETE FROM visitors WHERE id = ?').run(guest.id);
+
+    expect(startFollowUp(guest, person)).toMatchObject({ status: 400 });
   });
 });

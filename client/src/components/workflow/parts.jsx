@@ -61,15 +61,19 @@ export function ActionBar({ actions, onAct, busy }) {
 }
 // ─── Start a workflow ─────────────────────────────────────────────────────────
 
-export function StartForm({ definitions, onStarted, onCancel }) {
+// `prefill` is for starting a workflow from the thing it is about — the
+// follow-up button on one guest's row, rather than the generic one at the top
+// of the page. A field it names is filled in and shown as settled, since the
+// answer came from what was clicked and changing it there would be a surprise.
+export function StartForm({ definitions, prefill = null, onStarted, onCancel }) {
   const [definitionId, setDefinitionId] = useState(definitions[0]?.id ?? '');
-  const [form, setForm] = useState({});
+  const [form, setForm] = useState(() => ({ ...(prefill || {}) }));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   const definition = definitions.find(d => d.id === definitionId);
 
-  useEffect(() => { setForm({}); setError(''); }, [definitionId]);
+  useEffect(() => { setForm({ ...(prefill || {}) }); setError(''); }, [definitionId, prefill]);
 
   async function submit(e) {
     e.preventDefault();
@@ -113,6 +117,18 @@ export function StartForm({ definitions, onStarted, onCancel }) {
         const value = form[field.key] ?? '';
         const set = v => setForm(p => ({ ...p, [field.key]: v }));
         const common = 'mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold';
+
+        // Settled by where this was started from: shown, so it is clear what
+        // the request is about, but not something to change here.
+        if (prefill && prefill[field.key] !== undefined) {
+          const chosen = (field.options || []).find(o => String(o.value ?? o) === String(value));
+          return (
+            <div key={field.key} className="block">
+              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">{field.label}</span>
+              <p className="mt-1 text-sm text-church-navy font-medium">{chosen?.label ?? chosen ?? value}</p>
+            </div>
+          );
+        }
 
         return (
           <label key={field.key} className="block">

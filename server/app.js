@@ -28,6 +28,7 @@ const servingRoutes              = require('./routes/serving');
 const visitorRoutes              = require('./routes/visitors');
 const leadershipRoutes           = require('./routes/leadership');
 const { requireSiteAuth }        = require('./middleware/auth');
+const { applyImpersonation }     = require('./middleware/impersonation');
 const { requireTrustedOrigin }   = require('./middleware/csrf');
 const rateLimit                  = require('express-rate-limit');
 
@@ -85,6 +86,11 @@ function createApp() {
   }));
   app.use(passport.initialize());
   app.use(passport.session());
+  // Straight after passport: an admin viewing the portal as a member has their
+  // own account in the session, and every request below this line is answered
+  // as the member. The admin stays on req.impersonator, which is what stops it
+  // again and who the action history names.
+  app.use(applyImpersonation);
 
   // A ceiling on the whole authenticated surface, well above real usage —
   // the per-endpoint limits in routes/auth.js exist to slow down password

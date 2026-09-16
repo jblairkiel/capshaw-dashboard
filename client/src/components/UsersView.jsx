@@ -611,7 +611,7 @@ function ApproveDialog({ user, people, busy, error, onApprove, onClose }) {
 
 // ─── Detail panel: everything you can do to one account ───────────────────────
 
-function UserDetail({ user, currentUserId, people, busy, onSetRole, onSetAreas, onLink, onRemove, onApproveRequest, onClose }) {
+function UserDetail({ user, currentUserId, people, busy, onSetRole, onSetAreas, onLink, onRemove, onApproveRequest, onViewAs, onClose }) {
   const isSelf  = user.id === currentUserId;
   const locked  = isSelf || !!user.is_owner;
   const waiting = user.role === 'pending' && !isSelf && !user.is_owner;
@@ -730,6 +730,26 @@ function UserDetail({ user, currentUserId, people, busy, onSetRole, onSetAreas, 
               ))}
             </div>
           </fieldset>
+
+          {/* Seeing what they see */}
+          {user.role !== 'admin' && user.id !== currentUserId && (
+            <div className="rounded-xl border border-gray-200 px-4 py-3">
+              <h4 className="text-sm font-semibold text-church-navy">See the portal as {user.name}</h4>
+              <p className="text-xs text-gray-500 mt-1">
+                Answers &ldquo;the button is missing for me&rdquo; without guessing: every page renders exactly as it
+                does for them. You stay signed in as yourself, anything you change is recorded against
+                you, and a banner stays on screen until you stop.
+              </p>
+              <button
+                type="button"
+                onClick={() => onViewAs(user.id)}
+                disabled={busy}
+                className="mt-2 text-xs px-3 py-1.5 rounded-lg border border-church-navy text-church-navy hover:bg-church-navy hover:text-white transition-colors font-medium disabled:opacity-50"
+              >
+                View as {user.name}
+              </button>
+            </div>
+          )}
 
           {/* Areas of responsibility */}
           <div>
@@ -857,7 +877,7 @@ function UsersCards({ users, currentUserId, onOpen, onApprove }) {
   );
 }
 
-function UsersGrid({ users, columns, sort, onSort, filters, onFilter, currentUserId, onOpen, onApprove }) {
+function UsersGrid({ users, columns, sort, onSort, filters, onFilter, currentUserId, onOpen, onApprove, onViewAs }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-gray-100">
       <table className="w-full text-sm">
@@ -939,6 +959,15 @@ function UsersGrid({ users, columns, sort, onSort, filters, onFilter, currentUse
                       className="text-xs px-2.5 py-1 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors font-medium"
                     >
                       Approve
+                    </button>
+                  )}
+                  {u.role !== 'admin' && u.id !== currentUserId && (
+                    <button
+                      onClick={e => { e.stopPropagation(); onViewAs(u.id); }}
+                      aria-label={`View as ${u.name}`}
+                      className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold hover:text-church-navy transition-colors whitespace-nowrap"
+                    >
+                      View as
                     </button>
                   )}
                   <button
@@ -1063,6 +1092,22 @@ export default function UsersView({ currentUser }) {
     if (!json.success) setNotice(json.error || 'Could not change what they look after');
     setBusy(false);
     load();
+  }
+
+  // Borrowing a member's view of the site. The whole portal reloads as them —
+  // every page has already fetched what it needs as somebody else.
+  async function viewAs(id) {
+    setNotice('');
+    setBusy(true);
+    const res  = await fetch('/api/auth/impersonate', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ userId: id }),
+    });
+    const json = await res.json().catch(() => ({}));
+    setBusy(false);
+    if (!json.success) { setNotice(json.error || 'Could not view as that account'); return; }
+    window.location.reload();
   }
 
   async function remove(id, name) {
@@ -1210,6 +1255,7 @@ export default function UsersView({ currentUser }) {
             currentUserId={currentUser.id}
             onOpen={setOpenId}
             onApprove={openApproval}
+            onViewAs={viewAs}
           />
         )}
       </div>
@@ -1258,6 +1304,7 @@ export default function UsersView({ currentUser }) {
           busy={busy}
           onSetRole={setRole}
           onSetAreas={setAreas}
+          onViewAs={viewAs}
           onLink={link}
           onRemove={remove}
           onApproveRequest={openApproval}

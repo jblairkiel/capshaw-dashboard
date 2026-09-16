@@ -279,6 +279,44 @@ screen lands in the history the same way.
 
 ---
 
+## Viewing the portal as a member
+
+An admin cannot see what a member sees: they hold every area, so every page is
+full and every button is there. "The Add button is missing for me" and "that
+page is empty" are the two hardest reports to answer from an admin account.
+
+So an admin can borrow one member's view of the site, from **Church Office →
+Members & Access** (the **View as** button on a row, or inside the detail
+panel). Every page then renders exactly as it does for that person, because
+every request really is answered as them.
+
+Three things make it safe to have:
+
+- **Only an admin can start it, and only on an account that is not an admin.**
+  An admin's view is not somebody else's to borrow, so it can never be used to
+  take another admin's standing — and since an admin already holds everything,
+  it can never grant anything they did not have.
+- **The real account is never lost.** It stays in the session, it is what stops
+  the impersonation, and stopping answers to it rather than to the borrowed
+  account. A banner stays across the top of every page until it is stopped.
+- **Everything done is recorded.** A change made while viewing as somebody is
+  filed under *them* — it is their record that changed — and carries the admin
+  as who was really at the keyboard. The action history shows both
+  (`Ada / viewing as Mel`), and can be filtered down to just those changes.
+
+It is not a read-only view: what you change while you are in it is really
+changed, which is why the banner says so. The checks are made on every request
+rather than trusted from when it started, so promoting that account to admin,
+or removing it, ends the impersonation immediately.
+
+| | |
+|---|---|
+| `POST /api/auth/impersonate` | `{ userId }`, admin only. Refuses another admin, yourself, and starting one from inside another |
+| `DELETE /api/auth/impersonate` | Answers as the real admin; always available while one is running |
+| `GET /api/auth/me` | Returns the borrowed account as `user`, and the admin as `impersonatedBy` |
+
+---
+
 ## Serving Schedule
 
 The serving schedule is the one page with two audiences.
@@ -543,12 +581,42 @@ reached.
 | Workflow | Shape it exercises |
 |---|---|
 | **Job Assignment Swap** | Starts from a duty you are really rostered for, loops while a replacement is found, writes the new name to `job_assignments` on approval. |
-| **Visitor Follow-Up** | Task aimed at a named person, loops on "no answer", hands off to an admin if they decline. |
+| **Guest Follow-Up** | Started from the guest it is about, aimed at a named person, loops on "no answer", and closes the moment somebody reaches them. |
 | **Monthly Worship Schedule** | Owned by the `serving-schedule` area; builds a draft from everyone's preferences and publishes it to the roster. |
 
 Each one is reached from the page it belongs to, behind a **Roster requests** or
 **Follow-ups** button at the top of that page, so the page itself stays the
 roster or the guest list.
+
+### Guest follow-ups
+
+The guest follow-up is also started **from the guest it is about**: every guest
+on the Guests page carries a **Follow up** button, which opens the same workflow
+with that guest already chosen. The guest's own row then shows where it has got
+to — *Follow-up in progress*, *Phoned by Ray Harris*, *Never reached* — so the
+list answers "has anybody been in touch with them?" without opening anything.
+
+The shape follows what actually happens:
+
+1. Somebody is asked to reach out. The task carries the guest's **phone number
+   and email address**, so whoever picks it up can act on it there and then;
+   the guest's details panel offers the same two as `tel:` and `mailto:` links.
+2. **Emailing or phoning them closes it.** There is no step afterwards asking
+   whether the contact happened — pressing the button is saying that it did.
+   The outcome is *Contacted*.
+3. **No answer** brings it round for another try; **I cannot do this** hands it
+   to whoever looks after the guests, who can reach out themselves or close it
+   out as *Never reached*.
+
+Reaching a guest writes back to their record — who, how and when — which is
+what the badge on the list reads. The workflow's own history stays the record of
+what happened, step by step, with who did what.
+
+A task aimed at an **area** (the guests, the serving schedule) emails the people
+who hold that area. Admins hold every area implicitly but are deliberately not
+mailed for each one, so an area task reaches the person who actually looks after
+it; if nobody holds it yet, the admins are told rather than it waiting in a
+queue nobody is watching.
 
 ### Adding a workflow
 
@@ -727,7 +795,8 @@ capshaw-dashboard/
 │   ├── db.js                # SQLite init (question library)
 │   ├── schema.js            # The whole schema, plus its migrations
 │   ├── middleware/
-│   │   └── auth.js          # Roles (a ladder) and areas (not one)
+│   │   ├── auth.js          # Roles (a ladder) and areas (not one)
+│   │   └── impersonation.js # An admin borrowing a member's view of the site
 │   ├── lib/
 │   │   ├── parsers.js       # HTML parser functions (testable)
 │   │   ├── areas.js         # The catalogue of areas, and who holds what

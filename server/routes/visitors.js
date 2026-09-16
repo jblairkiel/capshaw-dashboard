@@ -29,8 +29,39 @@ function visitsOf(id) {
   return db.prepare('SELECT id, date, service FROM visitor_visits WHERE visitor_id = ? ORDER BY id ASC').all(id);
 }
 
+// Whether a follow-up is already under way for this guest, so the page can
+// offer to start one — or point at the one in flight — rather than quietly
+// letting three people start three.
+//
+// The workflow keeps which guest it is about in its own data, so that is where
+// this reads it from; the workflow's history stays the record of what happened.
+function followUpFor(id) {
+  const active = db.prepare(`
+    SELECT i.id, i.title, i.step_id, i.created_at
+      FROM workflow_instances i
+     WHERE i.definition_id = 'visitor-follow-up'
+       AND i.status = 'active'
+       AND json_extract(i.data, '$.visitorId') = ?
+     ORDER BY i.id DESC LIMIT 1
+  `).get(String(id));
+
+  const finished = db.prepare(`
+    SELECT i.id, i.outcome, i.completed_at
+      FROM workflow_instances i
+     WHERE i.definition_id = 'visitor-follow-up'
+       AND i.status = 'completed'
+       AND json_extract(i.data, '$.visitorId') = ?
+     ORDER BY i.id DESC LIMIT 1
+  `).get(String(id));
+
+  return {
+    active:   active ? { id: active.id, step: active.step_id, since: active.created_at } : null,
+    lastDone: finished ? { id: finished.id, outcome: finished.outcome, at: finished.completed_at } : null,
+  };
+}
+
 function withVisits(row) {
-  return row ? { ...row, visits: visitsOf(row.id) } : null;
+  return row ? { ...row, visits: visitsOf(row.id), followUp: followUpFor(row.id) } : null;
 }
 
 function cleanFields(body) {

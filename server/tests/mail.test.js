@@ -263,7 +263,8 @@ describe('workflow notifications', () => {
 
     const rows = outbox();
     expect(rows).toHaveLength(1);
-    expect(rows[0].intended_for).toBe('ada@example.com');   // the admin queue
+    // Nobody looks after the guests yet, so it falls to the admins.
+    expect(rows[0].intended_for).toBe('ada@example.com');
     expect(rows[0].subject).toContain('Follow up with Sam Visitor');
     expect(rows[0].body).toContain('Reach out');
   });
@@ -272,11 +273,27 @@ describe('workflow notifications', () => {
     const { id } = followUp({ assignee: RAY });             // lands on Ray himself
     db.prepare('DELETE FROM mail_outbox').run();
 
-    engine.act({ taskId: pendingTask(id).id, actionId: 'spoke', user: MEMBER });
+    // Ray cannot do it, so it goes to whoever looks after the guests — nobody
+    // does yet, so the admins are told rather than it sitting unwatched.
+    engine.act({ taskId: pendingTask(id).id, actionId: 'decline', note: 'Away all month', user: MEMBER });
 
     const rows = outbox();
     expect(rows).toHaveLength(1);
-    expect(rows[0].intended_for).toBe('ada@example.com');   // on to the admins
+    expect(rows[0].intended_for).toBe('ada@example.com');
+  });
+
+  test('a task aimed at an area reaches the people who look after it, not the admins', () => {
+    const gus = addPerson('Gus Keeper', 'gus@example.com');
+    const { lastInsertRowid: gusUserId } = db.prepare(
+      "INSERT INTO users (provider, provider_id, email, name, role, directory_id) VALUES ('google','gus','gus@example.com','Gus','approved',?)"
+    ).run(gus.id);
+    db.prepare("INSERT INTO user_areas (user_id, area) VALUES (?, 'visitors')").run(gusUserId);
+
+    const { id } = followUp({ assignee: RAY });
+    db.prepare('DELETE FROM mail_outbox').run();
+    engine.act({ taskId: pendingTask(id).id, actionId: 'decline', note: 'Away all month', user: MEMBER });
+
+    expect(outbox().map(r => r.intended_for)).toEqual(['gus@example.com']);
   });
 
   test('finishing tells the requester and copies the group the outcome names', () => {
@@ -305,10 +322,10 @@ describe('workflow notifications', () => {
 
   test('an outcome that names no group only tells the requester', () => {
     const { id } = followUp();
-    engine.act({ taskId: pendingTask(id).id, actionId: 'spoke', user: ADMIN });
     db.prepare('DELETE FROM mail_outbox').run();
 
-    engine.act({ taskId: pendingTask(id).id, actionId: 'not-interested', user: ADMIN });
+    // Reaching the guest closes it outright, so this is the completion email.
+    engine.act({ taskId: pendingTask(id).id, actionId: 'phoned', user: ADMIN });
 
     expect(outbox().map(r => r.intended_for)).toEqual(['ray@example.com']);
   });

@@ -11,6 +11,10 @@ const SITE_URL = process.env.NODE_ENV === 'production'
   ? 'https://capshaw.jblairkiel.com'
   : 'http://localhost:5173';
 
+// An assignment names either an area or a role; telling them apart is what
+// decides where its holders are looked up.
+const { isArea } = require('../middleware/auth');
+
 function link() {
   return `${SITE_URL} → My Info → Workflows & Inbox`;
 }
@@ -24,18 +28,31 @@ function recipientsForTask(task) {
 
   if (!task.assignee_role) return [];
 
-  // Anyone at or above the role could pick it up; admins outrank everyone, so
-  // a task for 'approved' would otherwise mail the entire congregation. Only
-  // people holding exactly that role are told.
-  const holders = db.prepare('SELECT name, email FROM users WHERE role = ? AND email IS NOT NULL')
-    .all(task.assignee_role)
-    .filter(u => u.email)
-    .map(u => ({ email: u.email, name: u.name }));
-  if (holders.length) return holders;
+  // A step addresses either an area of responsibility or a rung on the role
+  // ladder, and each is looked up where it actually lives: areas in the grants
+  // table, roles on the account.
+  //
+  // Admins hold every area implicitly, but are deliberately not mailed for
+  // every area task — whoever actually looks after the guests should hear
+  // about a guest task, not all six admins as well.
+  const holders = isArea(task.assignee_role)
+    ? db.prepare(`
+        SELECT u.name, u.email FROM users u
+          JOIN user_areas a ON a.user_id = u.id
+         WHERE a.area = ? AND u.role = 'approved' AND u.email IS NOT NULL
+      `).all(task.assignee_role)
+    // Anyone at or above the role could pick it up; admins outrank everyone, so
+    // a task for 'approved' would otherwise mail the entire congregation. Only
+    // people holding exactly that role are told.
+    : db.prepare('SELECT name, email FROM users WHERE role = ? AND email IS NOT NULL')
+        .all(task.assignee_role);
 
-  // Nobody holds that role yet — a worship coordinator has not been appointed,
-  // say. The task still sits in the admins' inbox by rank, so tell them, or
-  // the workflow would wait on a queue nobody is watching.
+  const withAddress = holders.filter(u => u.email).map(u => ({ email: u.email, name: u.name }));
+  if (withAddress.length) return withAddress;
+
+  // Nobody looks after it yet — no guest tracker has been appointed, say. The
+  // task still sits in the admins' inbox, since they hold every area, so tell
+  // them or the workflow would wait on a queue nobody is watching.
   return db.prepare("SELECT name, email FROM users WHERE role = 'admin' AND email IS NOT NULL")
     .all()
     .filter(u => u.email)
