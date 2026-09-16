@@ -10,12 +10,15 @@ import { ActionBar, StartForm, Detail } from './parts';
 // `embedded` is for the panel inside a dialog: the dialog already carries the
 // heading and its own frame, and having been opened deliberately it should say
 // "nothing here" rather than silently render nothing.
-export default function WorkflowPanel({ page, user, title = 'Requests & approvals', embedded = false }) {
+export default function WorkflowPanel({ page, user, title = 'Requests & approvals', embedded = false, prefill = null, startImmediately = false }) {
   const [definitions, setDefinitions] = useState([]);
   const [instances,   setInstances]   = useState([]);
   const [openId,      setOpenId]      = useState(null);
   const [detail,      setDetail]      = useState(null);
-  const [starting,    setStarting]    = useState(false);
+  // Opened from the thing it is about (one guest's Follow up button) rather
+  // than from the page's own panel: the form is what was wanted, so it is what
+  // opens.
+  const [starting,    setStarting]    = useState(startImmediately);
   const [status,      setStatus]      = useState('active');
   const [scope,       setScope]       = useState('mine');
   const [busyTask,    setBusyTask]    = useState(null);
@@ -128,6 +131,7 @@ export default function WorkflowPanel({ page, user, title = 'Requests & approval
       {starting && (
         <StartForm
           definitions={definitions}
+          prefill={prefill}
           onCancel={() => setStarting(false)}
           onStarted={id => { setStarting(false); load(); setOpenId(id); }}
         />

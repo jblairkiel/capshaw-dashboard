@@ -165,14 +165,11 @@ describe('GET /api/workflows', () => {
   test('completed workflows are filtered out by default and found with status=completed', async () => {
     const id = await startFollowUp(MEMBER);
     const detail = await request(buildApp(ADMIN)).get(`/api/workflows/${id}`);
+    // Reaching the guest is the end of it — there is no step afterwards asking
+    // whether the contact happened.
     await request(buildApp(ADMIN))
       .post(`/api/workflows/tasks/${detail.body.myTask.id}`)
-      .send({ action: 'spoke' });
-
-    const outcome = await request(buildApp(ADMIN)).get(`/api/workflows/${id}`);
-    await request(buildApp(ADMIN))
-      .post(`/api/workflows/tasks/${outcome.body.myTask.id}`)
-      .send({ action: 'not-interested' });
+      .send({ action: 'emailed' });
 
     const active = await request(buildApp(MEMBER)).get('/api/workflows');
     expect(active.body.instances.map(i => i.id)).not.toContain(id);
@@ -223,10 +220,10 @@ describe('POST /api/workflows/tasks/:taskId', () => {
 
     const res = await request(buildApp(ADMIN))
       .post(`/api/workflows/tasks/${task.id ?? task.taskId}`)
-      .send({ action: 'spoke' });
+      .send({ action: 'no-answer' });
 
     expect(res.status).toBe(200);
-    expect(res.body.instance.stepId).toBe('record-outcome');
+    expect(res.body.instance.stepId).toBe('try-again');
   });
 
   test('somebody the task is not aimed at is refused', async () => {
@@ -234,7 +231,7 @@ describe('POST /api/workflows/tasks/:taskId', () => {
     const task = await inboxTask(ADMIN);
     const res = await request(buildApp(OTHER))
       .post(`/api/workflows/tasks/${task.taskId}`)
-      .send({ action: 'spoke' });
+      .send({ action: 'emailed' });
     expect(res.status).toBe(403);
   });
 

@@ -478,6 +478,21 @@ function initSchema(db) {
   addColumn('visitors', 'notes',       "TEXT NOT NULL DEFAULT ''");
   addColumn('visitors', 'created_at',  "TEXT NOT NULL DEFAULT ''");
 
+  // ── Follow-up ────────────────────────────────────────────────────────────────
+  // Written by the follow-up workflow when somebody actually reaches the guest,
+  // so the guest list can show who has been contacted without anybody opening a
+  // workflow to find out. The workflow's own history stays the record of what
+  // happened; this is the summary of it.
+  addColumn('visitors', 'last_contacted_at',     "TEXT NOT NULL DEFAULT ''");
+  addColumn('visitors', 'last_contact_method',   "TEXT NOT NULL DEFAULT ''");   // email | phone
+  addColumn('visitors', 'last_contacted_by',     "TEXT NOT NULL DEFAULT ''");
+
+  // Who was really at the keyboard, when that is not who the change is
+  // attributed to: an admin viewing the portal as a member. Empty for every
+  // ordinary change, which is what makes the ones that are not stand out.
+  addColumn('action_log', 'acting_user_id', 'INTEGER REFERENCES users(id) ON DELETE SET NULL');
+  addColumn('action_log', 'acting_user_name', "TEXT NOT NULL DEFAULT ''");
+
   db.exec(`CREATE INDEX IF NOT EXISTS idx_users_directory ON users(directory_id);`);
   // Sign-in looks an account up by address, and two accounts must never share
   // one: 'local' rows store the folded address in provider_id, so the existing

@@ -24,6 +24,7 @@ import MailGroupsView from './components/MailGroupsView';
 import ServingSchedule from './components/ServingSchedule';
 import ServingJobsView from './components/ServingJobsView';
 import ActionHistoryView from './components/ActionHistoryView';
+import ImpersonationBanner from './components/ImpersonationBanner';
 import { hasWriteAccess, isAdmin, hasArea } from './lib/roles';
 
 const API = '/api/members';
@@ -158,7 +159,7 @@ function NavDropdown({ group, activeTab, onSelect }) {
 }
 
 
-function MainApp({ user, onLogout }) {
+function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
   const [activeTab,   setActiveTab]   = useState('order');
   const [siteData,    setSiteData]    = useState(null);
   const [updating,    setUpdating]    = useState(false);
@@ -206,6 +207,9 @@ function MainApp({ user, onLogout }) {
 
   return (
     <div className="min-h-screen bg-church-cream flex flex-col">
+      {impersonatedBy && (
+        <ImpersonationBanner user={user} impersonatedBy={impersonatedBy} onStopped={onStoppedImpersonating} />
+      )}
       <Header user={user} onLogout={onLogout} />
 
       {/* Pending approval banner */}
@@ -370,7 +374,7 @@ function MainApp({ user, onLogout }) {
             <div className="flex justify-end">
               <WorkflowDialogButton page="visitors" user={user} label="Follow-ups" title="Guest follow-ups" />
             </div>
-            <VisitorTracker />
+            <VisitorTracker user={user} />
           </div>
         </main>
       )}
@@ -442,6 +446,9 @@ function MainApp({ user, onLogout }) {
 // signed-in members only. Nothing renders until we know who is here.
 export default function App() {
   const [user, setUser] = useState(undefined); // undefined=checking, null=signed out
+  // Set only while an admin is viewing the portal as a member: `user` is then
+  // the member, and this is the admin behind them.
+  const [impersonatedBy, setImpersonatedBy] = useState(null);
 
   // Set by the OAuth callbacks and by the confirmation link in the registration
   // email, which the API answers with a redirect back to here.
@@ -453,7 +460,7 @@ export default function App() {
   useEffect(() => {
     fetch('/api/auth/me', { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
-      .then(j => setUser(j?.user ?? null))
+      .then(j => { setUser(j?.user ?? null); setImpersonatedBy(j?.impersonatedBy ?? null); })
       .catch(() => setUser(null));
   }, []);
 
@@ -480,7 +487,20 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/display" element={<AnnouncementsDisplay />} />
-        <Route path="/*" element={<MainApp user={user} onLogout={() => setUser(null)} />} />
+        <Route
+          path="/*"
+          element={
+            <MainApp
+              // Remounts the whole portal when the view changes hands, so no
+              // page is left holding what it loaded as somebody else.
+              key={`${user.id}:${impersonatedBy?.id ?? ''}`}
+              user={user}
+              impersonatedBy={impersonatedBy}
+              onStoppedImpersonating={admin => { setUser(admin); setImpersonatedBy(null); }}
+              onLogout={() => { setUser(null); setImpersonatedBy(null); }}
+            />
+          }
+        />
       </Routes>
     </BrowserRouter>
   );

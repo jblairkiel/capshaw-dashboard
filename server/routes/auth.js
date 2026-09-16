@@ -8,6 +8,7 @@ const {
   AREAS, isArea, areasFor, setAreas, effectiveAreas, areaLabel,
 } = require('../middleware/auth');
 const actionLog = require('../lib/actionLog');
+const { impersonationProblem } = require('../middleware/impersonation');
 const {
   passwordProblem, hashPassword, verifyPassword, burnTime,
   createToken, hashToken, MIN_LENGTH,
@@ -493,7 +494,16 @@ router.get('/facebook/callback', (req, res, next) => {
 
 router.get('/me', (req, res) => {
   if (!req.user) return res.status(401).json({ success: false });
-  res.json({ success: true, user: publicUser(req.user) });
+  res.json({
+    success: true,
+    user: publicUser(req.user),
+    // Present only while an admin is viewing the portal as this member. The
+    // client draws its banner from this, and it is the admin's own account —
+    // never the one being viewed as.
+    impersonatedBy: req.impersonator
+      ? { id: req.impersonator.id, name: req.impersonator.name, since: req.user.impersonationStartedAt || null }
+      : null,
+  });
 });
 
 router.post('/logout', (req, res) => {
@@ -709,6 +719,77 @@ router.patch('/users/:id/approve', requireAuth, requireAdmin, (req, res) => {
 router.patch('/users/:id/revoke', requireAuth, requireAdmin, (req, res) => {
   const { status, body } = changeRole(req.user, req.params.id, 'pending');
   res.status(status).json(body);
+});
+
+// ─── Viewing the portal as a member ───────────────────────────────────────────
+//
+// "The Add button is missing for me" is the hardest kind of report to answer
+// from an admin account, because an admin holds every area and every page is
+// full. This lets an admin see exactly what one member sees.
+//
+// Starting it is admin-only and refuses another admin; stopping it answers to
+// the real account rather than the borrowed one, so it can always be undone.
+// Every change made while it is on is recorded against the admin.
+
+router.post('/impersonate', requireAuth, (req, res) => {
+  // While viewing as somebody else, req.user is the member — the admin is on
+  // req.impersonator. Starting a second one from inside the first would lose
+  // track of who is really here, so it is refused rather than nested.
+  if (req.impersonator) {
+    return res.status(409).json({
+      success: false,
+      error: `You are already viewing the portal as ${req.user.name}. Stop that first.`,
+    });
+  }
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ success: false, error: 'Admin access required' });
+  }
+
+  const targetId = Number(req.body?.userId);
+  if (!Number.isInteger(targetId)) {
+    return res.status(400).json({ success: false, error: 'userId must be a number' });
+  }
+
+  const target  = db.prepare('SELECT * FROM users WHERE id = ?').get(targetId);
+  const problem = impersonationProblem(req.user, target);
+  if (problem) return res.status(target ? 400 : 404).json({ success: false, error: problem });
+
+  req.session.impersonate = { userId: target.id, startedAt: new Date().toISOString() };
+
+  actionLog.record(req.user, {
+    area:     'impersonation',
+    action:   'other',
+    entity:   'account',
+    entityId: target.id,
+    summary:  `${req.user.name} started viewing the portal as ${target.name}`,
+    details:  { viewing: { id: target.id, name: target.name, role: target.role } },
+  });
+
+  res.json({ success: true, user: publicUser(userRow(target.id)) });
+});
+
+router.delete('/impersonate', requireAuth, (req, res) => {
+  // Answered as the real admin: the borrowed account has no say in giving
+  // itself back.
+  const admin = req.impersonator;
+  if (!admin) {
+    return res.status(400).json({ success: false, error: 'You are not viewing the portal as anybody.' });
+  }
+
+  const viewedAs = req.user;
+  const since    = viewedAs.impersonationStartedAt;
+  delete req.session.impersonate;
+
+  actionLog.record(admin, {
+    area:     'impersonation',
+    action:   'other',
+    entity:   'account',
+    entityId: viewedAs.id,
+    summary:  `${admin.name} stopped viewing the portal as ${viewedAs.name}`,
+    details:  { viewing: { id: viewedAs.id, name: viewedAs.name }, since },
+  });
+
+  res.json({ success: true, user: publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(admin.id)) });
 });
 
 // ─── What this account looks after ────────────────────────────────────────────

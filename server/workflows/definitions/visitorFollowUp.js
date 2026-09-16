@@ -1,19 +1,58 @@
-// Visitor follow-up — assign a member to reach out to someone who visited,
-// log what happened, and loop round if they need another try. Reads the
-// visitors the scraper already collects; writes nothing back to them.
+// Guest follow-up — ask a member to reach out to somebody who visited, and
+// close it the moment they actually reach them.
+//
+// The shape follows what really happens: somebody is asked to make contact,
+// they either get hold of the guest or they do not, and getting hold of them is
+// the end of it. So "Emailed them" and "Phoned them" are terminal — there is no
+// separate step afterwards asking whether the contact happened, because
+// pressing the button is saying that it did.
+//
+// Reaching the guest also writes back to their record (who, how, when), so the
+// guest list shows who has been contacted without anybody opening a workflow to
+// find out. The workflow's own history stays the record of what happened.
+
+// Marks the guest as reached, and says so on the workflow.
+function recordContact(method) {
+  return (data, { db, user, note }) => {
+    const visitorId = Number(data.visitorId);
+    const guest = db.prepare('SELECT id, name, status FROM visitors WHERE id = ?').get(visitorId);
+    if (!guest) return { error: 'That guest is no longer on file' };
+
+    const by = user?.name || '';
+    db.prepare(`
+      UPDATE visitors
+         SET last_contacted_at = datetime('now'),
+             last_contact_method = ?,
+             last_contacted_by = ?,
+             status = CASE WHEN trim(coalesce(status, '')) = '' THEN 'Contacted' ELSE status END
+       WHERE id = ?
+    `).run(method, by, guest.id);
+
+    return {
+      data: {
+        contactMethod: method,
+        contactedBy:   by,
+        contactedAt:   new Date().toISOString(),
+        contactNote:   note || '',
+      },
+    };
+  };
+}
 
 module.exports = {
   id: 'visitor-follow-up',
   page: 'visitors',
-  title: 'Visitor Follow-Up',
+  title: 'Guest Follow-Up',
   description:
-    'Ask a member to reach out to a recent visitor, record how it went, and try ' +
-    'again later if nobody was reached.',
+    'Ask a member to reach out to a guest. Emailing or phoning them closes it, ' +
+    'and is recorded against the guest.',
   startRole: 'approved',
-  fallbackRole: 'admin',
+  // Nobody to aim it at falls to whoever looks after the guests, rather than to
+  // admins generally — it is their page.
+  fallbackRole: 'visitors',
 
   fields: [
-    { key: 'visitorId', label: 'Visitor', type: 'select', optionsFrom: 'visitors', required: true },
+    { key: 'visitorId', label: 'Guest', type: 'select', optionsFrom: 'visitors', required: true },
     {
       key: 'assigneePersonId',
       label: 'Who should reach out',
@@ -25,14 +64,35 @@ module.exports = {
   ],
 
   onStart(data, { db }) {
-    const visitor = db.prepare('SELECT name FROM visitors WHERE id = ?').get(Number(data.visitorId));
-    if (!visitor) return { error: 'That visitor is no longer on file' };
+    const visitor = db.prepare('SELECT id, name, phone, email FROM visitors WHERE id = ?')
+      .get(Number(data.visitorId));
+    if (!visitor) return { error: 'That guest is no longer on file' };
 
     const person = db.prepare('SELECT name FROM directory WHERE id = ?').get(Number(data.assigneePersonId));
-    return { data: { visitorName: visitor.name, assigneeName: person?.name || '' } };
+
+    // Carried on the instance so whoever picks the task up has what they need
+    // to make contact in front of them, rather than having to go and find it.
+    return {
+      data: {
+        visitorName:  visitor.name,
+        visitorPhone: visitor.phone || '',
+        visitorEmail: visitor.email || '',
+        assigneeName: person?.name || '',
+      },
+    };
   },
 
   titleFor: data => `Follow up with ${data.visitorName}`,
+
+  // What the task shows: how to reach them, so the two buttons mean something.
+  preview: data => ({
+    columns: ['Guest', 'Phone', 'Email'],
+    rows: [[
+      data.visitorName || '',
+      data.visitorPhone || '— none on file —',
+      data.visitorEmail || '— none on file —',
+    ]],
+  }),
 
   start: 'reach-out',
 
@@ -40,15 +100,15 @@ module.exports = {
     'reach-out': {
       title: 'Reach out',
       instruction:
-        'Get in touch and let us know how it went. If you could not reach them, ' +
-        'choose "No answer" and it will come back round for another try.',
-      // Aimed at the directory person chosen on the form, via their login.
+        'Get in touch, then say how you reached them — that closes the follow-up. ' +
+        'If nobody answered, "No answer" brings it back round for another try.',
       assign: { personField: 'assigneePersonId' },
       assignLabel: 'The member asked to reach out',
       actions: [
-        { id: 'spoke',    label: 'Spoke with them', tone: 'good',    to: 'record-outcome' },
-        { id: 'no-answer', label: 'No answer',      tone: 'neutral', to: 'try-again' },
-        { id: 'decline',  label: 'I cannot do this', tone: 'bad',    to: 'reassign', requiresNote: true },
+        { id: 'emailed', label: 'Emailed them',  tone: 'good',    to: 'contacted', effect: recordContact('email') },
+        { id: 'phoned',  label: 'Phoned them',   tone: 'good',    to: 'contacted', effect: recordContact('phone') },
+        { id: 'no-answer', label: 'No answer',   tone: 'neutral', to: 'try-again' },
+        { id: 'decline', label: 'I cannot do this', tone: 'bad',  to: 'reassign', requiresNote: true },
       ],
     },
 
@@ -58,35 +118,26 @@ module.exports = {
       assign: { personField: 'assigneePersonId' },
       assignLabel: 'The member asked to reach out',
       actions: [
-        { id: 'retry',    label: 'Try again now', tone: 'neutral', to: 'reach-out' },
-        { id: 'give-up',  label: 'Give up',       tone: 'bad',     to: 'no-contact', requiresNote: true },
+        { id: 'retry',   label: 'Try again now', tone: 'neutral', to: 'reach-out' },
+        { id: 'give-up', label: 'Give up',       tone: 'bad',     to: 'no-contact', requiresNote: true },
       ],
     },
 
     reassign: {
       title: 'Assign someone else',
-      instruction: 'The first person could not do it. Pick this up or pass it on.',
-      assign: { role: 'admin' },
+      instruction: 'The first person could not do it. Pick this up yourself, or close it out.',
+      assign: { role: 'visitors' },
+      assignLabel: 'Whoever looks after the guests',
       actions: [
-        { id: 'take',   label: 'I will reach out', tone: 'neutral', to: 'record-outcome' },
-        { id: 'close',  label: 'Close it out',     tone: 'bad',     to: 'no-contact', requiresNote: true },
-      ],
-    },
-
-    'record-outcome': {
-      title: 'Record the outcome',
-      instruction: 'What came of it? This closes the follow-up.',
-      assign: { role: 'admin' },
-      actions: [
-        { id: 'interested',     label: 'Interested — keep in touch', tone: 'good',    to: 'interested' },
-        { id: 'not-interested', label: 'Not interested',             tone: 'neutral', to: 'not-interested' },
+        { id: 'emailed', label: 'I emailed them', tone: 'good',    to: 'contacted', effect: recordContact('email') },
+        { id: 'phoned',  label: 'I phoned them',  tone: 'good',    to: 'contacted', effect: recordContact('phone') },
+        { id: 'close',   label: 'Close it out',   tone: 'bad',     to: 'no-contact', requiresNote: true },
       ],
     },
   },
 
   outcomes: {
-    interested:     { label: 'Interested',      tone: 'good' },
-    'not-interested': { label: 'Not interested', tone: 'neutral' },
-    'no-contact':   { label: 'Never reached',   tone: 'bad' },
+    contacted:    { label: 'Contacted',     tone: 'good' },
+    'no-contact': { label: 'Never reached', tone: 'bad' },
   },
 };

@@ -102,11 +102,13 @@ describe('VisitorTracker', () => {
       city: 'Harvest', state: 'AL', invited_by: 'The Carters', status: 'Visited twice',
       notes: 'Asked about the Wednesday class',
       visits: [{ id: 1, date: '04/13/25', service: 'AM' }, { id: 2, date: '03/30/25', service: 'PM' }],
+      followUp: { active: null, lastDone: null },
     },
     {
       id: 2, name: 'Sam Ford', phone: '', email: '', city: '', state: '',
       invited_by: '', status: '', notes: '',
       visits: [{ id: 3, date: '04/06/25', service: 'AM' }],
+      followUp: { active: null, lastDone: null },
     },
   ];
 
@@ -242,6 +244,63 @@ describe('VisitorTracker', () => {
 
     type(screen.getByPlaceholderText(/Search guests/i), 'nobody');
     expect(screen.getByText(/No guests match your search/i)).toBeInTheDocument();
+  });
+
+  // ── Follow-ups, from the guest they are about ──────────────────────────────
+
+  test('shows where a guest\'s follow-up has got to', async () => {
+    mockGuests([
+      { ...GUESTS[0], followUp: { active: { id: 4, step: 'reach-out' }, lastDone: null } },
+      {
+        ...GUESTS[1],
+        last_contacted_at: '2026-06-07 10:00:00',
+        last_contact_method: 'phone',
+        last_contacted_by: 'Ray Harris',
+        followUp: { active: null, lastDone: { id: 3, outcome: 'contacted' } },
+      },
+    ]);
+    render(<VisitorTracker user={{ id: 1, role: 'approved' }} />);
+
+    await screen.findByRole('button', { name: 'Pat Lane' });
+    expect(screen.getByText('Follow-up in progress')).toBeInTheDocument();
+    expect(screen.getByText('Phoned by Ray Harris')).toBeInTheDocument();
+  });
+
+  test('a guest with one in flight is not offered another', async () => {
+    mockGuests([{ ...GUESTS[0], followUp: { active: { id: 4, step: 'reach-out' }, lastDone: null } }]);
+    render(<VisitorTracker user={{ id: 1, role: 'approved' }} />);
+
+    await screen.findByRole('button', { name: 'Pat Lane' });
+    expect(screen.queryByRole('button', { name: /^follow up$/i })).not.toBeInTheDocument();
+    expect(screen.getByText('In progress')).toBeInTheDocument();
+  });
+
+  test('a guest nobody has reached gets a Follow up button of their own', async () => {
+    mockGuests([{ ...GUESTS[0], followUp: { active: null, lastDone: null } }]);
+    render(<VisitorTracker user={{ id: 1, role: 'approved' }} />);
+
+    await screen.findByRole('button', { name: 'Pat Lane' });
+    expect(screen.getByRole('button', { name: /^follow up$/i })).toBeInTheDocument();
+  });
+
+  test('the details offer the two ways of reaching them', async () => {
+    mockGuests([{ ...GUESTS[0], followUp: { active: null, lastDone: null } }]);
+    render(<VisitorTracker user={{ id: 1, role: 'approved' }} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Pat Lane' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('link', { name: /call 256-555-0143/i }))
+      .toHaveAttribute('href', 'tel:2565550143');
+    expect(within(dialog).getByRole('link', { name: /email pat@example.com/i }))
+      .toHaveAttribute('href', 'mailto:pat@example.com');
+  });
+
+  test('signed-out visitors are offered no follow-up at all', async () => {
+    mockGuests([{ ...GUESTS[0], followUp: { active: null, lastDone: null } }]);
+    render(<VisitorTracker user={null} />);
+
+    await screen.findByRole('button', { name: 'Pat Lane' });
+    expect(screen.queryByRole('button', { name: /follow up/i })).not.toBeInTheDocument();
   });
 
   test('only the guest area is offered the Add and Edit buttons', async () => {

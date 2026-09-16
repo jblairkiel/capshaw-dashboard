@@ -98,9 +98,9 @@ describe('workflow definitions', () => {
   test('describe() yields a node for every step and outcome', () => {
     const chart = engine.describe(getDefinition('visitor-follow-up'));
     expect(chart.nodes.filter(n => n.kind === 'step').map(n => n.id).sort())
-      .toEqual(['reach-out', 'reassign', 'record-outcome', 'try-again']);
+      .toEqual(['reach-out', 'reassign', 'try-again']);
     expect(chart.nodes.filter(n => n.kind === 'outcome').map(n => n.id).sort())
-      .toEqual(['interested', 'no-contact', 'not-interested']);
+      .toEqual(['contacted', 'no-contact']);
   });
 });
 
@@ -162,14 +162,14 @@ describe('starting a workflow', () => {
 
 describe('who a task lands on', () => {
   test('a role step is offered to anyone holding that role, not one person', () => {
-    // Jo does the reaching out; recording the outcome afterwards is the
-    // admins' step, and belongs to whichever of them picks it up.
+    // Jo was asked to reach out and cannot; reassigning is the guest area's
+    // step, and belongs to whichever of them picks it up.
     const { id } = followUp({ assignee: JO });
-    actOn(id, OTHER, 'spoke');
+    actOn(id, OTHER, 'decline', 'Away all month');
 
     const [task] = pendingTasks(id);
-    expect(instanceRow(id).step_id).toBe('record-outcome');
-    expect(task.assignee_role).toBe('admin');
+    expect(instanceRow(id).step_id).toBe('reassign');
+    expect(task.assignee_role).toBe('visitors');
     expect(task.assignee_user_id).toBeNull();
   });
 
@@ -193,7 +193,8 @@ describe('who a task lands on', () => {
     const { id } = followUp();
     const [task] = pendingTasks(id);
     expect(task.assignee_user_id).toBeNull();
-    expect(task.assignee_role).toBe('admin');
+    // The guests' own area, rather than admins generally — it is their page.
+    expect(task.assignee_role).toBe('visitors');
   });
 });
 
@@ -202,22 +203,22 @@ describe('who a task lands on', () => {
 describe('acting on a task', () => {
   test('an admin can action a role task, and it advances', () => {
     const { id } = followUp();
-    expect(actOn(id, ADMIN, 'spoke')).toMatchObject({ id });
-    expect(instanceRow(id).step_id).toBe('record-outcome');
+    expect(actOn(id, ADMIN, 'no-answer')).toMatchObject({ id });
+    expect(instanceRow(id).step_id).toBe('try-again');
     expect(pendingTasks(id)).toHaveLength(1);
   });
 
-  test('a member cannot action a task aimed at admins', () => {
+  test('a member who holds nothing cannot action a task aimed at an area', () => {
     const { id } = followUp();
-    expect(actOn(id, OTHER, 'spoke')).toMatchObject({ status: 403 });
+    expect(actOn(id, OTHER, 'emailed')).toMatchObject({ status: 403 });
     expect(instanceRow(id).step_id).toBe('reach-out');
   });
 
   test('the same task cannot be actioned twice', () => {
     const { id } = followUp();
     const task = pendingTasks(id)[0];
-    engine.act({ taskId: task.id, actionId: 'spoke', user: ADMIN });
-    expect(engine.act({ taskId: task.id, actionId: 'spoke', user: ADMIN })).toMatchObject({ status: 409 });
+    engine.act({ taskId: task.id, actionId: 'emailed', user: ADMIN });
+    expect(engine.act({ taskId: task.id, actionId: 'emailed', user: ADMIN })).toMatchObject({ status: 409 });
   });
 
   test('an unknown action is refused', () => {
@@ -233,12 +234,12 @@ describe('acting on a task', () => {
 
   test('reaching an outcome completes the instance and leaves no open task', () => {
     const { id } = followUp();
-    actOn(id, ADMIN, 'spoke');
-    actOn(id, ADMIN, 'not-interested');
+    actOn(id, ADMIN, 'no-answer');
+    actOn(id, ADMIN, 'give-up', 'No number on file');
 
     const row = instanceRow(id);
     expect(row.status).toBe('completed');
-    expect(row.outcome).toBe('not-interested');
+    expect(row.outcome).toBe('no-contact');
     expect(row.step_id).toBe('');
     expect(row.completed_at).toBeTruthy();
     expect(pendingTasks(id)).toHaveLength(0);
@@ -246,11 +247,11 @@ describe('acting on a task', () => {
 
   test('every action is recorded in the audit trail with its actor', () => {
     const { id } = followUp({ assignee: JO });
-    actOn(id, OTHER, 'spoke');
-    actOn(id, ADMIN, 'interested');
+    actOn(id, OTHER, 'decline', 'Away all month');
+    actOn(id, ADMIN, 'phoned');
 
     const events = db.prepare('SELECT * FROM workflow_events WHERE instance_id = ? ORDER BY id').all(id);
-    expect(events.map(e => e.action)).toEqual(['started', 'spoke', 'interested', 'completed']);
+    expect(events.map(e => e.action)).toEqual(['started', 'decline', 'phoned', 'completed']);
     expect(events[1].actor_user_id).toBe(OTHER.id);
     expect(events[2].actor_user_id).toBe(ADMIN.id);
   });
@@ -356,15 +357,14 @@ describe('inbox', () => {
     followUp();
 
     const [task] = engine.inbox(ADMIN);
-    expect(task.actions.map(a => a.id)).toEqual(['spoke', 'no-answer', 'decline']);
+    expect(task.actions.map(a => a.id)).toEqual(['emailed', 'phoned', 'no-answer', 'decline']);
     expect(task.actions.find(a => a.id === 'decline').requiresNote).toBe(true);
     expect(task.title).toBe('Follow up with Sam Visitor');
   });
 
   test('empties once the task is done', () => {
     const { id } = followUp();
-    actOn(id, ADMIN, 'spoke');
-    actOn(id, ADMIN, 'not-interested');
+    actOn(id, ADMIN, 'emailed');
     expect(engine.inbox(ADMIN)).toHaveLength(0);
   });
 });
@@ -389,8 +389,7 @@ describe('who can see an instance', () => {
 
   test('acting on a workflow keeps it visible afterwards', () => {
     const { id } = followUp();
-    actOn(id, ADMIN, 'spoke');
-    actOn(id, ADMIN, 'interested');
+    actOn(id, ADMIN, 'emailed');
     // Ada is an admin anyway; check the participant row was actually written.
     const rows = db.prepare('SELECT user_id FROM workflow_participants WHERE instance_id = ?').all(id);
     expect(rows.map(r => r.user_id).sort()).toEqual([MEMBER.id, ADMIN.id].sort());
@@ -416,7 +415,7 @@ describe('who can see an instance', () => {
 
   test('detail lists the steps already visited, for the chart', () => {
     const { id } = followUp();
-    actOn(id, ADMIN, 'spoke');
+    actOn(id, ADMIN, 'no-answer');
     expect(engine.detail(id, ADMIN).visited).toContain('reach-out');
   });
 });

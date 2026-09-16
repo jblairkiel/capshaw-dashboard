@@ -40,7 +40,11 @@ function safeJson(value) {
 /**
  * Record one change.
  *
- * @param {object|null} actor   req.user, or null for something the site did itself
+ * @param {object|null} actor   req.user, or null for something the site did itself.
+ *                              An admin viewing the portal as a member arrives
+ *                              here as the member, carrying `impersonatedBy` —
+ *                              the entry is filed under the member, and says
+ *                              who was really at the keyboard.
  * @param {object} entry
  * @param {string} entry.area      which area of responsibility this belongs to
  * @param {string} entry.action    create | update | delete | other
@@ -59,9 +63,12 @@ function record(actor, entry = {}) {
     else if (entry.before && !entry.after) details.removed = entry.before;
     else if (entry.after && !entry.before) details.created = entry.after;
 
+    const acting = actor?.impersonatedBy || null;
+
     db.prepare(`
-      INSERT INTO action_log (user_id, user_name, area, action, entity, entity_id, summary, details)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO action_log
+        (user_id, user_name, area, action, entity, entity_id, summary, details, acting_user_id, acting_user_name)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       actor?.id ?? null,
       actor?.name || (actor ? '' : 'the site'),
@@ -71,6 +78,8 @@ function record(actor, entry = {}) {
       entry.entityId === undefined || entry.entityId === null ? '' : String(entry.entityId),
       entry.summary || '',
       safeJson(details),
+      acting?.id ?? null,
+      acting?.name ?? '',
     );
   } catch (err) {
     // A history that cannot be written is worth a shout, but never worth
@@ -81,21 +90,26 @@ function record(actor, entry = {}) {
 
 // ─── Reading it back ──────────────────────────────────────────────────────────
 
-function list({ area = '', action = '', userId = null, entity = '', search = '', limit = 100, offset = 0 } = {}) {
+function list({ area = '', action = '', userId = null, entity = '', search = '', actingOnly = false, limit = 100, offset = 0 } = {}) {
   const where  = [];
   const params = [];
   if (area)   { where.push('area = ?');      params.push(area); }
   if (action) { where.push('action = ?');    params.push(action); }
   if (entity) { where.push('entity = ?');    params.push(entity); }
-  if (userId) { where.push('user_id = ?');   params.push(Number(userId)); }
+  // A person filter means "everything this account was behind", which includes
+  // what they did while viewing the portal as somebody else.
+  if (userId) { where.push('(user_id = ? OR acting_user_id = ?)'); params.push(Number(userId), Number(userId)); }
+  // Just the changes made while viewing the portal as somebody else.
+  if (actingOnly) where.push('acting_user_id IS NOT NULL');
   if (search) {
-    where.push('(summary LIKE ? OR user_name LIKE ? OR entity LIKE ?)');
-    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    where.push('(summary LIKE ? OR user_name LIKE ? OR acting_user_name LIKE ? OR entity LIKE ?)');
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
   }
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
   const rows = db.prepare(`
-    SELECT id, user_id, user_name, area, action, entity, entity_id, summary, details, created_at
+    SELECT id, user_id, user_name, area, action, entity, entity_id, summary, details, created_at,
+           acting_user_id, acting_user_name
       FROM action_log ${clause}
      ORDER BY id DESC
      LIMIT ? OFFSET ?

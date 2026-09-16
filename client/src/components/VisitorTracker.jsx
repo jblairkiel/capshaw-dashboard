@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Dialog from './Dialog';
+import WorkflowDialogButton from './WorkflowDialogButton';
 import { useIsNarrow } from '../lib/useMediaQuery';
 
 // Our guests: who they are, how to reach them, and when they have been with us.
@@ -43,6 +44,48 @@ async function send(url, options = {}) {
 
 function jsonBody(body) {
   return { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+}
+
+// Where this guest's follow-up has got to. Three states worth telling apart:
+// somebody is on it, somebody reached them, or nobody has tried.
+function followUpState(guest) {
+  if (guest.followUp?.active) return { tone: 'bg-amber-100 text-amber-800', label: 'Follow-up in progress' };
+  if (guest.last_contacted_at) {
+    const how = guest.last_contact_method === 'phone' ? 'Phoned' : 'Emailed';
+    return {
+      tone:  'bg-emerald-100 text-emerald-800',
+      label: `${how}${guest.last_contacted_by ? ` by ${guest.last_contacted_by}` : ''}`,
+    };
+  }
+  if (guest.followUp?.lastDone?.outcome === 'no-contact') {
+    return { tone: 'bg-gray-100 text-gray-600', label: 'Never reached' };
+  }
+  return null;
+}
+
+function FollowUpBadge({ guest }) {
+  const state = followUpState(guest);
+  if (!state) return null;
+  return <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${state.tone}`}>{state.label}</span>;
+}
+
+// The button that starts one for this guest, with them already chosen. It is
+// the same workflow the page's own panel starts — only the guest is settled.
+function FollowUpButton({ guest, user, onDone, className }) {
+  if (!user || guest.followUp?.active) return null;
+  return (
+    <WorkflowDialogButton
+      page="visitors"
+      user={user}
+      icon={false}
+      label={guest.last_contacted_at ? 'Follow up again' : 'Follow up'}
+      title={`Follow up with ${guest.name}`}
+      prefill={{ visitorId: String(guest.id) }}
+      startImmediately
+      onClosed={onDone}
+      className={className || 'text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold hover:text-church-navy transition-colors whitespace-nowrap'}
+    />
+  );
 }
 
 function Stat({ value, label, tone = 'text-church-navy' }) {
@@ -198,7 +241,7 @@ function GuestForm({ guest, onClose, onSaved, onDeleted }) {
 
 // ─── One guest, in full ───────────────────────────────────────────────────────
 
-function GuestDetail({ guest, canManage, onClose, onChanged, onEdit }) {
+function GuestDetail({ guest, canManage, user, onClose, onChanged, onEdit, onFollowUpDone }) {
   const [visit, setVisit] = useState({ date: '', service: '' });
   const [busy, setBusy]   = useState(false);
   const [error, setError] = useState('');
@@ -240,6 +283,51 @@ function GuestDetail({ guest, canManage, onClose, onChanged, onEdit }) {
       width="max-w-lg"
     >
       <div className="space-y-5">
+        {/* Follow-up: where it has got to, and how to reach them */}
+        <section className="rounded-xl border border-gray-200 px-4 py-3">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
+              <h4 className="text-sm font-semibold text-church-navy">Follow-up</h4>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {guest.followUp?.active
+                  ? 'Somebody has been asked to reach out. It closes when they do.'
+                  : guest.last_contacted_at
+                    ? `Last reached ${guest.last_contact_method === 'phone' ? 'by phone' : 'by email'}` +
+                      `${guest.last_contacted_by ? ` by ${guest.last_contacted_by}` : ''}.`
+                    : 'Nobody has been asked to reach out yet.'}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <FollowUpBadge guest={guest} />
+              <FollowUpButton
+                guest={guest}
+                user={user}
+                onDone={onFollowUpDone}
+                className="text-xs px-3 py-1.5 rounded-lg border border-church-navy text-church-navy hover:bg-church-navy hover:text-white transition-colors font-medium"
+              />
+            </div>
+          </div>
+
+          {/* Reaching them is the point of the follow-up, so the two ways of
+              doing it are here rather than buried in the details below. */}
+          {(guest.phone || guest.email) && (
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
+              {guest.phone && (
+                <a href={`tel:${guest.phone.replace(/[^0-9+]/g, '')}`}
+                   className="text-xs px-2.5 py-1 rounded-lg bg-church-cream text-church-navy hover:bg-church-gold/20 transition-colors">
+                  Call {guest.phone}
+                </a>
+              )}
+              {guest.email && (
+                <a href={`mailto:${guest.email}`}
+                   className="text-xs px-2.5 py-1 rounded-lg bg-church-cream text-church-navy hover:bg-church-gold/20 transition-colors">
+                  Email {guest.email}
+                </a>
+              )}
+            </div>
+          )}
+        </section>
+
         {/* Details */}
         <section>
           <h4 className="text-sm font-semibold text-church-navy mb-2">Details</h4>
@@ -356,7 +444,7 @@ function GuestDetail({ guest, canManage, onClose, onChanged, onEdit }) {
 
 // ─── The page ─────────────────────────────────────────────────────────────────
 
-export default function VisitorTracker() {
+export default function VisitorTracker({ user }) {
   const [guests, setGuests]   = useState([]);
   const [canManage, setCanManage] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -396,7 +484,6 @@ export default function VisitorTracker() {
 
   const totalVisits = filtered.reduce((s, g) => s + g.count, 0);
   const returning   = filtered.filter(g => g.count > 1).length;
-  const maxVisits   = filtered.length ? Math.max(...filtered.map(g => g.count)) : 0;
   const mostRecent  = filtered.reduce((best, g) => (g.lastKey > (best?.lastKey ?? -1) ? g : best), null);
 
   const open = guests.find(g => g.id === openId) || null;
@@ -462,6 +549,7 @@ export default function VisitorTracker() {
               {g.last ? `Last with us ${g.last}` : 'No visits recorded'}
               {g.invited_by ? ` · invited by ${g.invited_by}` : ''}
             </p>
+            <span className="inline-block mt-1.5"><FollowUpBadge guest={g} /></span>
           </button>
         ))}
         {filtered.length === 0 && (
@@ -480,7 +568,7 @@ export default function VisitorTracker() {
               <th className="px-4 py-3 text-right whitespace-nowrap">Visits</th>
               <th className="px-4 py-3 whitespace-nowrap">First visit</th>
               <th className="px-4 py-3 whitespace-nowrap">Last visit</th>
-              <th className="px-4 py-3 w-32">Bar</th>
+              <th className="px-4 py-3 w-28">Follow-up</th>
             </tr>
           </thead>
           <tbody>
@@ -498,6 +586,7 @@ export default function VisitorTracker() {
                     {g.name}
                   </button>
                   {g.status && <span className="block text-xs text-gray-400">{g.status}</span>}
+                  <span className="block mt-1"><FollowUpBadge guest={g} /></span>
                 </td>
                 <td className="px-4 py-2 text-gray-500">
                   {[g.phone, g.email].filter(Boolean).join(' · ') || <span className="text-gray-300">—</span>}
@@ -509,13 +598,10 @@ export default function VisitorTracker() {
                 <td className="px-4 py-2 text-right font-semibold text-church-navy">{g.count}</td>
                 <td className="px-4 py-2 text-gray-500 whitespace-nowrap">{g.first || '—'}</td>
                 <td className="px-4 py-2 text-gray-500 whitespace-nowrap">{g.last || '—'}</td>
-                <td className="px-4 py-2">
-                  <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-church-gold rounded-full"
-                      style={{ width: `${maxVisits ? (g.count / maxVisits) * 100 : 0}%` }}
-                    />
-                  </div>
+                <td className="px-4 py-2" onClick={e => e.stopPropagation()}>
+                  {g.followUp?.active
+                    ? <span className="text-xs text-amber-700">In progress</span>
+                    : <FollowUpButton guest={g} user={user} onDone={load} />}
                 </td>
               </tr>
             ))}
@@ -535,6 +621,8 @@ export default function VisitorTracker() {
         <GuestDetail
           guest={open}
           canManage={canManage}
+          user={user}
+          onFollowUpDone={load}
           onClose={() => setOpenId(null)}
           onChanged={updated => setGuests(prev => prev.map(g => (g.id === updated.id ? summarise(updated) : g)))}
           onEdit={() => setEditing(open)}
