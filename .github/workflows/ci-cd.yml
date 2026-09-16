@@ -155,19 +155,85 @@ jobs:
             npm run build
             cd ..
 
+            # How many times PM2 has had to restart the app. Compared before
+            # and after the health check below: a count that climbs while we
+            # watch means the app is crash-looping, which a single successful
+            # curl can otherwise hide.
+            restart_count() {
+              pm2 jlist 2>/dev/null | node -e "
+                let s = '';
+                process.stdin.on('data', d => s += d).on('end', () => {
+                  try {
+                    const app = JSON.parse(s).find(p => p.name === 'capshaw-dashboard');
+                    console.log(app ? app.pm2_env.restart_time : 'unknown');
+                  } catch { console.log('unknown'); }
+                });
+              " || echo unknown
+            }
+
             # Restart app
             pm2 restart ecosystem.config.js --env production
             pm2 save
 
-            # Health check
+            restarts_before=$(restart_count)
+
+            # ── Health check ─────────────────────────────────────────────────
+            # Polls rather than sleeping once: a cold start has to open the
+            # database and run migrations, which takes longer on a tired
+            # droplet than on the runner, and a fixed 5-second wait turns that
+            # into a failed deploy of code that is actually fine.
             echo "Waiting for server to start..."
-            sleep 5
-            if ! curl -sf http://localhost:3001/api/health; then
+            healthy=0
+            for _ in $(seq 1 20); do
+              if curl -sf --max-time 5 http://localhost:3001/api/health; then
+                healthy=1
+                break
+              fi
+              sleep 3
+            done
+
+            if [ "$healthy" != "1" ]; then
               echo ""
-              echo "=== HEALTH CHECK FAILED — last 40 PM2 log lines ==="
-              pm2 logs capshaw-dashboard --lines 40 --nostream 2>&1 || true
+              echo "=== HEALTH CHECK FAILED after 60s ==="
+              echo "PM2 restarts: ${restarts_before} -> $(restart_count)"
+              echo ""
+              # `pm2 logs --lines 40` is useless here: express-session prints a
+              # three-line MemoryStore warning on every single boot, so a
+              # crash-looping app fills the whole window with that warning and
+              # pushes the actual stack trace out of view. Read the log files
+              # directly, drop the known noise, and take a much deeper slice.
+              echo "=== Error log (last 200 lines, MemoryStore warning filtered) ==="
+              tail -n 200 "$HOME/.pm2/logs/capshaw-dashboard-error-1.log" 2>/dev/null \
+                | grep -v -e 'MemoryStore is not' \
+                          -e 'designed for a production environment' \
+                          -e 'memory, and will not scale past a single process' \
+                || true
+              echo ""
+              echo "=== Output log (last 60 lines) ==="
+              tail -n 60 "$HOME/.pm2/logs/capshaw-dashboard-out-1.log" 2>/dev/null || true
+              echo ""
               echo "=== PM2 describe ==="
               pm2 describe capshaw-dashboard 2>&1 || true
               exit 1
             fi
+
+            # Answering once is not the same as staying up. Give it a beat and
+            # see whether PM2 has had to restart it again in the meantime.
+            sleep 15
+            restarts_after=$(restart_count)
+            if [ "$restarts_before" != "unknown" ] && [ "$restarts_after" != "$restarts_before" ]; then
+              echo ""
+              echo "############################################################"
+              echo "# WARNING: the app answered the health check but PM2 has"
+              echo "# restarted it again since (${restarts_before} -> ${restarts_after})."
+              echo "# It is crashing and being restarted, not running steadily."
+              echo "# Recent errors:"
+              echo "############################################################"
+              tail -n 200 "$HOME/.pm2/logs/capshaw-dashboard-error-1.log" 2>/dev/null \
+                | grep -v -e 'MemoryStore is not' \
+                          -e 'designed for a production environment' \
+                          -e 'memory, and will not scale past a single process' \
+                | tail -n 40 || true
+            fi
+
             echo "Deployment verified OK"
