@@ -20,6 +20,12 @@ export const PREFERENCE_LEVELS = [
   { id: 'unavailable', label: 'Rather not', hint: 'Please do not schedule this',         tone: 'bg-gray-100 text-gray-500 border-gray-200' },
 ];
 
+export const GENDER_OPTIONS = [
+  { value: '',       label: 'Prefer not to say' },
+  { value: 'male',   label: 'Male' },
+  { value: 'female', label: 'Female' },
+];
+
 export const DIRECTORY_FIELDS = [
   { key: 'name',    label: 'Name',       placeholder: 'First Last' },
   { key: 'address', label: 'Address',    placeholder: '123 Main St' },
@@ -30,6 +36,10 @@ export const DIRECTORY_FIELDS = [
   { key: 'cell',    label: 'Cell Phone', placeholder: '(256) 555-0101' },
   { key: 'email',   label: 'Email',      placeholder: 'name@example.com' },
   { key: 'notes',   label: 'Notes',      placeholder: '' },
+  // Asked because this congregation rosters the worship jobs among its men, so
+  // the serving schedule needs to know who may sign up. Never guessed from a
+  // name, and "Prefer not to say" is a real answer.
+  { key: 'gender', label: 'Gender', type: 'select', options: GENDER_OPTIONS },
 ];
 
 export function levelInfo(level) {

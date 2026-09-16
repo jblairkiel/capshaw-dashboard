@@ -14,7 +14,9 @@
 
 const db = require('../db');
 const { getDefinition } = require('./definitions');
-const { ROLE_RANK, hasRole } = require('../middleware/auth');
+// `holds` answers both questions a workflow can ask of somebody: an area of
+// responsibility if the step names one, a rung on the role ladder otherwise.
+const { ROLE_RANK, AREA_IDS, hasRole, holds } = require('../middleware/auth');
 const mailer = require('../mail/mailer');
 const notify = require('../mail/notify');
 
@@ -96,7 +98,7 @@ function assignmentFor(step, definition, instance) {
 function canActOnTask(user, task) {
   if (!user || task.status !== 'pending') return false;
   if (task.assignee_user_id) return task.assignee_user_id === user.id;
-  if (task.assignee_role)    return hasRole(user, task.assignee_role);
+  if (task.assignee_role)    return holds(user, task.assignee_role);
   return false;
 }
 
@@ -118,7 +120,7 @@ function canViewInstance(user, instance, definition) {
   const roleTask = db.prepare(
     "SELECT assignee_role FROM workflow_tasks WHERE instance_id = ? AND status = 'pending' AND assignee_role <> ''"
   ).all(instance.id);
-  return roleTask.some(t => hasRole(user, t.assignee_role));
+  return roleTask.some(t => holds(user, t.assignee_role));
 }
 
 // ─── Starting an instance ─────────────────────────────────────────────────────
@@ -156,7 +158,7 @@ const startInstance = db.transaction((definition, data, user) => {
 function start({ definitionId, data, user }) {
   const definition = getDefinition(definitionId);
   if (!definition) return { error: 'Unknown workflow', status: 404 };
-  if (!hasRole(user, definition.startRole || 'approved')) {
+  if (!holds(user, definition.startRole || 'approved')) {
     return { error: 'You do not have permission to start this workflow', status: 403 };
   }
 
@@ -314,7 +316,9 @@ function act({ taskId, actionId, note = '', user }) {
 // aimed at a role they hold.
 function inbox(user) {
   if (!user) return [];
-  const roles = Object.keys(ROLE_RANK).filter(r => hasRole(user, r));
+  // Both vocabularies: the rungs this account outranks, and the areas it
+  // looks after, since a step may address either.
+  const roles = [...Object.keys(ROLE_RANK), ...AREA_IDS].filter(r => holds(user, r));
 
   const rows = db.prepare(`
     SELECT t.*, i.title AS instance_title, i.definition_id, i.data AS instance_data

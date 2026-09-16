@@ -4,7 +4,12 @@ const router  = express.Router();
 const https   = require('https');
 const qs      = require('querystring');
 
-const { requireAdmin } = require('../middleware/auth');
+const { requireArea } = require('../middleware/auth');
+const actionLog = require('../lib/actionLog');
+
+// Keeping the song list and what was sung when belongs to whoever looks after
+// the song tracker; everybody signed in can still read it.
+const requireSongs = requireArea('songs');
 const { parseCookies, cookieStr, mergeCookieStr } = require('./scraper');
 const db = require('../db');
 
@@ -278,7 +283,7 @@ router.get('/analytics', (req, res) => {
 });
 
 // POST /api/songs/sync — scrape latest records from admin panel
-router.post('/sync', requireAdmin, async (req, res) => {
+router.post('/sync', requireSongs, async (req, res) => {
   const pages    = Math.min(parseInt(req.body?.pages || 5), 20);
   const warnings = [];
   let   synced   = 0;
@@ -316,6 +321,13 @@ router.post('/sync', requireAdmin, async (req, res) => {
         synced++;
       }
     }
+    actionLog.record(req.user, {
+      area:    'songs',
+      action:  'other',
+      entity:  'song records',
+      summary: `Synced ${synced} song record${synced === 1 ? '' : 's'} from capshawchurch.org`,
+      details: { synced, pages, warnings },
+    });
     res.json({ success: true, synced, pages, warnings });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -323,7 +335,7 @@ router.post('/sync', requireAdmin, async (req, res) => {
 });
 
 // POST /api/songs/add — submit new service record to admin + cache locally
-router.post('/add', requireAdmin, async (req, res) => {
+router.post('/add', requireSongs, async (req, res) => {
   const { day, month, year, serviceId, leaderId, songIds } = req.body;
   if (!day || !month || !year || !serviceId || !leaderId || !Array.isArray(songIds) || !songIds.length)
     return res.status(400).json({ success: false, error: 'day, month, year, serviceId, leaderId, and songIds are required' });
@@ -369,6 +381,14 @@ router.post('/add', requireAdmin, async (req, res) => {
       } catch { /* non-fatal */ }
     }
 
+    actionLog.record(req.user, {
+      area:     'songs',
+      action:   'create',
+      entity:   'song service',
+      entityId: newId,
+      summary:  `Recorded ${songIds.length} song${songIds.length === 1 ? '' : 's'} for ${serviceName} on ${date}, led by ${leaderName}`,
+      details:  { date, service: serviceName, leader: leaderName, songs: songIds.length },
+    });
     res.json({ success: true, id: newId });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -448,7 +468,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/songs/:id/refresh — force re-fetch this one record from admin panel
-router.post('/:id/refresh', requireAdmin, async (req, res) => {
+router.post('/:id/refresh', requireSongs, async (req, res) => {
   const id = parseInt(req.params.id);
   try {
     const detail   = await fetchAdmin(`/admin/songsdb/edit/${id}`);
@@ -463,6 +483,14 @@ router.post('/:id/refresh', requireAdmin, async (req, res) => {
       ORDER  BY sx.position
     `).all(id);
 
+    actionLog.record(req.user, {
+      area:     'songs',
+      action:   'update',
+      entity:   'song service',
+      entityId: id,
+      summary:  `Refreshed the songs on service record #${id}`,
+      details:  { songs: songs.length },
+    });
     res.json({ success: true, songs });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

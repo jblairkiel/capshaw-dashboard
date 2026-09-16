@@ -3,7 +3,6 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Header from './components/Header';
 import OrderOfService from './components/OrderOfService';
 import CalendarView from './components/CalendarView';
-import JobAssignments from './components/JobAssignments';
 import AttendanceView from './components/AttendanceView';
 import LivestreamsView from './components/LivestreamsView';
 import VisitorTracker from './components/VisitorTracker';
@@ -22,7 +21,10 @@ import MobileNav from './components/MobileNav';
 import InboxView from './components/InboxView';
 import WorkflowDialogButton from './components/WorkflowDialogButton';
 import MailGroupsView from './components/MailGroupsView';
-import { hasWriteAccess, isAdmin } from './lib/roles';
+import ServingSchedule from './components/ServingSchedule';
+import ServingJobsView from './components/ServingJobsView';
+import ActionHistoryView from './components/ActionHistoryView';
+import { hasWriteAccess, isAdmin, hasArea } from './lib/roles';
 
 const API = '/api/members';
 
@@ -70,19 +72,32 @@ const PROFILE_GROUP = {
   ],
 };
 
-// Everything the church office looks after on the congregation's behalf.
-const OFFICE_GROUP = {
-  id: 'admin',
-  label: 'Church Office',
-  items: [
-    { id: 'users',       label: 'Members & Access' },
-    { id: 'database',    label: 'Church Records' },
-    { id: 'directory',   label: 'Member Directory' },
-    { id: 'mail-groups', label: 'Email Groups' },
-  ],
-};
+// Everything somebody looks after on the congregation's behalf. Each item is
+// shown only to the people who can actually use it: an admin sees all of it,
+// and a member sees the pages for the areas they hold and nothing else. The
+// server checks the same thing on every request — this only decides what is
+// worth showing.
+const OFFICE_ITEMS = [
+  { id: 'users',          label: 'Members & Access',  when: user => isAdmin(user) },
+  { id: 'action-history', label: 'Action History',    when: user => isAdmin(user) },
+  { id: 'database',       label: 'Church Records',    when: user => isAdmin(user) },
+  { id: 'serving-jobs',   label: 'Member Jobs',       when: user => hasArea(user, 'serving-schedule') },
+  { id: 'directory',      label: 'Member Directory',  when: user => hasArea(user, 'directory') },
+  { id: 'mail-groups',    label: 'Email Groups',      when: user => hasArea(user, 'mail-groups') },
+];
 
-const STANDALONE_TABS = new Set(['bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database', 'directory', 'profile', 'inbox', 'mail-groups', 'livestreams']);
+function officeGroupFor(user) {
+  const items = OFFICE_ITEMS.filter(item => item.when(user)).map(({ id, label }) => ({ id, label }));
+  return items.length ? [{ id: 'admin', label: 'Church Office', items }] : [];
+}
+
+// Pages that fetch what they need themselves, rather than waiting on the
+// scraped payload the app holds.
+const STANDALONE_TABS = new Set([
+  'bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database',
+  'directory', 'profile', 'inbox', 'mail-groups', 'livestreams',
+  'assignments', 'visitors', 'leadership', 'serving-jobs', 'action-history',
+]);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
 
@@ -182,7 +197,7 @@ function MainApp({ user, onLogout }) {
   const GROUPS = [
     ...BASE_GROUPS,
     PROFILE_GROUP,
-    ...(admin ? [OFFICE_GROUP] : []),
+    ...officeGroupFor(user),
   ];
 
   const lastUpdated = siteData?.lastUpdated
@@ -339,6 +354,41 @@ function MainApp({ user, onLogout }) {
           <LivestreamsView />
         </main>
       )}
+      {!updating && activeTab === 'assignments' && (
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <div className="space-y-4">
+            <div className="flex justify-end">
+              <WorkflowDialogButton page="assignments" user={user} label="Roster requests" title="Roster requests" />
+            </div>
+            <ServingSchedule />
+          </div>
+        </main>
+      )}
+      {!updating && activeTab === 'visitors' && (
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <div className="space-y-4">
+            <div className="flex justify-end">
+              <WorkflowDialogButton page="visitors" user={user} label="Follow-ups" title="Guest follow-ups" />
+            </div>
+            <VisitorTracker />
+          </div>
+        </main>
+      )}
+      {!updating && activeTab === 'leadership' && (
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <LeadershipView bulletins={siteData?.bulletins} />
+        </main>
+      )}
+      {!updating && activeTab === 'serving-jobs' && hasArea(user, 'serving-schedule') && (
+        <main className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
+          <ServingJobsView />
+        </main>
+      )}
+      {!updating && activeTab === 'action-history' && admin && (
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <ActionHistoryView />
+        </main>
+      )}
       {!updating && activeTab === 'inbox' && user && (
         <main className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
           <InboxView onGoToPage={setActiveTab} />
@@ -359,12 +409,12 @@ function MainApp({ user, onLogout }) {
           <DatabaseAdminView />
         </main>
       )}
-      {!updating && activeTab === 'mail-groups' && admin && (
+      {!updating && activeTab === 'mail-groups' && hasArea(user, 'mail-groups') && (
         <main className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
           <MailGroupsView />
         </main>
       )}
-      {!updating && activeTab === 'directory' && admin && (
+      {!updating && activeTab === 'directory' && hasArea(user, 'directory') && (
         <main className="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           <DirectoryView />
         </main>
@@ -373,25 +423,8 @@ function MainApp({ user, onLogout }) {
       {/* Data-dependent tabs */}
       {siteData && !updating && !STANDALONE_TABS.has(activeTab) && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
-          {activeTab === 'assignments'   && (
-            <div className="space-y-4">
-              <div className="flex justify-end">
-                <WorkflowDialogButton page="assignments" user={user} label="Roster requests" title="Roster requests" />
-              </div>
-              <JobAssignments data={siteData.jobAssignments} />
-            </div>
-          )}
-          {activeTab === 'attendance'    && <AttendanceView data={siteData.attendance} />}
-          {activeTab === 'visitors'      && (
-            <div className="space-y-4">
-              <div className="flex justify-end">
-                <WorkflowDialogButton page="visitors" user={user} label="Follow-ups" title="Guest follow-ups" />
-              </div>
-              <VisitorTracker data={siteData.visitors} />
-            </div>
-          )}
+          {activeTab === 'attendance'    && <AttendanceView data={siteData.attendance} user={user} />}
           {activeTab === 'anniversaries' && <AnniversariesView data={siteData.anniversaries} />}
-          {activeTab === 'leadership'    && <LeadershipView deacons={siteData.deacons} bulletins={siteData.bulletins} />}
         </main>
       )}
 

@@ -1,4 +1,4 @@
-import { render, screen, within, fireEvent } from '@testing-library/react';
+import { render, screen, within, fireEvent, waitFor } from '@testing-library/react';
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import AttendanceView from '../components/AttendanceView';
 import AnniversariesView from '../components/AnniversariesView';
@@ -98,34 +98,50 @@ describe('AnniversariesView', () => {
 // ─── LeadershipView ───────────────────────────────────────────────────────────
 
 describe('LeadershipView', () => {
-  test('shows no-data prompt when both props are null', () => {
-    render(<LeadershipView deacons={null} bulletins={null} />);
-    expect(screen.getByText(/No data/i)).toBeInTheDocument();
-  });
-
-  const DEACONS = [
-    { name: 'James Wilson', duties: ['Oversees benevolence', 'Grounds'] },
-    { name: 'Alan Reed',    duties: ['Building maintenance'] },
-    { name: 'Carl Dunn',    duties: [] },
+  const ELDERS = [
+    { id: 1, name: 'Ray Harris', phone: '256-555-0110', email: 'ray@example.com', notes: '', duties: ['Shepherding group 1'] },
   ];
 
-  // The names of the deacons in the grid, top to bottom.
-  function order() {
-    return screen.getAllByRole('row')
+  const DEACONS = [
+    { id: 1, name: 'James Wilson', duties: ['Oversees benevolence', 'Grounds'] },
+    { id: 2, name: 'Alan Reed',    duties: ['Building maintenance'] },
+    { id: 3, name: 'Carl Dunn',    duties: [] },
+  ];
+
+  function mockLeadership({ elders = ELDERS, deacons = DEACONS, canManage = false, bulletins = [] } = {}) {
+    const fetchMock = vi.fn(() => Promise.resolve({
+      json: () => Promise.resolve({ success: true, elders, deacons, bulletins, canManage }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  // The names in the deacons grid, top to bottom.
+  function deaconOrder() {
+    const table = screen.getByRole('button', { name: 'Sort by Deacon' }).closest('table');
+    return within(table).getAllByRole('row')
       .slice(1)                                   // past the header row
       .map(r => within(r).getAllByRole('cell')[0].textContent);
   }
 
-  test('renders deacon names', () => {
-    const deacons = [
-      { name: 'James Wilson', duties: ['Oversees benevolence'] },
-    ];
-    render(<LeadershipView deacons={deacons} bulletins={[]} />);
+  async function renderView(options) {
+    mockLeadership(options);
+    render(<LeadershipView />);
+    await screen.findByRole('button', { name: 'Sort by Deacon' });
+  }
+
+  test('lists the elders as well as the deacons', async () => {
+    await renderView();
+    expect(screen.getByText('Ray Harris')).toBeInTheDocument();
+    expect(screen.getByText(/256-555-0110/)).toBeInTheDocument();
+    expect(screen.getByText('1 elder')).toBeInTheDocument();
     expect(screen.getByText('James Wilson')).toBeInTheDocument();
   });
 
-  test('gives each deacon a row and his duties as a list', () => {
-    render(<LeadershipView deacons={DEACONS} bulletins={[]} />);
+  test('gives each deacon a row and his duties as a list', async () => {
+    await renderView();
 
     const row = screen.getByText('James Wilson').closest('tr');
     expect(within(row).getAllByRole('listitem').map(li => li.textContent))
@@ -133,57 +149,85 @@ describe('LeadershipView', () => {
     expect(screen.getByText('3 deacons')).toBeInTheDocument();
   });
 
-  test('a deacon with nothing recorded shows a dash rather than an empty list', () => {
-    render(<LeadershipView deacons={DEACONS} bulletins={[]} />);
+  test('a deacon with nothing recorded shows a dash rather than an empty list', async () => {
+    await renderView();
     const row = screen.getByText('Carl Dunn').closest('tr');
     expect(within(row).getByText('—')).toBeInTheDocument();
   });
 
-  test('sorts by name, and reverses when the heading is clicked again', () => {
-    render(<LeadershipView deacons={DEACONS} bulletins={[]} />);
-    expect(order()).toEqual(['Alan Reed', 'Carl Dunn', 'James Wilson']);
+  test('sorts by name, and reverses when the heading is clicked again', async () => {
+    await renderView();
+    expect(deaconOrder()).toEqual(['Alan Reed', 'Carl Dunn', 'James Wilson']);
 
     fireEvent.click(screen.getByRole('button', { name: 'Sort by Deacon' }));
-    expect(order()).toEqual(['James Wilson', 'Carl Dunn', 'Alan Reed']);
+    expect(deaconOrder()).toEqual(['James Wilson', 'Carl Dunn', 'Alan Reed']);
   });
 
-  test('sorts by how much each deacon looks after', () => {
-    render(<LeadershipView deacons={DEACONS} bulletins={[]} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Sort by Responsibilities' }));
-    expect(order()).toEqual(['Carl Dunn', 'Alan Reed', 'James Wilson']);
+  test('sorts by how much each deacon looks after', async () => {
+    await renderView();
+    const sorter = screen.getAllByRole('button', { name: 'Sort by Responsibilities' })[1];
 
-    fireEvent.click(screen.getByRole('button', { name: 'Sort by Responsibilities' }));
-    expect(order()).toEqual(['James Wilson', 'Alan Reed', 'Carl Dunn']);
+    fireEvent.click(sorter);
+    expect(deaconOrder()).toEqual(['Carl Dunn', 'Alan Reed', 'James Wilson']);
+
+    fireEvent.click(sorter);
+    expect(deaconOrder()).toEqual(['James Wilson', 'Alan Reed', 'Carl Dunn']);
   });
 
-  test('filters on a name or on a responsibility alike', () => {
-    render(<LeadershipView deacons={DEACONS} bulletins={[]} />);
-    const filter = screen.getByPlaceholderText(/Filter by name/i);
+  test('filters on a name or on a responsibility alike', async () => {
+    await renderView();
+    const filter = screen.getAllByPlaceholderText(/Filter by name/i)[1];
 
     fireEvent.change(filter, { target: { value: 'wilson' } });
-    expect(order()).toEqual(['James Wilson']);
+    expect(deaconOrder()).toEqual(['James Wilson']);
     expect(screen.getByText('1 deacon')).toBeInTheDocument();
 
     fireEvent.change(filter, { target: { value: 'maintenance' } });
-    expect(order()).toEqual(['Alan Reed']);
+    expect(deaconOrder()).toEqual(['Alan Reed']);
   });
 
-  test('a filter that matches nobody says so', () => {
-    render(<LeadershipView deacons={DEACONS} bulletins={[]} />);
-    fireEvent.change(screen.getByPlaceholderText(/Filter by name/i), { target: { value: 'zzz' } });
+  test('a filter that matches nobody says so', async () => {
+    await renderView();
+    fireEvent.change(screen.getAllByPlaceholderText(/Filter by name/i)[1], { target: { value: 'zzz' } });
     expect(screen.getByText(/No deacons match your filter/i)).toBeInTheDocument();
   });
 
-  test('says when there are no deacons at all', () => {
-    render(<LeadershipView deacons={[]} bulletins={[]} />);
-    expect(screen.getByText(/No deacon data found/i)).toBeInTheDocument();
+  test('says when there are no deacons at all', async () => {
+    await renderView({ deacons: [] });
+    expect(screen.getByText(/No deacons recorded yet/i)).toBeInTheDocument();
   });
 
-  test('renders bulletin labels', () => {
-    const bulletins = [
-      { url: '/files/bulletin.pdf', label: 'April 13, 2025' },
-    ];
-    render(<LeadershipView deacons={[]} bulletins={bulletins} />);
-    expect(screen.getByText('April 13, 2025')).toBeInTheDocument();
+  test('renders bulletin labels', async () => {
+    mockLeadership({ bulletins: [{ url: '/files/bulletin.pdf', label: 'April 13, 2025' }] });
+    render(<LeadershipView />);
+    expect(await screen.findByText('April 13, 2025')).toBeInTheDocument();
+  });
+
+  test('only the leadership area gets the Add and Edit buttons', async () => {
+    await renderView({ canManage: false });
+    expect(screen.queryByRole('button', { name: /add an elder/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /edit ray harris/i })).not.toBeInTheDocument();
+
+    vi.unstubAllGlobals();
+    await renderView({ canManage: true });
+    expect(screen.getAllByRole('button', { name: /add an elder/i })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: /edit ray harris/i })).toHaveLength(1);
+  });
+
+  test('editing an elder sends the responsibilities as a list, one per line', async () => {
+    const fetchMock = mockLeadership({ canManage: true });
+    render(<LeadershipView />);
+    fireEvent.click(await screen.findByRole('button', { name: /edit ray harris/i }));
+
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText(/^Responsibilities/), {
+      target: { value: 'Shepherding group 1\nBenevolence' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, opts]) => String(url).includes('/api/leadership/elders/1') && opts?.method === 'PATCH');
+      expect(JSON.parse(call[1].body).duties).toEqual(['Shepherding group 1', 'Benevolence']);
+    });
   });
 });

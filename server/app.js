@@ -23,6 +23,10 @@ const workflowRoutes             = require('./routes/workflows');
 const mailRoutes                 = require('./routes/mailGroups');
 const livestreamRoutes           = require('./routes/livestreams');
 const adminRoutes                = require('./routes/admin');
+const recordRoutes               = require('./routes/records');
+const servingRoutes              = require('./routes/serving');
+const visitorRoutes              = require('./routes/visitors');
+const leadershipRoutes           = require('./routes/leadership');
 const { requireSiteAuth }        = require('./middleware/auth');
 const { requireTrustedOrigin }   = require('./middleware/csrf');
 const rateLimit                  = require('express-rate-limit');
@@ -114,6 +118,10 @@ function createApp() {
   app.use('/api/workflows',       workflowRoutes);
   app.use('/api/mail',            mailRoutes);
   app.use('/api/livestreams',     livestreamRoutes);
+  app.use('/api/records',         recordRoutes);
+  app.use('/api/serving',         servingRoutes);
+  app.use('/api/visitors',        visitorRoutes);
+  app.use('/api/leadership',      leadershipRoutes);
 
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });

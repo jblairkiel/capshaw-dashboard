@@ -3,10 +3,12 @@ const router  = express.Router();
 const db      = require('../db');
 const groups  = require('../mail/groups');
 const mailer  = require('../mail/mailer');
-const { requireAdmin } = require('../middleware/auth');
+const { requireArea } = require('../middleware/auth');
+const actionLog = require('../lib/actionLog');
 
-// Who a message reaches is congregation-wide, so this is admin-only.
-router.use(requireAdmin);
+// Who a message reaches is congregation-wide, so this belongs to whoever looks
+// after the email groups — and to admins, who look after everything.
+router.use(requireArea('mail-groups'));
 
 // ─── GET /api/mail/groups ─────────────────────────────────────────────────────
 
@@ -66,6 +68,14 @@ router.post('/groups/:key/members', (req, res) => {
   const result = groups.addMember(group.id, { directoryId, email: req.body?.email || '' });
   if (result.error) return res.status(400).json({ success: false, error: result.error });
 
+  actionLog.record(req.user, {
+    area:     'mail-groups',
+    action:   'create',
+    entity:   'email group member',
+    entityId: group.key,
+    summary:  `Added ${req.body?.email || `directory member #${directoryId}`} to the ${group.name} group`,
+    details:  { group: group.key, directoryId, email: req.body?.email || '' },
+  });
   res.json({ success: true, members: groups.membersOf(group.id) });
 });
 
@@ -75,9 +85,18 @@ router.delete('/groups/:key/members/:memberId', (req, res) => {
   const group = groups.getGroup(req.params.key);
   if (!group) return res.status(404).json({ success: false, error: 'No such group' });
 
-  const result = groups.removeMember(group.id, Number(req.params.memberId));
+  const removed = groups.membersOf(group.id).find(m => String(m.id) === String(req.params.memberId));
+  const result  = groups.removeMember(group.id, Number(req.params.memberId));
   if (result.error) return res.status(404).json({ success: false, error: result.error });
 
+  actionLog.record(req.user, {
+    area:     'mail-groups',
+    action:   'delete',
+    entity:   'email group member',
+    entityId: group.key,
+    summary:  `Removed ${removed?.name || removed?.email || 'somebody'} from the ${group.name} group`,
+    details:  { group: group.key, member: removed || null },
+  });
   res.json({ success: true, members: groups.membersOf(group.id) });
 });
 
@@ -102,7 +121,15 @@ router.get('/outbox', (req, res) => {
 
 router.post('/outbox/send', async (req, res) => {
   try {
-    res.json({ success: true, ...(await mailer.drainOutbox({ limit: 50 })) });
+    const result = await mailer.drainOutbox({ limit: 50 });
+    actionLog.record(req.user, {
+      area:    'mail-groups',
+      action:  'other',
+      entity:  'outbox',
+      summary: `Sent the waiting email queue (${result.sent ?? 0} sent, ${result.failed ?? 0} failed)`,
+      details: result,
+    });
+    res.json({ success: true, ...result });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }

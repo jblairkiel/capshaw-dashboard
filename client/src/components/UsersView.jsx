@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { ROLES, roleInfo } from '../lib/roles';
+import { ROLES, AREAS, roleInfo, areaInfo, areasOf } from '../lib/roles';
 import { useCookieState } from '../lib/cookies';
+import { useIsPhone } from '../lib/useMediaQuery';
 
 // Remembers which columns the admin chose to see, so the grid comes back the
 // way they left it on their next visit.
@@ -115,6 +116,67 @@ function RoleBadge({ role }) {
   );
 }
 
+// What one account looks after, at a glance. An admin holds everything, which
+// is worth saying in one badge rather than ten.
+function AreaBadges({ user, limit = 3 }) {
+  if (user.role === 'admin') {
+    return <span className="text-xs px-2 py-0.5 rounded-full bg-church-gold/20 text-church-navy whitespace-nowrap">Every area</span>;
+  }
+  const areas = areasOf(user);
+  if (!areas.length) return <span className="text-gray-400 text-xs">Nothing yet</span>;
+
+  return (
+    <span className="flex flex-wrap gap-1">
+      {areas.slice(0, limit).map(id => (
+        <span key={id} className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${areaInfo(id).tone}`}>
+          {areaInfo(id).label}
+        </span>
+      ))}
+      {areas.length > limit && (
+        <span className="text-xs text-gray-400">+{areas.length - limit} more</span>
+      )}
+    </span>
+  );
+}
+
+// The checkbox list an admin hands areas out with. Areas are not a ladder, so
+// this is a plain set of independent choices — never a single "level".
+function AreaPicker({ user, busy, disabled, onChange }) {
+  const held = new Set(areasOf(user));
+
+  function toggle(id) {
+    const next = new Set(held);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    onChange([...next]);
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {AREAS.map(area => (
+        <label
+          key={area.id}
+          className={`flex gap-3 items-start p-2.5 rounded-lg border transition-colors ${
+            held.has(area.id) ? 'border-church-gold bg-church-gold/5' : 'border-gray-200'
+          } ${disabled ? 'opacity-60' : 'cursor-pointer hover:border-church-gold'}`}
+        >
+          <input
+            type="checkbox"
+            checked={held.has(area.id)}
+            disabled={disabled || busy}
+            aria-label={area.label}
+            onChange={() => toggle(area.id)}
+            className="mt-1 accent-church-gold"
+          />
+          <span className="min-w-0">
+            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${area.tone}`}>{area.label}</span>
+            <span className="block text-xs text-gray-600 mt-1">{area.description}</span>
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function SortIcon({ active, dir }) {
   if (!active) return (
     <svg className="w-3 h-3 opacity-30 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -165,6 +227,16 @@ const COLUMNS = [
     match:  'exact',
     sort:   u => ROLES.findIndex(r => r.id === u.role),
     render: u => <RoleBadge role={u.role} />,
+  },
+  {
+    key:    'areas',
+    label:  'Looks after',
+    filter: { type: 'select', options: AREAS.map(a => ({ value: a.id, label: a.label })) },
+    // Filtering and sorting work on the ids behind the badges, so picking
+    // "Song Tracker" finds everybody who holds it, admins included.
+    text:   u => areasOf(u).join(' '),
+    sort:   u => areasOf(u).length,
+    render: u => <AreaBadges user={u} />,
   },
   {
     key:    'provider',
@@ -339,6 +411,7 @@ function ApproveDialog({ user, people, busy, error, onApprove, onClose }) {
   const [choice, setChoice]     = useState(suggested ? 'existing' : 'new');
   const [personId, setPersonId] = useState(suggested);
   const [role, setRole]         = useState('approved');
+  const [areas, setAreas]       = useState([]);
   const [fields, setFields]     = useState(() => ({
     name:  user.name  || '',
     email: user.email || '',
@@ -355,11 +428,12 @@ function ApproveDialog({ user, people, busy, error, onApprove, onClose }) {
   function submit(e) {
     e.preventDefault();
     if (!ready) return;
+    const grants = role === 'admin' ? [] : areas;
     onApprove(
       user.id,
       choice === 'existing'
-        ? { role, directory_id: Number(personId) }
-        : { role, person: fields },
+        ? { role, areas: grants, directory_id: Number(personId) }
+        : { role, areas: grants, person: fields },
     );
   }
 
@@ -489,6 +563,35 @@ function ApproveDialog({ user, people, busy, error, onApprove, onClose }) {
               ))}
             </select>
             <p className="text-xs text-gray-500 mt-1">{roleInfo(role).description}</p>
+
+            {role !== 'admin' && (
+              <div className="mt-3">
+                <p className="text-sm font-semibold text-church-navy mb-1">Anything for them to look after?</p>
+                <p className="text-xs text-gray-500 mb-2">
+                  Optional, and changeable later. Each area is the Add and Edit buttons on one part
+                  of the site.
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {AREAS.map(area => {
+                    const on = areas.includes(area.id);
+                    return (
+                      <button
+                        key={area.id}
+                        type="button"
+                        aria-pressed={on}
+                        disabled={busy}
+                        onClick={() => setAreas(prev => (on ? prev.filter(a => a !== area.id) : [...prev, area.id]))}
+                        className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                          on ? 'bg-church-navy text-white border-church-navy' : 'bg-white text-gray-600 border-gray-200 hover:border-church-gold'
+                        }`}
+                      >
+                        {area.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -508,7 +611,7 @@ function ApproveDialog({ user, people, busy, error, onApprove, onClose }) {
 
 // ─── Detail panel: everything you can do to one account ───────────────────────
 
-function UserDetail({ user, currentUserId, people, busy, onSetRole, onLink, onRemove, onApproveRequest, onClose }) {
+function UserDetail({ user, currentUserId, people, busy, onSetRole, onSetAreas, onLink, onRemove, onApproveRequest, onClose }) {
   const isSelf  = user.id === currentUserId;
   const locked  = isSelf || !!user.is_owner;
   const waiting = user.role === 'pending' && !isSelf && !user.is_owner;
@@ -628,6 +731,29 @@ function UserDetail({ user, currentUserId, people, busy, onSetRole, onLink, onRe
             </div>
           </fieldset>
 
+          {/* Areas of responsibility */}
+          <div>
+            <h4 className="text-sm font-semibold text-church-navy mb-1">What {user.name} looks after</h4>
+            {user.role === 'admin' ? (
+              <p className="text-xs text-gray-600">
+                Admins look after every area. Make this account a member above to hand out areas
+                one at a time instead.
+              </p>
+            ) : user.role === 'pending' ? (
+              <p className="text-xs text-amber-700">
+                Approve this account first — an area means nothing until they can sign in.
+              </p>
+            ) : (
+              <>
+                <p className="text-xs text-gray-500 mb-2">
+                  Each area is the Add, Edit and Delete buttons on one part of the site, and nothing
+                  else. Saved as soon as you choose.
+                </p>
+                <AreaPicker user={user} busy={busy} onChange={areas => onSetAreas(user.id, areas)} />
+              </>
+            )}
+          </div>
+
           {/* Directory link */}
           <div>
             <label htmlFor={`person-${user.id}`} className="block text-sm font-semibold text-church-navy mb-1">
@@ -672,6 +798,64 @@ function UserDetail({ user, currentUserId, people, busy, onSetRole, onLink, onRe
 }
 
 // ─── The grid ─────────────────────────────────────────────────────────────────
+
+// Phones get a card each. A nine-column grid with a filter row cannot be made
+// readable at 375px wide, and this is a screen an elder is as likely to open on
+// a phone after services as at a desk.
+function UsersCards({ users, currentUserId, onOpen, onApprove }) {
+  return (
+    <div className="divide-y divide-gray-100">
+      {users.length === 0 && (
+        <p className="px-4 py-10 text-center text-gray-400 text-sm">No users match these filters.</p>
+      )}
+      {users.map(u => (
+        <div key={u.id} className="px-4 py-3">
+          <button onClick={() => onOpen(u.id)} className="w-full text-left">
+            <div className="flex items-center gap-3">
+              <Avatar user={u} size={40} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-medium text-church-navy truncate">{u.name}</span>
+                  {u.id === currentUserId && <span className="text-xs text-gray-400">(you)</span>}
+                  {u.is_owner && <span className="text-xs text-gray-400">(owner)</span>}
+                </div>
+                <p className="text-xs text-gray-500 truncate">{u.email || 'No email on file'}</p>
+              </div>
+              <RoleBadge role={u.role} />
+            </div>
+
+            <div className="mt-2 flex items-center gap-2 flex-wrap">
+              <AreaBadges user={u} limit={2} />
+            </div>
+
+            <p className="text-xs text-gray-400 mt-1.5">
+              {u.directory_name ? `Directory: ${u.directory_name}` : 'Not linked to the directory'}
+              {u.last_login ? ` · last seen ${formatDate(u.last_login)}` : ''}
+            </p>
+          </button>
+
+          <div className="mt-2 flex items-center gap-2">
+            {u.role === 'pending' && u.id !== currentUserId && !u.is_owner && (
+              <button
+                onClick={() => onApprove(u.id)}
+                className="text-xs px-2.5 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors font-medium"
+              >
+                Approve
+              </button>
+            )}
+            <button
+              onClick={() => onOpen(u.id)}
+              aria-label={`Manage ${u.name}`}
+              className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold hover:text-church-navy transition-colors"
+            >
+              Manage
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function UsersGrid({ users, columns, sort, onSort, filters, onFilter, currentUserId, onOpen, onApprove }) {
   return (
@@ -791,6 +975,12 @@ export default function UsersView({ currentUser }) {
 
   const [visibleKeys, setVisibleKeys] = useCookieState(COLUMN_COOKIE, DEFAULT_KEYS, { revive: reviveColumns });
 
+  // A nine-column grid with a filter row cannot be made readable at phone
+  // width, and this is a screen an elder is as likely to open on a phone after
+  // services as at a desk. So phones get a card each instead — one layout or
+  // the other, never both hidden behind CSS.
+  const onPhone = useIsPhone();
+
   const columns = useMemo(
     () => COLUMNS.filter(c => visibleKeys.includes(c.key)),
     [visibleKeys],
@@ -800,7 +990,7 @@ export default function UsersView({ currentUser }) {
     setLoading(true);
     Promise.all([
       fetch('/api/auth/users').then(r => r.json()),
-      fetch('/api/admin/directory?limit=2000&sort=name&dir=asc').then(r => r.json()).catch(() => ({ rows: [] })),
+      fetch('/api/records/directory?limit=2000&sort=name&dir=asc').then(r => r.json()).catch(() => ({ rows: [] })),
     ])
       .then(([usersJson, dirJson]) => {
         if (!usersJson.success) throw new Error(usersJson.error);
@@ -856,6 +1046,22 @@ export default function UsersView({ currentUser }) {
       return;
     }
     setApproveId(null);
+    load();
+  }
+
+  // The whole set this account should hold, not a change to it — the server
+  // replaces what is there, so a half-applied change is not possible.
+  async function setAreas(id, areas) {
+    setNotice('');
+    setBusy(true);
+    const res  = await fetch(`/api/auth/users/${id}/areas`, {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ areas }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!json.success) setNotice(json.error || 'Could not change what they look after');
+    setBusy(false);
     load();
   }
 
@@ -942,7 +1148,7 @@ export default function UsersView({ currentUser }) {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h2 className="section-heading mb-0">Members &amp; Access</h2>
         <div className="flex items-center gap-2">
-          <ColumnPicker visible={visibleKeys} onChange={setVisibleKeys} />
+          {!onPhone && <ColumnPicker visible={visibleKeys} onChange={setVisibleKeys} />}
           <button onClick={load} className="text-sm text-church-gold hover:text-church-navy transition-colors px-2">
             Refresh
           </button>
@@ -971,7 +1177,7 @@ export default function UsersView({ currentUser }) {
         <div className="flex items-center justify-between gap-3 px-4 py-3 flex-wrap">
           <p className="text-xs text-gray-500">
             Showing <strong className="text-church-navy">{rows.length}</strong> of {users.length} account{users.length === 1 ? '' : 's'}.
-            {' '}Click a row to open its details and assign a role.
+            {' '}{onPhone ? 'Tap somebody to open their details.' : 'Click a row to open its details and assign a role.'}
           </p>
           {activeFilters.length > 0 && (
             <button
@@ -986,29 +1192,59 @@ export default function UsersView({ currentUser }) {
           )}
         </div>
 
-        <UsersGrid
-          users={rows}
-          columns={columns}
-          sort={sort}
-          onSort={handleSort}
-          filters={filters}
-          onFilter={handleFilter}
-          currentUserId={currentUser.id}
-          onOpen={setOpenId}
-          onApprove={openApproval}
-        />
+        {onPhone ? (
+          <UsersCards
+            users={rows}
+            currentUserId={currentUser.id}
+            onOpen={setOpenId}
+            onApprove={openApproval}
+          />
+        ) : (
+          <UsersGrid
+            users={rows}
+            columns={columns}
+            sort={sort}
+            onSort={handleSort}
+            filters={filters}
+            onFilter={handleFilter}
+            currentUserId={currentUser.id}
+            onOpen={setOpenId}
+            onApprove={openApproval}
+          />
+        )}
       </div>
 
-      {/* What each role can do */}
+      {/* What an account is, and then what it looks after */}
       <div className="card">
-        <h3 className="font-semibold text-church-navy mb-3">What each role can do</h3>
+        <h3 className="font-semibold text-church-navy mb-1">What each role can do</h3>
+        <p className="text-xs text-gray-500 mb-3">
+          A role says what an account <em>is</em>. Everything below that is granted one area at a time.
+        </p>
         <dl className="space-y-2">
           {ROLES.map(r => (
             <div key={r.id} className="flex items-start gap-3">
-              <dt className="shrink-0 w-24">
+              <dt className="shrink-0 w-24 sm:w-28">
                 <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${r.tone}`}>{r.badge}</span>
               </dt>
               <dd className="text-xs text-gray-600 flex-1">{r.description}</dd>
+            </div>
+          ))}
+        </dl>
+
+        <h3 className="font-semibold text-church-navy mt-5 mb-1">Areas anybody can be given</h3>
+        <p className="text-xs text-gray-500 mb-3">
+          Each one is the Add, Edit and Delete buttons on one page. Holding one says nothing about
+          the others, and every change made under it is kept in the action history.
+        </p>
+        <dl className="space-y-2">
+          {AREAS.map(a => (
+            <div key={a.id} className="flex items-start gap-3">
+              <dt className="shrink-0 w-24 sm:w-40">
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${a.tone}`}>{a.label}</span>
+              </dt>
+              <dd className="text-xs text-gray-600 flex-1">
+                {a.description} <span className="text-gray-400">({a.page})</span>
+              </dd>
             </div>
           ))}
         </dl>
@@ -1021,6 +1257,7 @@ export default function UsersView({ currentUser }) {
           people={people}
           busy={busy}
           onSetRole={setRole}
+          onSetAreas={setAreas}
           onLink={link}
           onRemove={remove}
           onApproveRequest={openApproval}

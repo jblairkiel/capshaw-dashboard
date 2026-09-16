@@ -5,7 +5,13 @@ const mammoth = require('mammoth');
 const JSZip = require('jszip');
 const path = require('path');
 const fs = require('fs');
-const { requireAdmin } = require('../middleware/auth');
+const { requireArea } = require('../middleware/auth');
+const actionLog = require('../lib/actionLog');
+
+// The order of service for this Sunday is a document, so uploading and removing
+// one belongs to whoever looks after the worship order. Reading is open to
+// everybody signed in, as it always was.
+const requireWorshipOrder = requireArea('worship-order');
 
 // ─── Convert docx → HTML, preserving paragraph indentation ───────────────────
 // Mammoth strips w:ind (indentation) from paragraphs. We re-read the OOXML to
@@ -86,13 +92,21 @@ const upload = multer({
 });
 
 // POST /api/documents/upload — upload a Word doc and return HTML
-router.post('/upload', requireAdmin, upload.single('document'), async (req, res) => {
+router.post('/upload', requireWorshipOrder, upload.single('document'), async (req, res) => {
   if (!req.file) {
     return res.status(400).json({ success: false, error: 'No file uploaded' });
   }
 
   try {
     const { html, warnings } = await docxToHtml(req.file.path);
+    actionLog.record(req.user, {
+      area:    'worship-order',
+      action:  'create',
+      entity:  'order of service',
+      entityId: req.file.filename,
+      summary: `Uploaded the order of service "${req.file.originalname}"`,
+      details: { storedAs: req.file.filename, size: req.file.size },
+    });
     res.json({
       success: true,
       filename: req.file.originalname,
@@ -155,7 +169,7 @@ router.get('/:filename', async (req, res) => {
 });
 
 // DELETE /api/documents/:filename
-router.delete('/:filename', requireAdmin, (req, res) => {
+router.delete('/:filename', requireWorshipOrder, (req, res) => {
   const filePath = safeUploadPath(req.params.filename);
   if (!filePath) {
     return res.status(400).json({ success: false, error: 'Invalid filename' });
@@ -167,6 +181,13 @@ router.delete('/:filename', requireAdmin, (req, res) => {
 
   try {
     fs.unlinkSync(filePath);
+    actionLog.record(req.user, {
+      area:    'worship-order',
+      action:  'delete',
+      entity:  'order of service',
+      entityId: req.params.filename,
+      summary: `Deleted the order of service "${req.params.filename.replace(/^\d+-/, '')}"`,
+    });
     res.json({ success: true, message: 'File deleted' });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

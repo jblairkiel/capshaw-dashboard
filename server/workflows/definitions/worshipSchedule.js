@@ -30,9 +30,10 @@ module.exports = {
     'Build a month of worship assignments from the preferences people have set, ' +
     'review the draft, then publish it to the roster and tell everyone who is serving.',
 
-  // Only a coordinator (or an admin, who outranks them) starts one of these.
-  startRole: 'worship-coordinator',
-  fallbackRole: 'worship-coordinator',
+  // Building the roster is the Serving Schedule area's job — and an admin's,
+  // since admins look after every area.
+  startRole: 'serving-schedule',
+  fallbackRole: 'serving-schedule',
 
   fields: [
     { key: 'month',    label: 'Month to schedule', type: 'text', required: true, placeholder: 'June 2026' },
@@ -73,7 +74,7 @@ module.exports = {
         'Check the draft below. Publishing writes it to the roster and emails ' +
         'everyone who is serving. Regenerating produces a different but equally ' +
         'fair draft — nothing is written to the roster until you publish.',
-      assign: { role: 'worship-coordinator' },
+      assign: { role: 'serving-schedule' },
       actions: [
         {
           id: 'publish',

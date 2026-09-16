@@ -24,10 +24,13 @@ const request          = require('supertest');
 const express          = require('express');
 const announcementRouter = require('../routes/announcements');
 
-// Announcements are read-only for members: only an admin may write.
+// Announcements are read-only for members. Writing belongs to whoever looks
+// after them — and to the calendar area, but only for rows with a date.
 const ADMIN_USER    = { id: 1, role: 'admin' };
-const APPROVED_USER = { id: 2, role: 'approved' };
+const APPROVED_USER = { id: 2, role: 'approved', areas: [] };
 const PENDING_USER  = { id: 3, role: 'pending' };
+const WRITER_USER   = { id: 4, role: 'approved', areas: ['announcements'] };
+const CALENDAR_USER = { id: 5, role: 'approved', areas: ['calendar'] };
 
 function buildApp(user = null) {
   const app = express();
@@ -67,7 +70,7 @@ describe('POST /api/announcements', () => {
     expect(res.body.success).toBe(false);
   });
 
-  test('403 with an approved member — announcements are admin-only', async () => {
+  test('403 with a member who does not look after announcements', async () => {
     const res = await request(buildApp(APPROVED_USER))
       .post('/api/announcements')
       .send({ title: 'Members cannot post this' });
@@ -166,5 +169,62 @@ describe('PATCH /api/announcements/:id/toggle', () => {
       .patch('/api/announcements/99999/toggle');
     expect(res.status).toBe(404);
     expect(res.body.success).toBe(false);
+  });
+});
+
+// ─── Areas ────────────────────────────────────────────────────────────────────
+
+describe('who may write', () => {
+  test('the announcements area may post without being an admin', async () => {
+    const res = await request(buildApp(WRITER_USER))
+      .post('/api/announcements')
+      .send({ title: 'From the announcements area' });
+    expect(res.status).toBe(200);
+    expect(res.body.item.title).toBe('From the announcements area');
+  });
+
+  test('the calendar area may post a dated event', async () => {
+    const res = await request(buildApp(CALENDAR_USER))
+      .post('/api/announcements')
+      .send({ title: 'Fellowship meal', event_date: '2026-06-14' });
+    expect(res.status).toBe(200);
+    expect(res.body.item.event_date).toBe('2026-06-14');
+  });
+
+  test('the calendar area may not post an undated notice', async () => {
+    const res = await request(buildApp(CALENDAR_USER))
+      .post('/api/announcements')
+      .send({ title: 'Not a calendar entry' });
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/date/i);
+  });
+
+  test('the calendar area may not take the date off an event', async () => {
+    const created = await request(buildApp(WRITER_USER))
+      .post('/api/announcements')
+      .send({ title: 'Work day', event_date: '2026-07-04' });
+
+    const res = await request(buildApp(CALENDAR_USER))
+      .put(`/api/announcements/${created.body.item.id}`)
+      .send({ title: 'Work day', event_date: '' });
+    expect(res.status).toBe(403);
+
+    const still = await request(buildApp(null)).get('/api/announcements');
+    expect(still.body.items.find(i => i.id === created.body.item.id).event_date).toBe('2026-07-04');
+  });
+
+  test('the calendar area may edit and delete a dated event', async () => {
+    const created = await request(buildApp(WRITER_USER))
+      .post('/api/announcements')
+      .send({ title: 'Singing', event_date: '2026-08-02' });
+    const { id } = created.body.item;
+
+    const edited = await request(buildApp(CALENDAR_USER))
+      .put(`/api/announcements/${id}`)
+      .send({ title: 'Monthly singing', event_date: '2026-08-02' });
+    expect(edited.status).toBe(200);
+
+    const removed = await request(buildApp(CALENDAR_USER)).delete(`/api/announcements/${id}`);
+    expect(removed.status).toBe(200);
   });
 });

@@ -2,7 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import WorshipPreferences from './WorshipPreferences';
 import PersonPhoto from './PersonPhoto';
 
-const API = '/api/admin';
+// Adding somebody to the directory and removing them go through /api/records,
+// which is gated on the Member Directory area rather than on being an admin.
+// Editing an existing entry goes through the profile API, so the fields are
+// marked as hand-edited and survive the next sync.
+const API = '/api/records';
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
 function getLastName(fullName) {

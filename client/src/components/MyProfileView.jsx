@@ -49,14 +49,31 @@ function ContactForm({ person, onSaved, disabled }) {
         {DIRECTORY_FIELDS.map(f => (
           <label key={f.key} className={f.key === 'notes' ? 'block sm:col-span-2' : 'block'}>
             <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">{f.label}</span>
-            <input
-              type="text"
-              disabled={disabled}
-              value={form[f.key]}
-              placeholder={f.placeholder}
-              onChange={e => { setForm(p => ({ ...p, [f.key]: e.target.value })); setSaved(false); }}
-              className="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold disabled:bg-gray-50 disabled:text-gray-500"
-            />
+            {f.type === 'select' ? (
+              <select
+                disabled={disabled}
+                value={form[f.key]}
+                aria-label={f.label}
+                onChange={e => { setForm(p => ({ ...p, [f.key]: e.target.value })); setSaved(false); }}
+                className="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-church-gold disabled:bg-gray-50 disabled:text-gray-500"
+              >
+                {f.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            ) : (
+              <input
+                type="text"
+                disabled={disabled}
+                value={form[f.key]}
+                placeholder={f.placeholder}
+                onChange={e => { setForm(p => ({ ...p, [f.key]: e.target.value })); setSaved(false); }}
+                className="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold disabled:bg-gray-50 disabled:text-gray-500"
+              />
+            )}
+            {f.key === 'gender' && !disabled && (
+              <span className="block text-xs text-gray-400 mt-1">
+                The men of the congregation can sign up for worship jobs on the Serving Schedule.
+              </span>
+            )}
           </label>
         ))}
       </div>

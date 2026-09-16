@@ -50,10 +50,22 @@ function isPreferenceLevel(level) {
 
 // Everything a person may change about themselves or their household. `id` and
 // `edited_fields` are deliberately absent — they are bookkeeping, not content.
-const EDITABLE_FIELDS = ['name', 'address', 'city', 'state', 'zip', 'phone', 'cell', 'email', 'notes'];
+const EDITABLE_FIELDS = ['name', 'address', 'city', 'state', 'zip', 'phone', 'cell', 'email', 'notes', 'gender'];
+
+// ─── Gender ───────────────────────────────────────────────────────────────────
+// Recorded because this congregation rosters the worship jobs among its men, so
+// the serving schedule needs to know who may sign up. Chosen on My Info, never
+// guessed from a name, and '' means nobody has said.
+const GENDERS = ['male', 'female', ''];
+
+function isGender(value) {
+  return GENDERS.includes(String(value ?? '').toLowerCase());
+}
 
 module.exports = {
   householdKey,
+  GENDERS,
+  isGender,
   sameHousehold,
   WORSHIP_ROLES,
   PREFERENCE_LEVELS,

@@ -3,7 +3,11 @@ const passport  = require('passport');
 const { Strategy: GoogleStrategy }   = require('passport-google-oauth20');
 const { Strategy: FacebookStrategy } = require('passport-facebook');
 const db = require('../db');
-const { requireAuth, requireAdmin, ROLES, isRole } = require('../middleware/auth');
+const {
+  requireAuth, requireAdmin, ROLES, isRole,
+  AREAS, isArea, areasFor, setAreas, effectiveAreas, areaLabel,
+} = require('../middleware/auth');
+const actionLog = require('../lib/actionLog');
 const {
   passwordProblem, hashPassword, verifyPassword, burnTime,
   createToken, hashToken, MIN_LENGTH,
@@ -195,7 +199,9 @@ function localAccountFor(email) {
 // spread from the row: password_hash and the token digests live on it.
 function publicUser(user) {
   const { id, name, email, photo, role, provider, created_at, last_login, directory_id } = user;
-  return { id, name, email, photo, role, provider, created_at, last_login, directory_id };
+  // `areas` is what the client shows Add/Edit buttons from. The server checks
+  // it again on every write — this is only what the screen is allowed to offer.
+  return { id, name, email, photo, role, provider, created_at, last_login, directory_id, areas: effectiveAreas(user) };
 }
 
 // Issues a fresh confirmation token, stores only its digest, and mails the
@@ -582,7 +588,7 @@ function userRow(id) {
       FROM users u LEFT JOIN directory d ON d.id = u.directory_id
      WHERE u.id = ?
   `).get(id);
-  return { ...user, is_owner: isOwner(user) };
+  return { ...user, is_owner: isOwner(user), areas: effectiveAreas(user) };
 }
 
 function approveUser(actor, targetId, body = {}) {
@@ -613,7 +619,19 @@ function approveUser(actor, targetId, body = {}) {
      WHERE id = ?
   `).run(role, person.id, actor.id, target.id);
 
+  // An approval may hand out areas of responsibility at the same time, so a
+  // new song leader does not have to be approved and then edited again.
+  if (Array.isArray(body.areas)) setAreas(target.id, body.areas.filter(isArea));
+
   const user = userRow(target.id);
+  actionLog.record(actor, {
+    area:     'accounts',
+    action:   'update',
+    entity:   'account',
+    entityId: target.id,
+    summary:  `Approved ${target.name} as ${role}${user.areas.length ? ` looking after ${user.areas.map(areaLabel).join(', ')}` : ''}`,
+    details:  { role, directory_id: person.id, areas: user.areas },
+  });
   // Only the change from "waiting" to "in" is worth an email. Moving somebody
   // between member roles later is not news to them.
   if (wasPending) accountMail.approved({ user, personName: user.directory_name });
@@ -647,7 +665,20 @@ function changeRole(actor, targetId, role) {
     return approveUser(actor, targetId, { role });
   }
 
-  if (target.role !== role) db.prepare('UPDATE users SET role=? WHERE id=?').run(role, target.id);
+  if (target.role !== role) {
+    db.prepare('UPDATE users SET role=? WHERE id=?').run(role, target.id);
+    // Admins hold every area through the role itself, so grants made while they
+    // were a member would quietly come back on a demotion. Clear them instead.
+    if (role === 'admin' || role === 'pending') setAreas(target.id, []);
+    actionLog.record(actor, {
+      area:     'accounts',
+      action:   'update',
+      entity:   'account',
+      entityId: target.id,
+      summary:  `Changed ${target.name} from ${target.role} to ${role}`,
+      details:  { from: target.role, to: role },
+    });
+  }
 
   return { status: 200, body: { success: true, user: userRow(target.id) } };
 }
@@ -658,8 +689,8 @@ router.get('/users', requireAuth, requireAdmin, (req, res) => {
            u.directory_id, u.email_verified_at, u.approved_at, d.name AS directory_name
     FROM users u LEFT JOIN directory d ON d.id = u.directory_id
     ORDER BY u.role ASC, u.created_at ASC
-  `).all().map(u => ({ ...u, is_owner: isOwner(u) }));
-  res.json({ success: true, users, roles: ROLES });
+  `).all().map(u => ({ ...u, is_owner: isOwner(u), areas: effectiveAreas(u) }));
+  res.json({ success: true, users, roles: ROLES, areas: AREAS });
 });
 
 router.patch('/users/:id/role', requireAuth, requireAdmin, (req, res) => {
@@ -678,6 +709,61 @@ router.patch('/users/:id/approve', requireAuth, requireAdmin, (req, res) => {
 router.patch('/users/:id/revoke', requireAuth, requireAdmin, (req, res) => {
   const { status, body } = changeRole(req.user, req.params.id, 'pending');
   res.status(status).json(body);
+});
+
+// ─── What this account looks after ────────────────────────────────────────────
+//
+// Areas are not a ladder: each one is the Add/Edit/Delete buttons on one part
+// of the site, and holding one says nothing about the others. The body carries
+// the whole set the account should hold, not a change to it.
+
+router.patch('/users/:id/areas', requireAuth, requireAdmin, (req, res) => {
+  const target = db.prepare('SELECT * FROM users WHERE id=?').get(req.params.id);
+  if (!target) return res.status(404).json({ success: false, error: 'User not found' });
+
+  const wanted = req.body?.areas;
+  if (!Array.isArray(wanted)) {
+    return res.status(400).json({ success: false, error: 'areas must be an array of area ids' });
+  }
+  const unknown = wanted.filter(a => !isArea(a));
+  if (unknown.length) {
+    return res.status(400).json({ success: false, error: `Unknown area: ${unknown.join(', ')}` });
+  }
+
+  if (target.role === 'admin') {
+    return res.status(400).json({
+      success: false,
+      error: 'Admins already look after every area. Make them a member first to hand out areas one at a time.',
+    });
+  }
+  if (target.role === 'pending') {
+    return res.status(400).json({
+      success: false,
+      error: 'Approve this account first — an area means nothing until they can sign in.',
+    });
+  }
+
+  const before = areasFor(target.id);
+  setAreas(target.id, wanted);
+  const after = areasFor(target.id);
+
+  const added   = after.filter(a => !before.includes(a));
+  const removed = before.filter(a => !after.includes(a));
+  if (added.length || removed.length) {
+    actionLog.record(req.user, {
+      area:     'accounts',
+      action:   'update',
+      entity:   'account',
+      entityId: target.id,
+      summary:  [
+        added.length   ? `gave ${target.name} ${added.map(areaLabel).join(', ')}`     : '',
+        removed.length ? `took ${removed.map(areaLabel).join(', ')} from ${target.name}` : '',
+      ].filter(Boolean).join('; '),
+      details:  { added, removed, areas: after },
+    });
+  }
+
+  res.json({ success: true, user: userRow(target.id) });
 });
 
 // Link a login to the directory entry it belongs to. Needed whenever someone
@@ -722,6 +808,14 @@ router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {
     return res.status(400).json({ success: false, error: 'Cannot remove the last admin' });
   }
   db.prepare('DELETE FROM users WHERE id=?').run(target.id);
+  actionLog.record(req.user, {
+    area:     'accounts',
+    action:   'delete',
+    entity:   'account',
+    entityId: target.id,
+    summary:  `Removed ${target.name} from the portal`,
+    details:  { email: target.email, role: target.role },
+  });
   res.json({ success: true });
 });
 

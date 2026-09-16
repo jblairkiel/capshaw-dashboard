@@ -20,7 +20,7 @@ function buildApp(user = null) {
 }
 
 const ADMIN       = { id: 1, role: 'admin' };
-const COORDINATOR = { id: 2, role: 'worship-coordinator' };
+const AREA_HOLDER = { id: 2, role: 'approved', areas: ['attendance', 'songs'] };
 const MEMBER      = { id: 3, role: 'approved' };
 const PENDING     = { id: 4, role: 'pending' };
 
@@ -55,8 +55,8 @@ describe('access', () => {
     }
   });
 
-  test('members and worship coordinators get 403 — the table editor is admin-only', async () => {
-    for (const user of [PENDING, MEMBER, COORDINATOR]) {
+  test('members, whatever areas they look after, get 403 — the table editor is admin-only', async () => {
+    for (const user of [PENDING, MEMBER, AREA_HOLDER]) {
       const res = await request(buildApp(user)).get('/api/admin/overview');
       expect(res.status).toBe(403);
       expect(res.body.success).toBe(false);
@@ -89,9 +89,9 @@ describe('GET /api/admin/:table', () => {
     expect(res.body.error).toBe('Unknown table');
   });
 
-  test('caps limit at 500 and honours offset', async () => {
+  test('caps limit and honours offset', async () => {
     const res = await request(buildApp(ADMIN)).get('/api/admin/sermons?limit=9999&offset=1');
-    expect(res.body.limit).toBe(500);
+    expect(res.body.limit).toBe(2000);
     expect(res.body.offset).toBe(1);
     expect(res.body.rows).toHaveLength(2);
     // total counts every matching row, not just the page

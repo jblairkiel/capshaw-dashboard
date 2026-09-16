@@ -67,13 +67,17 @@ const _saveScraped = db.transaction((data) => {
     for (const r of ja.assignments) insJA.run(ja.month || '', r.date, r.service, r.job, r.name);
   }
 
-  // Visitors
-  db.prepare('DELETE FROM visitor_visits').run();
-  db.prepare('DELETE FROM visitors').run();
-  const insVisitor = db.prepare('INSERT INTO visitors (name) VALUES (?)');
-  const insVisit   = db.prepare('INSERT INTO visitor_visits (visitor_id, date, service) VALUES (?, ?, ?)');
+  // Visitors. A guest's details — how to reach them, who invited them, what was
+  // said — are typed in here and exist nowhere on the church site, so guests are
+  // matched by name and updated rather than wiped and re-created. Only the
+  // visit list, which the site is the authority for, is replaced.
+  const findVisitor = db.prepare('SELECT id FROM visitors WHERE lower(trim(name)) = lower(trim(?))');
+  const insVisitor  = db.prepare("INSERT INTO visitors (name, created_at) VALUES (?, datetime('now'))");
+  const clearVisits = db.prepare('DELETE FROM visitor_visits WHERE visitor_id = ?');
+  const insVisit    = db.prepare('INSERT INTO visitor_visits (visitor_id, date, service) VALUES (?, ?, ?)');
   for (const v of (data.visitors || [])) {
-    const vid = insVisitor.run(v.name).lastInsertRowid;
+    const vid = findVisitor.get(v.name)?.id ?? insVisitor.run(v.name).lastInsertRowid;
+    clearVisits.run(vid);
     for (const vv of (v.visits || [])) insVisit.run(vid, vv.date, vv.service);
   }
 
