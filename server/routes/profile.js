@@ -1,12 +1,13 @@
 const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
-const { requireAuth, requireApproved } = require('../middleware/auth');
+const { requireAuth, requireApproved, holdsArea } = require('../middleware/auth');
+const actionLog = require('../lib/actionLog');
 const photoStore = require('../lib/photoStore');
 const {
   sameHousehold,
   WORSHIP_ROLES, PREFERENCE_LEVELS, isWorshipRole, isPreferenceLevel,
-  EDITABLE_FIELDS,
+  EDITABLE_FIELDS, GENDERS, isGender,
 } = require('../lib/people');
 
 // ─── Lookups ──────────────────────────────────────────────────────────────────
@@ -56,11 +57,12 @@ function safeParse(json) {
 
 // ─── Authorization ────────────────────────────────────────────────────────────
 
-// Admins may edit anybody. Everyone else may edit only the people in their own
-// household, which requires their account to be linked to a directory entry.
+// Admins, and whoever looks after the member directory, may edit anybody.
+// Everyone else may edit only the people in their own household, which requires
+// their account to be linked to a directory entry.
 function canEdit(user, person) {
   if (!user || !person) return false;
-  if (user.role === 'admin') return true;
+  if (holdsArea(user, 'directory')) return true;
   if (!user.directory_id) return false;
   const self = getPerson(user.directory_id);
   return sameHousehold(self, person);
@@ -82,8 +84,10 @@ router.get('/me', requireAuth, (req, res) => {
     // Everyone is opted into the monthly worship summary until they say
     // otherwise, so this reflects the column's default of on.
     notifications: { monthlyReport: req.user.wants_monthly_report !== 0 },
-    // Admins edit from the directory screen; members edit their own household.
-    canEditAll:   req.user.role === 'admin',
+    genders:      GENDERS.filter(Boolean),
+    // The directory area edits from the directory screen; members edit their
+    // own household.
+    canEditAll:   holdsArea(req.user, 'directory'),
     canEdit:      req.user.role === 'admin' || (!!person && req.user.role !== 'pending'),
   });
 });
@@ -148,6 +152,13 @@ router.patch('/person/:id', requireApproved, (req, res) => {
   if (fields.includes('name') && !values[fields.indexOf('name')]) {
     return res.status(400).json({ success: false, error: 'Name cannot be empty' });
   }
+  if (fields.includes('gender')) {
+    const index = fields.indexOf('gender');
+    values[index] = values[index].toLowerCase();
+    if (!isGender(values[index])) {
+      return res.status(400).json({ success: false, error: `Gender must be one of: ${GENDERS.filter(Boolean).join(', ')}` });
+    }
+  }
 
   // Remember which fields were set by hand so the next scrape leaves them be.
   const edited = new Set(safeParse(person.edited_fields));
@@ -157,7 +168,17 @@ router.patch('/person/:id', requireApproved, (req, res) => {
     `UPDATE directory SET ${fields.map(f => `${f} = ?`).join(', ')}, edited_fields = ? WHERE id = ?`
   ).run(...values, JSON.stringify([...edited]), person.id);
 
-  res.json({ success: true, person: personPayload(getPerson(person.id)) });
+  const updated = getPerson(person.id);
+  actionLog.record(req.user, {
+    area:     holdsArea(req.user, 'directory') ? 'directory' : 'my-household',
+    action:   'update',
+    entity:   'directory entry',
+    entityId: person.id,
+    summary:  `Updated ${updated.name}'s details (${fields.join(', ')})`,
+    before:   person,
+    after:    updated,
+  });
+  res.json({ success: true, person: personPayload(updated) });
 });
 
 // ─── PUT /api/profile/person/:id/worship — role preferences ───────────────────
@@ -205,6 +226,14 @@ router.put('/person/:id/worship', requireApproved, (req, res) => {
   const notes = req.body.notes === undefined ? undefined : String(req.body.notes).trim();
   saveWorship(person.id, preferences, notes);
 
+  actionLog.record(req.user, {
+    area:     holdsArea(req.user, 'directory') ? 'directory' : 'my-household',
+    action:   'update',
+    entity:   'worship preferences',
+    entityId: person.id,
+    summary:  `Updated ${person.name}'s worship preferences`,
+    details:  { preferences },
+  });
   res.json({ success: true, person: personPayload(getPerson(person.id)) });
 });
 

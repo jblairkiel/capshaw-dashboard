@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import axios from 'axios';
-import { isAdmin } from '../lib/roles';
+import { hasArea } from '../lib/roles';
 
 const API = '/api';
 
@@ -152,7 +152,9 @@ function applyAssignments(htmlString, groups) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function OrderOfService({ user }) {
-  const canWrite = isAdmin(user);
+  // Uploading and removing this Sunday's order of service belongs to whoever
+  // looks after the worship order.
+  const canWrite = hasArea(user, 'worship-order');
   const [docList, setDocList]         = useState([]);
   const [currentDoc, setCurrentDoc]   = useState(null);
   const [html, setHtml]               = useState('');

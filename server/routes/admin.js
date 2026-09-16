@@ -4,97 +4,15 @@ const db      = require('../db');
 const { requireAdmin } = require('../middleware/auth');
 const { readData } = require('./scraper');
 const { syncDirectory } = require('../lib/directorySync');
+const { TABLES, tableDef } = require('../lib/recordTables');
+const store     = require('../lib/recordStore');
+const actionLog = require('../lib/actionLog');
 
-// Direct database editing is an admin-only privilege — members get the
-// feature tabs, admins additionally get every table below.
+// Direct database editing is an admin-only privilege — everyone else edits the
+// records their own area owns, through /api/records. Both go through
+// server/lib/recordStore.js, so either way the change lands in the action
+// history.
 router.use(requireAdmin);
-
-// ─── Table definitions ────────────────────────────────────────────────────────
-// Each entry describes columns (for SELECT), writable fields (for INSERT/UPDATE),
-// and an optional search column.
-
-const TABLES = {
-  attendance: {
-    columns:  ['id', 'date', 'service', 'count'],
-    writable: ['date', 'service', 'count'],
-    search:   'service',
-    order:    'date DESC',
-  },
-  sermons: {
-    columns:  ['id', 'date', 'title', 'speaker', 'type', 'series', 'service'],
-    writable: ['date', 'title', 'speaker', 'type', 'series', 'service'],
-    search:   'title',
-    order:    'date DESC',
-  },
-  job_assignments: {
-    columns:  ['id', 'month', 'date', 'service', 'job', 'name'],
-    writable: ['month', 'date', 'service', 'job', 'name'],
-    search:   'name',
-    order:    'month DESC, date ASC',
-  },
-  visitors: {
-    columns:  ['id', 'name'],
-    writable: ['name'],
-    search:   'name',
-    order:    'name ASC',
-  },
-  visitor_visits: {
-    columns:  ['id', 'visitor_id', 'date', 'service'],
-    writable: ['visitor_id', 'date', 'service'],
-    search:   'service',
-    order:    'date DESC',
-  },
-  anniversaries: {
-    columns:  ['id', 'month', 'date', 'names', 'month_num', 'day'],
-    writable: ['month', 'date', 'names', 'month_num', 'day'],
-    search:   'names',
-    order:    'month_num ASC, day ASC',
-  },
-  deacons: {
-    columns:  ['id', 'name'],
-    writable: ['name'],
-    search:   'name',
-    order:    'name ASC',
-  },
-  deacon_duties: {
-    columns:  ['id', 'deacon_id', 'duty', 'position'],
-    writable: ['deacon_id', 'duty', 'position'],
-    search:   'duty',
-    order:    'deacon_id ASC, position ASC',
-  },
-  bulletins: {
-    columns:  ['id', 'url', 'label'],
-    writable: ['url', 'label'],
-    search:   'label',
-    order:    'id DESC',
-  },
-  directory: {
-    // `photo` is readable so the directory can render it, but not writable —
-    // photos come from the vCard sync, not from typing a filename.
-    columns:  ['id', 'name', 'address', 'city', 'state', 'zip', 'phone', 'cell', 'email', 'notes', 'photo'],
-    writable: ['name', 'address', 'city', 'state', 'zip', 'phone', 'cell', 'email', 'notes'],
-    search:   'name',
-    order:    'name ASC',
-  },
-  announcements: {
-    columns:  ['id', 'type', 'title', 'body', 'event_date', 'event_time', 'location', 'priority', 'active', 'created_at'],
-    writable: ['type', 'title', 'body', 'event_date', 'event_time', 'location', 'priority', 'active'],
-    search:   'title',
-    order:    'created_at DESC',
-  },
-  songs: {
-    columns:  ['id', 'title', 'hymnal', 'number'],
-    writable: ['title', 'hymnal', 'number'],
-    search:   'title',
-    order:    'title ASC',
-  },
-  song_services: {
-    columns:  ['id', 'date', 'service', 'leader'],
-    writable: ['date', 'service', 'leader'],
-    search:   'leader',
-    order:    'date DESC',
-  },
-};
 
 // ─── Import from JSON cache (seeds DB without a live scrape) ─────────────────
 
@@ -122,12 +40,15 @@ router.post('/import-cache', (req, res) => {
         for (const r of ja.assignments) insJA.run(ja.month || '', r.date, r.service, r.job, r.name);
       }
 
-      db.prepare('DELETE FROM visitor_visits').run();
-      db.prepare('DELETE FROM visitors').run();
-      const insV  = db.prepare('INSERT INTO visitors (name) VALUES (?)');
+      // Guests are matched by name and kept, for the same reason as in
+      // routes/scraper.js: their details are typed in here and nowhere else.
+      const findV = db.prepare('SELECT id FROM visitors WHERE lower(trim(name)) = lower(trim(?))');
+      const insV  = db.prepare("INSERT INTO visitors (name, created_at) VALUES (?, datetime('now'))");
+      const clrVV = db.prepare('DELETE FROM visitor_visits WHERE visitor_id = ?');
       const insVV = db.prepare('INSERT INTO visitor_visits (visitor_id, date, service) VALUES (?, ?, ?)');
       for (const v of (d.visitors || [])) {
-        const vid = insV.run(v.name).lastInsertRowid;
+        const vid = findV.get(v.name)?.id ?? insV.run(v.name).lastInsertRowid;
+        clrVV.run(vid);
         for (const vv of (v.visits || [])) insVV.run(vid, vv.date, vv.service);
       }
 
@@ -223,37 +144,45 @@ router.get('/overview', (req, res) => {
   }
 });
 
+// ─── Action history ───────────────────────────────────────────────────────────
+// Who changed what, and when. Admin-only, and read-only: entries are written by
+// the routes that make the change, never by anybody typing here.
+
+router.get('/action-log', (req, res) => {
+  try {
+    const { rows, total } = actionLog.list({
+      area:   req.query.area   || '',
+      action: req.query.action || '',
+      entity: req.query.entity || '',
+      userId: req.query.userId || null,
+      search: req.query.search?.trim() || '',
+      limit:  req.query.limit,
+      offset: req.query.offset,
+    });
+
+    // The people and areas actually present, so the filters only ever offer
+    // something that will match at least one entry.
+    const actors = db.prepare(`
+      SELECT user_id AS id, user_name AS name, COUNT(*) AS entries
+        FROM action_log GROUP BY user_id, user_name ORDER BY name ASC
+    `).all();
+    const areas = db.prepare(
+      'SELECT area, COUNT(*) AS entries FROM action_log WHERE area <> \'\' GROUP BY area ORDER BY area ASC'
+    ).all();
+
+    res.json({ success: true, rows, total, actors, areas });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 // ─── Generic list ─────────────────────────────────────────────────────────────
 
 router.get('/:table', (req, res) => {
   try {
-    const def = TABLES[req.params.table];
-    if (!def) return res.status(404).json({ success: false, error: 'Unknown table' });
-
-    const limit  = Math.min(parseInt(req.query.limit) || 100, 500);
-    const offset = parseInt(req.query.offset) || 0;
-
-    // Sort: only allow columns in this table's definition
-    const sortCol = def.columns.includes(req.query.sort) ? req.query.sort : null;
-    const sortDir = req.query.dir === 'asc' ? 'ASC' : 'DESC';
-    const order   = sortCol ? `"${sortCol}" ${sortDir}` : def.order;
-
-    // Per-column filters via f_<col>=value
-    const conditions = [];
-    const params     = [];
-    for (const col of def.columns) {
-      const val = req.query[`f_${col}`]?.trim();
-      if (val) {
-        conditions.push(`"${col}" LIKE ?`);
-        params.push(`%${val}%`);
-      }
-    }
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-
-    const rows  = db.prepare(`SELECT ${def.columns.join(', ')} FROM "${req.params.table}" ${where} ORDER BY ${order} LIMIT ? OFFSET ?`).all(...params, limit, offset);
-    const total = db.prepare(`SELECT COUNT(*) AS n FROM "${req.params.table}" ${where}`).get(...params).n;
-
-    res.json({ success: true, rows, total, limit, offset });
+    const result = store.list(req.params.table, req.query);
+    if (!result) return res.status(404).json({ success: false, error: 'Unknown table' });
+    res.json({ success: true, ...result });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -263,18 +192,9 @@ router.get('/:table', (req, res) => {
 
 router.post('/:table', (req, res) => {
   try {
-    const def = TABLES[req.params.table];
-    if (!def) return res.status(404).json({ success: false, error: 'Unknown table' });
-
-    const fields = def.writable.filter(f => req.body[f] !== undefined);
-    if (!fields.length) return res.status(400).json({ success: false, error: 'No valid fields' });
-
-    const result = db.prepare(
-      `INSERT INTO "${req.params.table}" (${fields.join(', ')}) VALUES (${fields.map(() => '?').join(', ')})`
-    ).run(...fields.map(f => req.body[f] ?? null));
-
-    const row = db.prepare(`SELECT ${def.columns.join(', ')} FROM "${req.params.table}" WHERE id = ?`).get(result.lastInsertRowid);
-    res.json({ success: true, row });
+    const result = store.create(req.params.table, req.body ?? {}, req.user);
+    if (result.error) return res.status(result.status || 400).json({ success: false, error: result.error });
+    res.json({ success: true, row: result.row });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -284,18 +204,9 @@ router.post('/:table', (req, res) => {
 
 router.patch('/:table/:id', (req, res) => {
   try {
-    const def = TABLES[req.params.table];
-    if (!def) return res.status(404).json({ success: false, error: 'Unknown table' });
-
-    const fields = def.writable.filter(f => req.body[f] !== undefined);
-    if (!fields.length) return res.status(400).json({ success: false, error: 'No valid fields' });
-
-    db.prepare(
-      `UPDATE "${req.params.table}" SET ${fields.map(f => `${f} = ?`).join(', ')} WHERE id = ?`
-    ).run(...fields.map(f => req.body[f] ?? null), req.params.id);
-
-    const row = db.prepare(`SELECT ${def.columns.join(', ')} FROM "${req.params.table}" WHERE id = ?`).get(req.params.id);
-    res.json({ success: true, row });
+    const result = store.update(req.params.table, req.params.id, req.body ?? {}, req.user);
+    if (result.error) return res.status(result.status || 400).json({ success: false, error: result.error });
+    res.json({ success: true, row: result.row });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -305,9 +216,10 @@ router.patch('/:table/:id', (req, res) => {
 
 router.delete('/:table/:id', (req, res) => {
   try {
-    if (!TABLES[req.params.table]) return res.status(404).json({ success: false, error: 'Unknown table' });
+    if (!tableDef(req.params.table)) return res.status(404).json({ success: false, error: 'Unknown table' });
     if (req.params.table === 'users') return res.status(403).json({ success: false, error: 'Manage users via /api/auth' });
-    db.prepare(`DELETE FROM "${req.params.table}" WHERE id = ?`).run(req.params.id);
+    const result = store.remove(req.params.table, req.params.id, req.user);
+    if (result.error) return res.status(result.status || 400).json({ success: false, error: result.error });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -319,9 +231,17 @@ router.delete('/:table/:id', (req, res) => {
 router.delete('/:table', (req, res) => {
   try {
     const protected_ = new Set(['users', 'songs', 'song_services', 'service_songs']);
-    if (!TABLES[req.params.table]) return res.status(404).json({ success: false, error: 'Unknown table' });
+    if (!tableDef(req.params.table)) return res.status(404).json({ success: false, error: 'Unknown table' });
     if (protected_.has(req.params.table)) return res.status(403).json({ success: false, error: 'Cannot bulk-clear this table' });
-    db.prepare(`DELETE FROM "${req.params.table}"`).run();
+
+    const { changes } = db.prepare(`DELETE FROM "${req.params.table}"`).run();
+    actionLog.record(req.user, {
+      area:    tableDef(req.params.table).area,
+      action:  'delete',
+      entity:  tableDef(req.params.table).entity,
+      summary: `Cleared every row from ${req.params.table} (${changes} removed)`,
+      details: { table: req.params.table, removed: changes },
+    });
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

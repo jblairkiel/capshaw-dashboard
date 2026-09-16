@@ -52,7 +52,7 @@ describe('DirectoryView', () => {
 
     await screen.findByText('Harris Family');
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/admin/directory?limit=2000&sort=name&dir=asc',
+      '/api/records/directory?limit=2000&sort=name&dir=asc',
       expect.objectContaining({ credentials: 'include' })
     );
   });
@@ -261,7 +261,7 @@ describe('DirectoryView — changing the directory', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      '/api/admin/directory', expect.objectContaining({ method: 'POST' })
+      '/api/records/directory', expect.objectContaining({ method: 'POST' })
     ));
     expect(await screen.findByText('Person Family')).toBeInTheDocument();
   });
@@ -309,7 +309,7 @@ describe('DirectoryView — changing the directory', () => {
     expect(globalThis.confirm).toHaveBeenCalled();
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      '/api/admin/directory/1', expect.objectContaining({ method: 'DELETE' })
+      '/api/records/directory/1', expect.objectContaining({ method: 'DELETE' })
     ));
     await waitFor(() => expect(screen.queryByText('Ray Harris')).not.toBeInTheDocument());
   });

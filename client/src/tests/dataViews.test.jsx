@@ -7,7 +7,7 @@ const choose = (select, value) => fireEvent.change(select, { target: { value } }
 
 import LivestreamsView from '../components/LivestreamsView';
 import VisitorTracker  from '../components/VisitorTracker';
-import JobAssignments  from '../components/JobAssignments';
+import ServingSchedule from '../components/ServingSchedule';
 import PersonPhoto     from '../components/PersonPhoto';
 
 // The scraped data views: each one takes what the scraper found and lets a
@@ -90,164 +90,313 @@ describe('LivestreamsView', () => {
 });
 
 // ─── VisitorTracker ───────────────────────────────────────────────────────────
+//
+// The guest page used to render only what the church website knew — a name off
+// a heading and a list of dates — so it read as comments and visit history with
+// nobody's details on it. It now reads our own records, which carry the details.
 
 describe('VisitorTracker', () => {
-  const VISITORS = [
-    { name: 'Pat Lane', visits: [{ date: '04/13/25', service: 'AM' }, { date: '03/30/25', service: 'PM' }] },
-    { name: 'Sam Ford', visits: [{ date: '04/06/25', service: 'AM' }] },
+  const GUESTS = [
+    {
+      id: 1, name: 'Pat Lane', phone: '256-555-0143', email: 'pat@example.com',
+      city: 'Harvest', state: 'AL', invited_by: 'The Carters', status: 'Visited twice',
+      notes: 'Asked about the Wednesday class',
+      visits: [{ id: 1, date: '04/13/25', service: 'AM' }, { id: 2, date: '03/30/25', service: 'PM' }],
+    },
+    {
+      id: 2, name: 'Sam Ford', phone: '', email: '', city: '', state: '',
+      invited_by: '', status: '', notes: '',
+      visits: [{ id: 3, date: '04/06/25', service: 'AM' }],
+    },
   ];
 
-  test('prompts for an update when nothing has been loaded', () => {
-    render(<VisitorTracker data={null} />);
-    expect(screen.getByText(/No data/i)).toBeInTheDocument();
-  });
+  function mockGuests(visitors = GUESTS, canManage = false) {
+    const fetchMock = vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ success: true, visitors, canManage }) }));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
 
-  test('lists each guest with how often they came and when', () => {
-    render(<VisitorTracker data={VISITORS} />);
-    const row = screen.getByRole('button', { name: 'Pat Lane' }).closest('tr');
+  afterEach(() => { vi.unstubAllGlobals(); });
 
-    expect(within(row).getByText('2')).toBeInTheDocument();
+  test('shows each guest by name, with their details beside them', async () => {
+    mockGuests();
+    render(<VisitorTracker />);
+
+    const row = (await screen.findByRole('button', { name: 'Pat Lane' })).closest('tr');
+    expect(within(row).getByText(/256-555-0143/)).toBeInTheDocument();
+    expect(within(row).getByText('Harvest, AL')).toBeInTheDocument();
+    expect(within(row).getByText('The Carters')).toBeInTheDocument();
     expect(within(row).getByText('03/30/25')).toBeInTheDocument();   // first visit
     expect(within(row).getByText('04/13/25')).toBeInTheDocument();   // last visit
     expect(screen.getByText('2 guests')).toBeInTheDocument();
   });
 
-  test('counts the guests, their visits and who came back', () => {
-    render(<VisitorTracker data={VISITORS} />);
+  test('counts the guests, their visits and who came back', async () => {
+    mockGuests();
+    render(<VisitorTracker />);
+    await screen.findByRole('button', { name: 'Pat Lane' });
+
     expect(screen.getByText('Visits recorded').previousSibling).toHaveTextContent('3');
     expect(screen.getByText('Came back').previousSibling).toHaveTextContent('1');
     expect(screen.getByText('Most recent visit').previousSibling).toHaveTextContent('04/13/25');
   });
 
-  test('says "1 guest" rather than "1 guests"', () => {
-    render(<VisitorTracker data={VISITORS} />);
+  test('says "1 guest" rather than "1 guests"', async () => {
+    mockGuests();
+    render(<VisitorTracker />);
+    await screen.findByRole('button', { name: 'Pat Lane' });
+
     type(screen.getByPlaceholderText(/Search guests/i), 'Pat');
     expect(screen.getByText('1 guest')).toBeInTheDocument();
   });
 
-  test('a guest with no recorded visits shows a dash rather than "undefined"', () => {
-    render(<VisitorTracker data={[{ name: 'Jo Reed', visits: [] }]} />);
-    const row = screen.getByRole('button', { name: 'Jo Reed' }).closest('tr');
-    expect(within(row).getAllByText('—')).toHaveLength(2);
+  test('a guest with no recorded visits shows a dash rather than "undefined"', async () => {
+    mockGuests([{ id: 9, name: 'Jo Reed', visits: [] }]);
+    render(<VisitorTracker />);
+
+    const row = (await screen.findByRole('button', { name: 'Jo Reed' })).closest('tr');
+    expect(within(row).getAllByText('—').length).toBeGreaterThan(0);
   });
 
-  test('the visit history is spelled out when the guest is clicked', () => {
-    render(<VisitorTracker data={VISITORS} />);
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Pat Lane' }));
+  test('the details and visit history are spelled out when the guest is clicked', async () => {
+    mockGuests();
+    render(<VisitorTracker />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Pat Lane' }));
 
     const dialog = screen.getByRole('dialog');
-    expect(within(dialog).getByText('Pat Lane')).toBeInTheDocument();
     expect(within(dialog).getByText('2 visits on record')).toBeInTheDocument();
+    expect(within(dialog).getByText('pat@example.com')).toBeInTheDocument();
+    expect(within(dialog).getByText('The Carters')).toBeInTheDocument();
+    expect(within(dialog).getByText('Asked about the Wednesday class')).toBeInTheDocument();
     expect(within(dialog).getByText('03/30/25')).toBeInTheDocument();
     expect(within(dialog).getByText('PM')).toBeInTheDocument();
   });
 
-  test('the details are for the guest that was clicked, not another', () => {
-    render(<VisitorTracker data={VISITORS} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Sam Ford' }));
+  test('a guest we know little about says so rather than showing empty fields', async () => {
+    mockGuests();
+    render(<VisitorTracker />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Sam Ford' }));
 
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText('1 visit on record')).toBeInTheDocument();
+    expect(within(dialog).getByText(/Nothing beyond their name yet/i)).toBeInTheDocument();
     expect(within(dialog).queryByText('03/30/25')).not.toBeInTheDocument();
   });
 
-  test('the details close again', () => {
-    render(<VisitorTracker data={VISITORS} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Pat Lane' }));
+  test('the details close again', async () => {
+    mockGuests();
+    render(<VisitorTracker />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Pat Lane' }));
     fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  test('searching by name narrows the list', () => {
-    render(<VisitorTracker data={VISITORS} />);
-    type(screen.getByPlaceholderText(/Search guests/i), 'sam');
-    expect(screen.getByText('Sam Ford')).toBeInTheDocument();
-    expect(screen.queryByText('Pat Lane')).not.toBeInTheDocument();
+  test('searching matches a detail as well as a name', async () => {
+    mockGuests();
+    render(<VisitorTracker />);
+    await screen.findByRole('button', { name: 'Pat Lane' });
+
+    type(screen.getByPlaceholderText(/Search guests/i), 'carters');
+    expect(screen.getByText('Pat Lane')).toBeInTheDocument();
+    expect(screen.queryByText('Sam Ford')).not.toBeInTheDocument();
   });
 
-  test('a search that matches nobody says so', () => {
-    render(<VisitorTracker data={VISITORS} />);
+  test('a search that matches nobody says so', async () => {
+    mockGuests();
+    render(<VisitorTracker />);
+    await screen.findByRole('button', { name: 'Pat Lane' });
+
     type(screen.getByPlaceholderText(/Search guests/i), 'nobody');
-    expect(screen.getByText(/No visitors match your search/i)).toBeInTheDocument();
+    expect(screen.getByText(/No guests match your search/i)).toBeInTheDocument();
+  });
+
+  test('only the guest area is offered the Add and Edit buttons', async () => {
+    mockGuests(GUESTS, false);
+    const { unmount } = render(<VisitorTracker />);
+    await screen.findByRole('button', { name: 'Pat Lane' });
+    expect(screen.queryByRole('button', { name: /add a guest/i })).not.toBeInTheDocument();
+    unmount();
+
+    mockGuests(GUESTS, true);
+    render(<VisitorTracker />);
+    expect(await screen.findByRole('button', { name: /add a guest/i })).toBeInTheDocument();
+  });
+
+  test('adding a guest posts their details, and the first visit with them', async () => {
+    const fetchMock = mockGuests(GUESTS, true);
+    render(<VisitorTracker />);
+    fireEvent.click(await screen.findByRole('button', { name: /add a guest/i }));
+
+    const dialog = screen.getByRole('dialog');
+    type(within(dialog).getByLabelText(/^Name/), 'Dana Webb');
+    type(within(dialog).getByLabelText(/^Phone/), '256-555-0170');
+    type(within(dialog).getByLabelText(/^Comments/), 'Neighbour of the Carters');
+    type(within(dialog).getByLabelText(/^First visit/), '05/04/25');
+    fireEvent.click(within(dialog).getByRole('button', { name: /add guest/i }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, opts]) => url === '/api/visitors' && opts?.method === 'POST');
+      expect(call).toBeTruthy();
+      const body = JSON.parse(call[1].body);
+      expect(body).toMatchObject({ name: 'Dana Webb', phone: '256-555-0170', notes: 'Neighbour of the Carters' });
+      expect(body.visit).toEqual({ date: '05/04/25', service: '' });
+    });
   });
 });
 
-// ─── JobAssignments ───────────────────────────────────────────────────────────
+// ─── ServingSchedule ──────────────────────────────────────────────────────────
 
-describe('JobAssignments', () => {
-  const DATA = {
-    month: 'April 2025',
-    assignments: [
-      { date: 'April 6',  service: 'AM', job: 'Song Leader',        name: 'Tom Nelson' },
-      { date: 'April 6',  service: 'AM', job: 'Opening Prayer',     name: 'Ray Harris' },
-      { date: 'April 13', service: 'PM', job: 'Song Leader',        name: 'Lee Park' },
-      { date: 'April 6',  service: 'AM', job: 'Visuals',            name: 'Jo Reed' },
-      { date: '',         service: '',   job: 'Visual Preparation', name: 'Sam Ford' },
-    ],
-  };
+describe('ServingSchedule', () => {
+  const ASSIGNMENTS = [
+    { id: 1, month: 'April 2025', date: 'April 6',  service: 'Sunday Worship', job: 'Song Leader',        name: 'Tom Nelson' },
+    { id: 2, month: 'April 2025', date: 'April 6',  service: 'Sunday Worship', job: 'Opening Prayer',     name: '' },
+    { id: 3, month: 'April 2025', date: 'April 13', service: 'Sunday Worship', job: 'Song Leader',        name: 'Lee Park' },
+    { id: 4, month: 'April 2025', date: 'April 6',  service: 'Sunday Worship', job: 'Visuals',            name: 'Jo Reed' },
+    { id: 5, month: 'April 2025', date: '',         service: '',               job: 'Visual Preparation', name: 'Sam Ford' },
+  ];
 
-  test('prompts for an update when nothing has been loaded', () => {
-    render(<JobAssignments data={null} />);
-    expect(screen.getByText(/No data/i)).toBeInTheDocument();
+  function mockSchedule(overrides = {}) {
+    const body = {
+      success: true,
+      months: [{ month: 'April 2025', slots: 5 }],
+      month: 'April 2025',
+      assignments: ASSIGNMENTS,
+      jobs: ['Song Leader', 'Opening Prayer', 'Visuals', 'Visual Preparation'],
+      services: ['Sunday Worship', 'Sunday Evening', 'Wednesday'],
+      serviceJobs: {},
+      canManage: false,
+      me: { directoryId: null, name: '', gender: '', jobs: [], canSignUp: false },
+      ...overrides,
+    };
+    const fetchMock = vi.fn(() => Promise.resolve({ json: () => Promise.resolve(body) }));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  test('shows the month the roster covers', async () => {
+    mockSchedule();
+    render(<ServingSchedule />);
+    expect(await screen.findByText('April 2025')).toBeInTheDocument();
   });
 
-  test('shows the month the roster covers', () => {
-    render(<JobAssignments data={DATA} />);
-    expect(screen.getByText('April 2025')).toBeInTheDocument();
-  });
-
-  test('offers every week of the roster, and opens on the first', () => {
-    render(<JobAssignments data={DATA} />);
-    const weeks = screen.getByRole('combobox', { name: 'Week' });
+  test('offers every week of the roster, and opens on the first', async () => {
+    mockSchedule();
+    render(<ServingSchedule />);
+    const weeks = await screen.findByRole('combobox', { name: 'Week' });
 
     expect(within(weeks).getAllByRole('option').map(o => o.textContent)).toEqual(['April 6', 'April 13']);
     expect(weeks).toHaveValue('April 6');
   });
 
-  test('shows one week at a time, in a single table', () => {
-    render(<JobAssignments data={DATA} />);
+  test('shows one week at a time, in a single table', async () => {
+    mockSchedule();
+    render(<ServingSchedule />);
+    await screen.findByRole('combobox', { name: 'Week' });
+
     expect(screen.getAllByRole('table')).toHaveLength(1);
     expect(screen.getByText('Opening Prayer')).toBeInTheDocument();
     expect(screen.queryByText('Lee Park')).not.toBeInTheDocument();
   });
 
-  test('choosing another week swaps the table over', () => {
-    render(<JobAssignments data={DATA} />);
-    choose(screen.getByRole('combobox', { name: 'Week' }), 'April 13');
+  test('choosing another week swaps the table over', async () => {
+    mockSchedule();
+    render(<ServingSchedule />);
+    choose(await screen.findByRole('combobox', { name: 'Week' }), 'April 13');
 
     expect(screen.getByText('Lee Park')).toBeInTheDocument();
     expect(screen.queryByText('Opening Prayer')).not.toBeInTheDocument();
   });
 
-  test('the service each job belongs to is left out', () => {
-    render(<JobAssignments data={DATA} />);
-    expect(screen.queryByText('Service')).not.toBeInTheDocument();
-    expect(screen.queryByText('AM')).not.toBeInTheDocument();
+  test('an empty slot says nobody has it yet', async () => {
+    mockSchedule();
+    render(<ServingSchedule />);
+    expect(await screen.findByText('Nobody yet')).toBeInTheDocument();
   });
 
-  test('the AV operator is listed with the rest of that week', () => {
-    render(<JobAssignments data={DATA} />);
-    expect(screen.getByText('Visuals')).toBeInTheDocument();
-    expect(screen.getByText('Jo Reed')).toBeInTheDocument();
-  });
-
-  test('the monthly visual preparation is called out above the table, not as a week', () => {
-    render(<JobAssignments data={DATA} />);
-    expect(screen.getByText(/Visual Preparation: Sam Ford/)).toBeInTheDocument();
+  test('the monthly visual preparation is called out above the table, not as a week', async () => {
+    mockSchedule();
+    render(<ServingSchedule />);
+    expect(await screen.findByText(/Visual Preparation: Sam Ford/)).toBeInTheDocument();
     expect(within(screen.getByRole('combobox', { name: 'Week' })).getAllByRole('option')).toHaveLength(2);
   });
 
-  test('omits the monthly line when there is none', () => {
-    render(<JobAssignments data={{ assignments: [DATA.assignments[0]] }} />);
-    expect(screen.queryByText(/Visual Preparation/)).not.toBeInTheDocument();
+  test('a roster with nothing in it renders empty rather than breaking', async () => {
+    mockSchedule({ months: [], month: '', assignments: [] });
+    render(<ServingSchedule />);
+    expect(await screen.findByText(/Nobody is rostered yet/i)).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Week' })).not.toBeInTheDocument();
   });
 
-  test('a roster with no assignments at all renders empty rather than breaking', () => {
-    render(<JobAssignments data={{}} />);
-    expect(screen.getByText(/Nobody is rostered yet/i)).toBeInTheDocument();
-    expect(screen.queryByRole('combobox', { name: 'Week' })).not.toBeInTheDocument();
+  test('a member who may not sign up is told how to change that', async () => {
+    mockSchedule();
+    render(<ServingSchedule />);
+    expect(await screen.findByText(/men of the congregation can sign up/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /sign me up/i })).not.toBeInTheDocument();
+  });
+
+  test('a man signed off for the job is offered the empty slot, and only that one', async () => {
+    mockSchedule({ me: { directoryId: 3, name: 'Ray Harris', gender: 'male', jobs: ['Opening Prayer'], canSignUp: true } });
+    render(<ServingSchedule />);
+
+    expect(await screen.findByRole('button', { name: /sign me up/i })).toBeInTheDocument();
+    // Only the empty Opening Prayer slot — the filled Song Leader one is not offered.
+    expect(screen.getAllByRole('button', { name: /sign me up/i })).toHaveLength(1);
+  });
+
+  test('signing up asks the server, then reloads the month', async () => {
+    const fetchMock = mockSchedule({ me: { directoryId: 3, name: 'Ray Harris', gender: 'male', jobs: ['Opening Prayer'], canSignUp: true } });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: /sign me up/i }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url]) => String(url).includes('/assignments/2/signup'));
+      expect(call[1].method).toBe('POST');
+    });
+  });
+
+  test('you can take your own name back off', async () => {
+    const fetchMock = mockSchedule({ me: { directoryId: 3, name: 'Tom Nelson', gender: 'male', jobs: ['Song Leader'], canSignUp: true } });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: /take me off/i }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url]) => String(url).includes('/assignments/1/signup'));
+      expect(call[1].method).toBe('DELETE');
+    });
+  });
+
+  test('only the schedule keeper gets the build and edit buttons', async () => {
+    mockSchedule();
+    const { unmount } = render(<ServingSchedule />);
+    await screen.findByRole('combobox', { name: 'Week' });
+    expect(screen.queryByRole('button', { name: /build next month/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /edit song leader/i })).not.toBeInTheDocument();
+    unmount();
+
+    mockSchedule({ canManage: true });
+    render(<ServingSchedule />);
+    expect(await screen.findByRole('button', { name: /build next month/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /edit song leader/i })).toBeInTheDocument();
+  });
+
+  test('building a month posts the month and the services chosen', async () => {
+    const fetchMock = mockSchedule({ canManage: true });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: /build next month/i }));
+
+    const dialog = screen.getByRole('dialog');
+    type(within(dialog).getByLabelText(/^Month/), 'June 2026');
+    fireEvent.click(within(dialog).getByLabelText('Wednesday'));    // leave the Sundays on
+    fireEvent.click(within(dialog).getByRole('button', { name: /build the month/i }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, opts]) => String(url).endsWith('/months') && opts?.method === 'POST');
+      const body = JSON.parse(call[1].body);
+      expect(body.month).toBe('June 2026');
+      expect(body.services).toEqual(['Sunday Worship', 'Sunday Evening']);
+    });
   });
 });
 

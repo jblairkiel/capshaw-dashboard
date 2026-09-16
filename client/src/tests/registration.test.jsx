@@ -190,7 +190,7 @@ const PEOPLE = [
 
 function mockAdminFetch(approveResult = { success: true }) {
   const fetchMock = vi.fn(url => {
-    if (url.startsWith('/api/admin/directory')) {
+    if (url.startsWith('/api/records/directory')) {
       return Promise.resolve({ json: () => Promise.resolve({ rows: PEOPLE }) });
     }
     if (url.includes('/approve')) {
@@ -232,7 +232,7 @@ describe('UsersView — approving creates or pairs a member profile', () => {
 
     await waitFor(() => {
       expect(bodyOf(fetchMock, '/api/auth/users/3/approve'))
-        .toEqual({ role: 'approved', directory_id: 11 });
+        .toEqual({ role: 'approved', areas: [], directory_id: 11 });
     });
   });
 
@@ -262,15 +262,30 @@ describe('UsersView — approving creates or pairs a member profile', () => {
     });
   });
 
-  test('can hand out a role above plain member at the same time', async () => {
+  test('can hand out areas of responsibility at the same time', async () => {
     const fetchMock = mockAdminFetch();
     const dialog = await openApproval();
 
-    fireEvent.change(within(dialog).getByLabelText(/what may they do/i), { target: { value: 'worship-coordinator' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Song Tracker' }));
     fireEvent.click(within(dialog).getByRole('button', { name: /approve pat nolan/i }));
 
     await waitFor(() => {
-      expect(bodyOf(fetchMock, '/api/auth/users/3/approve').role).toBe('worship-coordinator');
+      expect(bodyOf(fetchMock, '/api/auth/users/3/approve').areas).toEqual(['songs']);
+    });
+  });
+
+  test('an admin needs no areas — they look after everything already', async () => {
+    const fetchMock = mockAdminFetch();
+    const dialog = await openApproval();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Song Tracker' }));
+    fireEvent.change(within(dialog).getByLabelText(/what may they do/i), { target: { value: 'admin' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /approve pat nolan/i }));
+
+    await waitFor(() => {
+      const body = bodyOf(fetchMock, '/api/auth/users/3/approve');
+      expect(body.role).toBe('admin');
+      expect(body.areas).toEqual([]);
     });
   });
 

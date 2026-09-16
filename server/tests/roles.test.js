@@ -53,8 +53,12 @@ describe('GET /api/auth/users', () => {
     const res = await request(buildApp(ADMIN)).get('/api/auth/users');
     expect(res.status).toBe(200);
     expect(res.body.users).toHaveLength(3);
-    expect(res.body.roles).toEqual(['pending', 'approved', 'worship-coordinator', 'admin']);
+    expect(res.body.roles).toEqual(['pending', 'approved', 'admin']);
     expect(res.body.users.every(u => 'is_owner' in u)).toBe(true);
+    // Every account also says which areas it looks after, and the response
+    // carries the catalogue so the screen can offer them.
+    expect(res.body.users.every(u => Array.isArray(u.areas))).toBe(true);
+    expect(res.body.areas.map(a => a.id)).toContain('serving-schedule');
   });
 
   test('flags the ADMIN_EMAIL account as the owner', async () => {
@@ -216,13 +220,14 @@ describe('approve and revoke shortcuts', () => {
     expect(linkOf(PENDING.id)).toBe(person.id);
   });
 
-  test('approve can hand out a role above plain member', async () => {
+  test('approve can hand out areas of responsibility at the same time', async () => {
     const person = addPerson('Pat Nolan');
     const res = await request(buildApp(ADMIN))
       .patch(`/api/auth/users/${PENDING.id}/approve`)
-      .send({ directory_id: person.id, role: 'worship-coordinator' });
+      .send({ directory_id: person.id, areas: ['serving-schedule', 'songs'] });
     expect(res.status).toBe(200);
-    expect(roleOf(PENDING.id)).toBe('worship-coordinator');
+    expect(roleOf(PENDING.id)).toBe('approved');
+    expect(res.body.user.areas.sort()).toEqual(['serving-schedule', 'songs']);
   });
 
   test('approve records who approved, and when', async () => {
@@ -391,5 +396,73 @@ describe('auto-linking at sign-in', () => {
     const person = addPerson('Mel Harris', 'mel@example.com');
     const again  = upsertUser('google', 'new-5', 'mel@example.com', 'Mel', null);
     expect(again.directory_id).toBe(person.id);
+  });
+});
+
+// ─── Areas of responsibility ──────────────────────────────────────────────────
+
+function areasOf(userId) {
+  return db.prepare('SELECT area FROM user_areas WHERE user_id=? ORDER BY area').all(userId).map(r => r.area);
+}
+
+describe('PATCH /api/auth/users/:id/areas', () => {
+  test('403 for a member — handing out areas is an admin job', async () => {
+    const res = await request(buildApp(MEMBER))
+      .patch(`/api/auth/users/${MEMBER.id}/areas`)
+      .send({ areas: ['songs'] });
+    expect(res.status).toBe(403);
+    expect(areasOf(MEMBER.id)).toEqual([]);
+  });
+
+  test('gives a member one area and nothing else', async () => {
+    const res = await request(buildApp(ADMIN))
+      .patch(`/api/auth/users/${MEMBER.id}/areas`)
+      .send({ areas: ['songs'] });
+    expect(res.status).toBe(200);
+    expect(res.body.user.areas).toEqual(['songs']);
+    expect(areasOf(MEMBER.id)).toEqual(['songs']);
+  });
+
+  test('replaces the whole set rather than adding to it', async () => {
+    await request(buildApp(ADMIN)).patch(`/api/auth/users/${MEMBER.id}/areas`).send({ areas: ['songs', 'attendance'] });
+    await request(buildApp(ADMIN)).patch(`/api/auth/users/${MEMBER.id}/areas`).send({ areas: ['attendance'] });
+    expect(areasOf(MEMBER.id)).toEqual(['attendance']);
+  });
+
+  test('400 for an area that does not exist, and changes nothing', async () => {
+    await request(buildApp(ADMIN)).patch(`/api/auth/users/${MEMBER.id}/areas`).send({ areas: ['songs'] });
+    const res = await request(buildApp(ADMIN))
+      .patch(`/api/auth/users/${MEMBER.id}/areas`)
+      .send({ areas: ['everything'] });
+    expect(res.status).toBe(400);
+    expect(areasOf(MEMBER.id)).toEqual(['songs']);
+  });
+
+  test('400 for an admin — they already look after everything', async () => {
+    const second = insert('Ben', 'ben@example.com', 'admin');
+    const res = await request(buildApp(ADMIN))
+      .patch(`/api/auth/users/${second.id}/areas`)
+      .send({ areas: ['songs'] });
+    expect(res.status).toBe(400);
+  });
+
+  test('400 for an account still waiting to be approved', async () => {
+    const res = await request(buildApp(ADMIN))
+      .patch(`/api/auth/users/${PENDING.id}/areas`)
+      .send({ areas: ['songs'] });
+    expect(res.status).toBe(400);
+  });
+
+  test('promoting to admin clears the grants, so a demotion does not bring them back', async () => {
+    await request(buildApp(ADMIN)).patch(`/api/auth/users/${MEMBER.id}/areas`).send({ areas: ['songs'] });
+    await request(buildApp(ADMIN)).patch(`/api/auth/users/${MEMBER.id}/role`).send({ role: 'admin' });
+    expect(areasOf(MEMBER.id)).toEqual([]);
+  });
+
+  test('every change is recorded in the action history', async () => {
+    await request(buildApp(ADMIN)).patch(`/api/auth/users/${MEMBER.id}/areas`).send({ areas: ['songs'] });
+    const entry = db.prepare("SELECT * FROM action_log WHERE area = 'accounts' ORDER BY id DESC").get();
+    expect(entry.user_id).toBe(ADMIN.id);
+    expect(entry.summary).toMatch(/Song Tracker/);
   });
 });

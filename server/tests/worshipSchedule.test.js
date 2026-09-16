@@ -13,11 +13,13 @@ function addPerson(name, email = '') {
   return id;
 }
 
-function addUser(name, role, email, directoryId = null, wantsReport = 1) {
+function addUser(name, role, email, directoryId = null, wantsReport = 1, areas = []) {
   const { lastInsertRowid: id } = db.prepare(`
     INSERT INTO users (provider, provider_id, email, name, role, directory_id, wants_monthly_report)
     VALUES (?,?,?,?,?,?,?)
   `).run('google', `${name}-id`, email, name, role, directoryId, wantsReport);
+  const grant = db.prepare('INSERT OR IGNORE INTO user_areas (user_id, area) VALUES (?, ?)');
+  for (const area of areas) grant.run(id, area);
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 }
 
@@ -48,13 +50,15 @@ let COORDINATOR, ADMIN, MEMBER, people;
 beforeEach(() => {
   for (const t of ['mail_outbox', 'mail_group_members', 'workflow_participants', 'workflow_events',
                    'workflow_tasks', 'workflow_instances', 'worship_preferences', 'job_assignments',
-                   'visitors', 'users', 'directory']) {
+                   'visitors', 'user_areas', 'users', 'directory']) {
     db.prepare(`DELETE FROM ${t}`).run();
   }
 
   people = Object.fromEntries(VOLUNTEERS.map(([name, email]) => [name, addPerson(name, email)]));
 
-  COORDINATOR = addUser('Cora', 'worship-coordinator', 'cora@example.com');
+  // Building the roster is the Serving Schedule area's job now, not a rung on
+  // a ladder — Cora is an ordinary member who looks after it.
+  COORDINATOR = addUser('Cora', 'approved', 'cora@example.com', null, 1, ['serving-schedule']);
   ADMIN       = addUser('Ada',  'admin',    'ada@example.com');
   MEMBER      = addUser('Mel',  'approved', 'mel@example.com');
 
@@ -67,12 +71,12 @@ beforeEach(() => {
 // ─── Who may run it ───────────────────────────────────────────────────────────
 
 describe('who can start a worship schedule', () => {
-  test('the worship coordinator can', () => {
+  test('whoever looks after the serving schedule can', () => {
     expect(engine.start({ definitionId: 'worship-schedule', data: JUNE, user: COORDINATOR }).id)
       .toEqual(expect.any(Number));
   });
 
-  test('an admin can, since they outrank the coordinator', () => {
+  test('an admin can, since admins look after every area', () => {
     expect(engine.start({ definitionId: 'worship-schedule', data: JUNE, user: ADMIN }).id)
       .toEqual(expect.any(Number));
   });
@@ -83,9 +87,9 @@ describe('who can start a worship schedule', () => {
     expect(db.prepare('SELECT COUNT(*) n FROM workflow_instances').get().n).toBe(0);
   });
 
-  test('the review task waits on the coordinator, not on admins generally', () => {
+  test('the review task waits on the serving-schedule area, not on admins generally', () => {
     const { id } = engine.start({ definitionId: 'worship-schedule', data: JUNE, user: ADMIN });
-    expect(pendingTask(id).assignee_role).toBe('worship-coordinator');
+    expect(pendingTask(id).assignee_role).toBe('serving-schedule');
   });
 
   test('it appears in the coordinator\'s inbox', () => {
@@ -294,10 +298,10 @@ describe('notifications on publishing', () => {
 // ─── The definition itself ────────────────────────────────────────────────────
 
 describe('the definition', () => {
-  test('is owned by the worship coordinator', () => {
+  test('is owned by the serving-schedule area', () => {
     const definition = getDefinition('worship-schedule');
-    expect(definition.startRole).toBe('worship-coordinator');
-    expect(definition.steps.review.assign).toEqual({ role: 'worship-coordinator' });
+    expect(definition.startRole).toBe('serving-schedule');
+    expect(definition.steps.review.assign).toEqual({ role: 'serving-schedule' });
   });
 
   test('charts the regenerate loop back to the review step', () => {

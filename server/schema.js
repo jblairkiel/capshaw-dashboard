@@ -319,6 +319,76 @@ function initSchema(db) {
     sent_at      TEXT
   );
 
+  -- ── Areas of responsibility ─────────────────────────────────────────────────
+  -- One row per area an account looks after. Admins are never listed here:
+  -- their access comes from the role, so demoting one leaves nothing behind.
+  -- See server/lib/areas.js for the catalogue.
+
+  CREATE TABLE IF NOT EXISTS user_areas (
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    area       TEXT    NOT NULL,
+    granted_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    granted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    PRIMARY KEY (user_id, area)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_user_areas_area ON user_areas(area);
+
+  -- ── Action history ──────────────────────────────────────────────────────────
+  -- Append-only: every create, edit and delete anybody makes through the
+  -- portal, so an admin can answer "who changed this, and when?" without
+  -- guessing. Never written to from the client — only by the routes that
+  -- perform the change.
+
+  CREATE TABLE IF NOT EXISTS action_log (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    user_name  TEXT    NOT NULL DEFAULT '',
+    area       TEXT    NOT NULL DEFAULT '',
+    action     TEXT    NOT NULL DEFAULT '',   -- create | update | delete | other
+    entity     TEXT    NOT NULL DEFAULT '',   -- what kind of thing changed
+    entity_id  TEXT    NOT NULL DEFAULT '',
+    summary    TEXT    NOT NULL DEFAULT '',
+    details    TEXT    NOT NULL DEFAULT '{}', -- JSON: before/after where useful
+    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_action_log_created ON action_log(created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_action_log_area    ON action_log(area, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_action_log_user    ON action_log(user_id, created_at DESC);
+
+  -- ── Elders ──────────────────────────────────────────────────────────────────
+  -- Deacons come off the church website; the eldership is kept here by hand,
+  -- by whoever holds the Elders & Deacons area.
+
+  CREATE TABLE IF NOT EXISTS elders (
+    id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    name  TEXT    NOT NULL,
+    phone TEXT    NOT NULL DEFAULT '',
+    email TEXT    NOT NULL DEFAULT '',
+    notes TEXT    NOT NULL DEFAULT ''
+  );
+
+  CREATE TABLE IF NOT EXISTS elder_duties (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    elder_id INTEGER NOT NULL REFERENCES elders(id) ON DELETE CASCADE,
+    duty     TEXT    NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_elder_duties_elder ON elder_duties(elder_id);
+
+  -- ── Who may sign up for which serving job ───────────────────────────────────
+  -- A row means the Serving Schedule area has decided this person may put
+  -- their own name against that job. No row means they cannot.
+
+  CREATE TABLE IF NOT EXISTS job_eligibility (
+    directory_id INTEGER NOT NULL REFERENCES directory(id) ON DELETE CASCADE,
+    job          TEXT    NOT NULL,
+    updated_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (directory_id, job)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_mail_members_group ON mail_group_members(group_id);
   CREATE INDEX IF NOT EXISTS idx_mail_outbox_status ON mail_outbox(status, id);
 `);
@@ -368,11 +438,45 @@ function initSchema(db) {
   addColumn('users', 'approved_at', 'TEXT');
   addColumn('users', 'approved_by', 'INTEGER REFERENCES users(id) ON DELETE SET NULL');
 
+  // Whether this person may be rostered for the men's worship jobs. Chosen on
+  // My Info (or by the directory area on their behalf) — not guessed from a
+  // name. '' means nobody has said.
+  addColumn('directory', 'gender', "TEXT NOT NULL DEFAULT ''");
+
+  // ── Guest details ────────────────────────────────────────────────────────────
+  // The scraper only ever knew a guest's name and the dates they came. Anything
+  // learned since — how to reach them, who invited them, what was said — is
+  // typed in here by whoever holds the Guest Tracker area.
+  addColumn('visitors', 'phone',       "TEXT NOT NULL DEFAULT ''");
+  addColumn('visitors', 'email',       "TEXT NOT NULL DEFAULT ''");
+  addColumn('visitors', 'address',     "TEXT NOT NULL DEFAULT ''");
+  addColumn('visitors', 'city',        "TEXT NOT NULL DEFAULT ''");
+  addColumn('visitors', 'state',       "TEXT NOT NULL DEFAULT ''");
+  addColumn('visitors', 'zip',         "TEXT NOT NULL DEFAULT ''");
+  addColumn('visitors', 'invited_by',  "TEXT NOT NULL DEFAULT ''");
+  addColumn('visitors', 'status',      "TEXT NOT NULL DEFAULT ''");
+  addColumn('visitors', 'notes',       "TEXT NOT NULL DEFAULT ''");
+  addColumn('visitors', 'created_at',  "TEXT NOT NULL DEFAULT ''");
+
   db.exec(`CREATE INDEX IF NOT EXISTS idx_users_directory ON users(directory_id);`);
   // Sign-in looks an account up by address, and two accounts must never share
   // one: 'local' rows store the folded address in provider_id, so the existing
   // UNIQUE(provider, provider_id) already enforces that.
   db.exec(`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);`);
+
+  // ─── From the old role ladder to areas ────────────────────────────────────────
+  // 'worship-coordinator' was a rung above member that existed only to own the
+  // worship roster. That is now the Serving Schedule area, so anybody holding
+  // the old role becomes a member who holds it — same access, nothing silently
+  // widened or lost.
+  const coordinators = db.prepare("SELECT id FROM users WHERE role = 'worship-coordinator'").all();
+  if (coordinators.length) {
+    const grant  = db.prepare("INSERT OR IGNORE INTO user_areas (user_id, area) VALUES (?, 'serving-schedule')");
+    const demote = db.prepare("UPDATE users SET role = 'approved' WHERE id = ?");
+    db.transaction(() => {
+      for (const c of coordinators) { grant.run(c.id); demote.run(c.id); }
+    })();
+  }
 
   // ─── Seed the distribution groups ─────────────────────────────────────────────
   // Created empty; an admin fills in who is in each from Admin → Email Groups.

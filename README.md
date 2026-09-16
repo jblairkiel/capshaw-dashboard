@@ -144,35 +144,56 @@ address, so those accounts have nothing to confirm and no password here.
 
 ---
 
-## Roles & Permissions
+## Roles & Areas
 
-Every signed-in user holds exactly one of three roles. They are ranked, so each
-role includes everything below it.
+Access is two separate questions, deliberately kept apart.
 
-| Role | Can do |
+**What is this account?** — its `role`, which is a ladder:
+
+| Role | Is |
 |---|---|
 | `pending` | Waiting on an admin. An account registered with an email address and password cannot sign in at all while it is `pending`; one that came from Google or Facebook can look around the portal but cannot create or edit anything. |
-| `approved` (Member) | Everything a pending user sees, plus: Bible class questions, the lesson planner, site updates, and editing their own household's details and worship preferences. |
-| `worship-coordinator` | Everything a member can do, plus building the worship roster — they own the Monthly Worship Schedule workflow. |
-| `admin` | Everything above, plus writing announcements, the song tracker and the order of service, and the Church Office tabs — member access, the member directory, and direct editing of every database table. |
+| `approved` (Member) | Bible class questions, the lesson planner, site updates, their own household's details and worship preferences, and signing up for serving jobs. |
+| `admin` | Everything, including every area below, the action history, who may sign in, and direct editing of every database table. |
 
-Read and write are separate: **announcements, the song tracker and the order of
-service are read-only for members** — everyone can see them, only admins can
-change them.
+**What does this account look after?** — its *areas*, which are **not** a
+ladder. Each area is the Add, Edit and Delete buttons on one part of the site;
+holding one says nothing whatever about the others. Admins hold every area
+implicitly, and nobody else holds one until an admin grants it.
 
-| Feature | Member | Admin |
+| Area | The page it unlocks | What the holder can do |
 |---|---|---|
-| Announcements | read | read + write |
-| Song Tracker | read | read + write |
-| Order of Service | read | read + write |
-| Bible Class & Lesson Planner | read + write | read + write |
-| My Household (own household) | read + write | read + write (anyone) |
-| Site update (re-scrape) | ✅ | ✅ |
-| Member Directory, Church Records, Members & Access | — | ✅ |
+| `worship-order` | This Sunday | Upload, replace and remove the order of service |
+| `songs` | Songs We Sing | Add songs, record what was sung, keep the song of the week |
+| `announcements` | Announcements | Write, edit and retire announcements and events |
+| `serving-schedule` | Serving Schedule, Member Jobs | Build a month of worship jobs, fill or clear any slot, and decide which jobs each member may sign up for |
+| `attendance` | Attendance | Record attendance counts and correct earlier ones |
+| `visitors` | Guests | Add guests, keep their details and comments, record their visits |
+| `leadership` | Elders & Deacons | Keep the elders and deacons, and what each looks after, up to date |
+| `calendar` | Church Calendar | Add and edit dated events |
+| `directory` | Member Directory | Edit anybody's directory entry, and add people who are not in it yet |
+| `mail-groups` | Email Groups | Decide who is in each distribution group, and send to them |
+
+Everything else stays read-only for everyone signed in: the pages are all
+visible to the whole church family, and only the area holder sees the buttons.
+
+The calendar and the announcement board are the same table seen two ways, so
+they overlap on purpose: `announcements` may write any row, and `calendar` may
+write only rows that carry a date. A calendar editor taking the date off an
+event would be posting to the announcement board, so it is refused rather than
+quietly allowed.
+
+The old `worship-coordinator` role is gone. It existed only to own the worship
+roster, which is now the `serving-schedule` area; `server/schema.js` converts
+anybody who held it into a member holding that area, so their access is
+unchanged.
+
+### Handing an area out
 
 New sign-ins land on `pending`. An admin lets them in from **Church Office →
 Members & Access**, with the **Approve** button in the grid or from the
-person's detail panel.
+person's detail panel; areas can be ticked in the same step or granted later
+from the detail panel.
 
 **Approving is one decision, not two.** Letting somebody in and saying who they
 are happen together, so the approval dialog will not submit until the admin has
@@ -185,29 +206,46 @@ read the whole congregation's information while its owner cannot keep their own
 household up to date.
 
 The dialog suggests a directory entry when exactly one matches the account's
-address — always as a suggestion to check, never as an assumption. A role above
-plain member can be handed out in the same step, and the approval records who
-did it and when (`approved_by`, `approved_at`). The person is emailed as soon
-as it is done.
+address — always as a suggestion to check, never as an assumption. The approval
+records who did it and when (`approved_by`, `approved_at`), and the person is
+emailed as soon as it is done.
 
 **The members grid.** Accounts are listed in a sortable, filterable grid. Every
 column carries its own filter — free text for names, emails, directory links
-and dates, a picker for role and sign-in provider — and the filters combine.
-Clicking a row (or its **Manage** button) opens a detail panel holding
-everything you can do to that account: assign a role, link it to a directory
-entry, or remove it. The **Columns** menu chooses which columns are shown — including **Confirmed**, which says whether an
+and dates, a picker for role, areas and sign-in provider — and the filters
+combine. Clicking a row (or its **Manage** button) opens a detail panel holding
+everything you can do to that account: set its role, tick the areas it looks
+after, link it to a directory entry, or remove it. The **Columns** menu chooses
+which columns are shown — including **Confirmed**, which says whether an
 email-and-password account has answered its confirmation email — and
 remembers the choice in a cookie (`capshaw.users.columns`, a preference only —
 no account data), so the grid comes back the way it was left. Columns the build
 no longer has are dropped when the cookie is read, and the name column is always
-shown.
+shown. **On a phone the grid becomes a card each** — a nine-column table with a
+filter row cannot be made readable at that width — with the same Approve and
+Manage actions on every card.
 
-Roles are enforced on the server by `server/middleware/auth.js`:
-`requireApproved` guards the member routes (Bible class, lesson planner, site
-update, profile edits), `requireAdmin` guards announcements, songs, documents,
-`/api/admin/*` (the database editor) and user management. The client mirrors
-the same ranks in `client/src/lib/roles.js` purely to decide what to show — the
-server is always the authority.
+### How it is enforced
+
+`server/middleware/auth.js` carries both vocabularies:
+
+- `requireApproved` / `requireAdmin` guard what a role is for — the member
+  routes (Bible class, lesson planner, site update, profile edits), and
+  `/api/admin/*`, user management and the action history.
+- `requireArea('songs')` and `requireAnyArea(['announcements', 'calendar'])`
+  guard a page's writes. `holdsArea(user, area)` is the check behind both;
+  `holds(user, key)` answers for either vocabulary, which is what a workflow
+  step uses since its `assign` may name either.
+
+Areas live in `server/lib/areas.js` (the catalogue) and the `user_areas` table
+(who holds what). Admins are never listed there — their access comes from the
+role, so demoting one leaves nothing behind, and promoting a member clears
+their grants for the same reason. A pending account holds nothing whatever the
+table says.
+
+The client mirrors the same vocabulary in `client/src/lib/roles.js` purely to
+decide what to show — the server is always the authority, and re-checks on
+every write.
 
 Three guardrails keep an admin from locking everyone out:
 
@@ -215,6 +253,56 @@ Three guardrails keep an admin from locking everyone out:
 - The last remaining admin cannot be demoted or removed.
 - The account named by `ADMIN_EMAIL` is the owner; it is promoted to admin on
   every login and its role cannot be edited.
+
+---
+
+## Action History
+
+Every create, edit and delete anybody makes through the portal is recorded in
+the `action_log` table by the route that made it, and read back at **Church
+Office → Action History** (admins only).
+
+An entry carries who did it, which area they did it under, what kind of thing
+changed, a one-line summary, and — where it makes sense — the fields that
+changed with their before and after values. Opening an entry spells that out;
+the list itself can be filtered by area, by what happened (added, changed,
+deleted), by who did it, and by a free-text search.
+
+Recording is a side effect of a change that has already succeeded: a write that
+cannot be logged is reported to the console and otherwise ignored, so the
+history can never be the reason a save fails. Nothing writes to it from the
+client, and a refused change records nothing.
+
+`server/lib/actionLog.js` is the recorder; `server/lib/recordStore.js` routes
+every area-gated and admin table edit through it, so a change made from either
+screen lands in the history the same way.
+
+---
+
+## Serving Schedule
+
+The serving schedule is the one page with two audiences.
+
+**Whoever holds `serving-schedule`** can lay out a month in one go — every
+service in it, with a slot for each job that service needs and nobody against
+them yet — fill or clear any slot by hand, add a one-off job, and run the
+Monthly Worship Schedule workflow. Running the layout twice never doubles a
+month up: slots that already exist are left alone.
+
+**Every other member** sees the roster and, if they can, signs themselves up.
+Two things have to be true for that:
+
+1. Their directory entry says they are a man (chosen on **My Household &
+   Preferences**, never guessed from a name — this congregation rosters the
+   worship jobs among its men).
+2. The schedule keeper has signed them off for that particular job, on
+   **Church Office → Member Jobs**.
+
+That page lists every member with what they may sign up for, alongside what
+they said about each job themselves on their worship preferences, so nobody is
+signed off for something they asked not to do. Somebody may take their own name
+back off a slot; only the schedule keeper may take somebody else's off. Every
+sign-up and every clearing is recorded in the action history by name.
 
 ---
 
@@ -230,11 +318,17 @@ the same address, and each person's worship role preferences.
 |---|---|---|---|
 | `pending` | read-only | read-only | — |
 | `approved` (Member) | ✅ | ✅ | — |
-| `admin` | ✅ | ✅ | ✅ (from **Church Office → Member Directory**) |
+| Holds `directory` | ✅ | ✅ | ✅ (from **Church Office → Member Directory**) |
+| `admin` | ✅ | ✅ | ✅ |
 
 A *household* is everyone sharing a street address — the same grouping the
 directory shows as a family. Someone with no address on file is a household of
 one, so a blank address never pulls in strangers.
+
+**Gender** is asked here because this congregation rosters the worship jobs
+among its men, so the serving schedule needs to know who may sign up. It is
+chosen by the person (or by the directory area on their behalf), never guessed
+from a name, and "prefer not to say" is a real answer.
 
 **Worship preferences** are per person, per role — `preferred` ("glad to"),
 `willing`, or `unavailable` ("rather not") — with a free-text note for the
@@ -346,8 +440,9 @@ steps: {
 instance data for conditional routing (an approval threshold, say) — declare
 `possibleTo` alongside it so the flowchart can still draw both branches.
 
-**Who gets asked.** A step's `assign` is one of `{ role }` (anyone holding it),
-`{ creator: true }` (whoever started it), `{ userField }`, or `{ personField }`
+**Who gets asked.** A step's `assign` is one of `{ role }` — an area id such as
+`serving-schedule`, or a rung on the role ladder, whichever the step names —
+or `{ creator: true }` (whoever started it), `{ userField }`, or `{ personField }`
 (a directory person, reached through their linked login). If a person has no
 linked login the task falls back to the definition's `fallbackRole` rather than
 stalling silently.
@@ -392,7 +487,7 @@ reached.
 |---|---|
 | **Job Assignment Swap** | Starts from a duty you are really rostered for, loops while a replacement is found, writes the new name to `job_assignments` on approval. |
 | **Visitor Follow-Up** | Task aimed at a named person, loops on "no answer", hands off to an admin if they decline. |
-| **Monthly Worship Schedule** | Owned by the worship coordinator; builds a draft from everyone's preferences and publishes it to the roster. |
+| **Monthly Worship Schedule** | Owned by the `serving-schedule` area; builds a draft from everyone's preferences and publishes it to the roster. |
 
 Each one is reached from the page it belongs to, behind a **Roster requests** or
 **Follow-ups** button at the top of that page, so the page itself stays the
@@ -495,7 +590,10 @@ one copy.
 ## Monthly Worship Schedule
 
 A workflow that builds a month of worship assignments from the preferences
-people set on My Household, owned by the **worship coordinator** role.
+people set on My Household, owned by the **`serving-schedule`** area. (The
+Serving Schedule page can also lay out an empty month directly — see
+[Serving Schedule](#serving-schedule). This workflow is the version that fills
+the names in for you.)
 
 ### How a month is built
 
@@ -511,10 +609,11 @@ preferences always give the same schedule. Its rules, in order:
 
 Load deliberately beats keenness. Ordering by keenness first would hand the one
 eager song leader every Sunday in the month while a willing volunteer sat idle,
-which is not what a coordinator would do by hand.
+which is not what anybody would do by hand.
 
 A role nobody can cover is **reported as unfilled** rather than left quietly
-blank, since an empty slot is the thing a coordinator most needs to see.
+blank, since an empty slot is the thing the schedule keeper most needs to see —
+and an unfilled slot is one a member can sign themselves up for.
 
 ### Running it
 
@@ -569,10 +668,21 @@ capshaw-dashboard/
 ├── server/
 │   ├── index.js             # Express entry point
 │   ├── db.js                # SQLite init (question library)
+│   ├── schema.js            # The whole schema, plus its migrations
+│   ├── middleware/
+│   │   └── auth.js          # Roles (a ladder) and areas (not one)
 │   ├── lib/
-│   │   └── parsers.js       # HTML parser functions (testable)
+│   │   ├── parsers.js       # HTML parser functions (testable)
+│   │   ├── areas.js         # The catalogue of areas, and who holds what
+│   │   ├── actionLog.js     # The action history recorder
+│   │   ├── recordTables.js  # Which table each area looks after
+│   │   └── recordStore.js   # Reading and writing those tables, logged
 │   ├── routes/
 │   │   ├── scraper.js       # Church website scraper + data endpoints
+│   │   ├── records.js       # Area-gated CRUD for the record tables
+│   │   ├── serving.js       # The roster, member jobs, and sign-ups
+│   │   ├── visitors.js      # Guests, their details and their visits
+│   │   ├── leadership.js    # Elders and deacons, with their duties
 │   │   ├── documents.js     # .docx upload + OOXML → HTML conversion
 │   │   └── bibleClass.js    # Question generation + library CRUD
 │   ├── data/                # Runtime data (gitignored)

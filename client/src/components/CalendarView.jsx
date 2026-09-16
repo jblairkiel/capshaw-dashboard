@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { isAdmin } from '../lib/roles';
+import { hasAnyArea } from '../lib/roles';
 
 // The calendar is a view over announcements, not a store of its own. Anything
 // with an event_date shows up here, and adding or editing a day writes back to
@@ -178,7 +178,9 @@ export default function CalendarView({ user }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  const canEdit = isAdmin(user);
+  // The calendar and the announcement board are the same rows seen two ways,
+  // so either area may keep a dated event up to date.
+  const canEdit = hasAnyArea(user, ['calendar', 'announcements']);
 
   const load = useCallback(async () => {
     setError('');
