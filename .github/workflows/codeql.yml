@@ -30,6 +30,7 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: javascript-typescript
+          config-file: ./.github/codeql/codeql-config.yml
 
       # No build step: the JS/TS extractor reads source directly and does not
       # need the app installed or compiled first.
