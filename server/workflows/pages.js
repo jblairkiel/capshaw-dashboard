@@ -7,7 +7,6 @@
 const PAGES = [
   { id: 'assignments', label: 'Job Assignments' },
   { id: 'visitors',    label: 'Visitors' },
-  { id: 'calendar',    label: 'Calendar' },
 ];
 
 const PAGE_IDS = new Set(PAGES.map(p => p.id));

@@ -1,11 +1,11 @@
-import { render, screen, within, fireEvent } from '@testing-library/react';
-import { describe, test, expect } from 'vitest';
+import { render, screen, within, fireEvent, waitFor } from '@testing-library/react';
+import { describe, test, expect, vi, afterEach } from 'vitest';
 
 // Typing into a controlled input, the way the rest of these tests do it.
 const type   = (input, value) => fireEvent.change(input, { target: { value } });
 const choose = (select, value) => fireEvent.change(select, { target: { value } });
 
-import SermonsView     from '../components/SermonsView';
+import LivestreamsView from '../components/LivestreamsView';
 import VisitorTracker  from '../components/VisitorTracker';
 import JobAssignments  from '../components/JobAssignments';
 import PersonPhoto     from '../components/PersonPhoto';
@@ -14,91 +14,78 @@ import PersonPhoto     from '../components/PersonPhoto';
 // member search it. They share a "nothing loaded yet" state, which is what a
 // signed-in member sees before the first update.
 
-const sermon = over => ({
-  date: '04/13/25', title: 'Faith That Works', speaker: 'Ray Harris',
-  type: 'Expository', series: 'James', service: 'AM', ...over,
-});
+// ─── LivestreamsView ──────────────────────────────────────────────────────────
 
-// ─── SermonsView ──────────────────────────────────────────────────────────────
+describe('LivestreamsView', () => {
+  const CHANNEL = { handle: '@CapshawChurch', url: 'https://www.youtube.com/@CapshawChurch', id: 'UC123' };
 
-describe('SermonsView', () => {
-  const SERMONS = [
-    sermon(),
-    sermon({ date: '04/06/25', title: 'The Good Shepherd', speaker: 'Tom Nelson', type: 'Topical', series: 'Psalms', service: 'PM' }),
-    sermon({ date: '03/30/25', title: 'Living Water',      speaker: 'Ray Harris', type: 'Topical', series: 'John' }),
+  const VIDEOS = [
+    { id: 'abc', title: 'Sunday Morning Worship', published: '2025-04-13T15:00:00+00:00',
+      url: 'https://www.youtube.com/watch?v=abc', thumbnail: 'https://i.ytimg.com/vi/abc/hq.jpg', views: 84 },
+    { id: 'def', title: 'Wednesday Bible Study', published: '2025-04-09T23:30:00+00:00',
+      url: 'https://www.youtube.com/watch?v=def', thumbnail: '', views: 1 },
   ];
 
-  test('prompts for an update when nothing has been loaded', () => {
-    render(<SermonsView data={null} />);
-    expect(screen.getByText(/No data/i)).toBeInTheDocument();
+  function mockApi(body) {
+    const fetchMock = vi.fn(() => Promise.resolve({ json: () => Promise.resolve(body) }));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  test('lists the recent streams, each linking to its video', async () => {
+    mockApi({ success: true, channel: CHANNEL, videos: VIDEOS });
+    render(<LivestreamsView />);
+
+    const link = await screen.findByRole('link', { name: /Sunday Morning Worship/ });
+    expect(link).toHaveAttribute('href', 'https://www.youtube.com/watch?v=abc');
+    expect(screen.getByText('Wednesday Bible Study')).toBeInTheDocument();
   });
 
-  test('lists every sermon with its details', () => {
-    render(<SermonsView data={SERMONS} />);
-    expect(screen.getByText('Faith That Works')).toBeInTheDocument();
-    expect(screen.getByText('The Good Shepherd')).toBeInTheDocument();
-    expect(screen.getByText('3 results')).toBeInTheDocument();
+  test('says "1 view" rather than "1 views"', async () => {
+    mockApi({ success: true, channel: CHANNEL, videos: VIDEOS });
+    render(<LivestreamsView />);
+    expect(await screen.findByText(/1 view$/)).toBeInTheDocument();
+    expect(screen.getByText(/84 views$/)).toBeInTheDocument();
   });
 
-  test('says "1 result" rather than "1 results"', async () => {
-    render(<SermonsView data={SERMONS} />);
-    type(screen.getByPlaceholderText(/Search title/i), 'Good Shepherd');
-    expect(screen.getByText('1 result')).toBeInTheDocument();
+  test('always offers the channel itself', async () => {
+    mockApi({ success: true, channel: CHANNEL, videos: VIDEOS });
+    render(<LivestreamsView />);
+    const channelLink = await screen.findByRole('link', { name: /Watch on YouTube/ });
+    expect(channelLink).toHaveAttribute('href', 'https://www.youtube.com/@CapshawChurch');
   });
 
-  test('searches the title, the speaker and the series alike', async () => {
-    render(<SermonsView data={SERMONS} />);
-    const search = screen.getByPlaceholderText(/Search title/i);
+  test('an unreachable YouTube leaves the channel link, not an error page', async () => {
+    mockApi({ success: true, channel: CHANNEL, videos: [], warning: 'timed out' });
+    render(<LivestreamsView />);
 
-    for (const [term, expected] of [['Living', 'Living Water'], ['Nelson', 'The Good Shepherd'], ['James', 'Faith That Works']]) {
-      type(search, term);
-      expect(screen.getByText('1 result')).toBeInTheDocument();
-      expect(screen.getByText(expected)).toBeInTheDocument();
-    }
+    expect(await screen.findByText(/could not reach YouTube/i)).toBeInTheDocument();
+    expect(screen.getByText('youtube.com/@CapshawChurch')).toBeInTheDocument();
   });
 
-  test('ignores the case of the search', async () => {
-    render(<SermonsView data={SERMONS} />);
-    type(screen.getByPlaceholderText(/Search title/i), 'FAITH');
-    expect(screen.getByText('Faith That Works')).toBeInTheDocument();
+  test('an empty channel is not an error', async () => {
+    mockApi({ success: true, channel: CHANNEL, videos: [] });
+    render(<LivestreamsView />);
+    expect(await screen.findByText(/always on the channel/i)).toBeInTheDocument();
   });
 
-  test('offers every speaker and type that appears, and filters on the choice', async () => {
-    render(<SermonsView data={SERMONS} />);
-    const [speakerSelect, typeSelect] = screen.getAllByRole('combobox');
-
-    expect(within(speakerSelect).getAllByRole('option').map(o => o.textContent))
-      .toEqual(['All', 'Ray Harris', 'Tom Nelson']);
-
-    choose(speakerSelect, 'Tom Nelson');
-    expect(screen.getByText('1 result')).toBeInTheDocument();
-
-    choose(speakerSelect, 'All');
-    choose(typeSelect, 'Topical');
-    expect(screen.getByText('2 results')).toBeInTheDocument();
+  test('a failed request is reported rather than swallowed', async () => {
+    mockApi({ success: false, error: 'Authentication required' });
+    render(<LivestreamsView />);
+    expect(await screen.findByText('Authentication required')).toBeInTheDocument();
   });
 
-  test('combines a search with the filters', async () => {
-    render(<SermonsView data={SERMONS} />);
-    const [speakerSelect] = screen.getAllByRole('combobox');
+  test('refreshing asks YouTube again rather than the cache', async () => {
+    const fetchMock = mockApi({ success: true, channel: CHANNEL, videos: VIDEOS });
+    render(<LivestreamsView />);
 
-    choose(speakerSelect, 'Ray Harris');
-    type(screen.getByPlaceholderText(/Search title/i), 'Shepherd');
-    expect(screen.getByText('0 results')).toBeInTheDocument();
-    expect(screen.getByText(/No sermons match your filter/i)).toBeInTheDocument();
-  });
+    await screen.findByText('Sunday Morning Worship');
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
 
-  test('leaves a blank speaker or type out of the filter lists', () => {
-    render(<SermonsView data={[sermon({ speaker: '', type: '' })]} />);
-    const [speakerSelect, typeSelect] = screen.getAllByRole('combobox');
-    expect(within(speakerSelect).getAllByRole('option')).toHaveLength(1);
-    expect(within(typeSelect).getAllByRole('option')).toHaveLength(1);
-  });
-
-  test('an empty list is not an error', () => {
-    render(<SermonsView data={[]} />);
-    expect(screen.getByText('0 results')).toBeInTheDocument();
-    expect(screen.getByText(/No sermons match your filter/i)).toBeInTheDocument();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(fetchMock.mock.calls[1][0]).toContain('refresh=1');
   });
 });
 
@@ -115,15 +102,24 @@ describe('VisitorTracker', () => {
     expect(screen.getByText(/No data/i)).toBeInTheDocument();
   });
 
-  test('lists each guest with how many times they have visited and when they last did', () => {
+  test('lists each guest with how often they came and when', () => {
     render(<VisitorTracker data={VISITORS} />);
-    expect(screen.getByText('Pat Lane')).toBeInTheDocument();
-    expect(screen.getByText('2')).toBeInTheDocument();
-    expect(screen.getByText('Last visit: 04/13/25')).toBeInTheDocument();
+    const row = screen.getByRole('button', { name: 'Pat Lane' }).closest('tr');
+
+    expect(within(row).getByText('2')).toBeInTheDocument();
+    expect(within(row).getByText('03/30/25')).toBeInTheDocument();   // first visit
+    expect(within(row).getByText('04/13/25')).toBeInTheDocument();   // last visit
     expect(screen.getByText('2 guests')).toBeInTheDocument();
   });
 
-  test('says "1 guest" rather than "1 guests"', async () => {
+  test('counts the guests, their visits and who came back', () => {
+    render(<VisitorTracker data={VISITORS} />);
+    expect(screen.getByText('Visits recorded').previousSibling).toHaveTextContent('3');
+    expect(screen.getByText('Came back').previousSibling).toHaveTextContent('1');
+    expect(screen.getByText('Most recent visit').previousSibling).toHaveTextContent('04/13/25');
+  });
+
+  test('says "1 guest" rather than "1 guests"', () => {
     render(<VisitorTracker data={VISITORS} />);
     type(screen.getByPlaceholderText(/Search guests/i), 'Pat');
     expect(screen.getByText('1 guest')).toBeInTheDocument();
@@ -131,42 +127,47 @@ describe('VisitorTracker', () => {
 
   test('a guest with no recorded visits shows a dash rather than "undefined"', () => {
     render(<VisitorTracker data={[{ name: 'Jo Reed', visits: [] }]} />);
-    expect(screen.getByText('Last visit: —')).toBeInTheDocument();
+    const row = screen.getByRole('button', { name: 'Jo Reed' }).closest('tr');
+    expect(within(row).getAllByText('—')).toHaveLength(2);
   });
 
-  test('the visit history is hidden until the guest is opened', async () => {
+  test('the visit history is spelled out when the guest is clicked', () => {
     render(<VisitorTracker data={VISITORS} />);
-    expect(screen.queryByText('03/30/25')).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: /Pat Lane/ }));
-    expect(screen.getByText('03/30/25')).toBeInTheDocument();
-    expect(screen.getByText('PM')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Pat Lane' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Pat Lane')).toBeInTheDocument();
+    expect(within(dialog).getByText('2 visits on record')).toBeInTheDocument();
+    expect(within(dialog).getByText('03/30/25')).toBeInTheDocument();
+    expect(within(dialog).getByText('PM')).toBeInTheDocument();
   });
 
-  test('opening one guest leaves the others closed', async () => {
+  test('the details are for the guest that was clicked, not another', () => {
     render(<VisitorTracker data={VISITORS} />);
-    fireEvent.click(screen.getByRole('button', { name: /Pat Lane/ }));
-    expect(screen.queryByText('04/06/25')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Sam Ford' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('1 visit on record')).toBeInTheDocument();
+    expect(within(dialog).queryByText('03/30/25')).not.toBeInTheDocument();
   });
 
-  test('a guest can be closed again', async () => {
+  test('the details close again', () => {
     render(<VisitorTracker data={VISITORS} />);
-    const row = screen.getByRole('button', { name: /Pat Lane/ });
-
-    fireEvent.click(row);
-    expect(screen.getByText('03/30/25')).toBeInTheDocument();
-    fireEvent.click(row);
-    expect(screen.queryByText('03/30/25')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Pat Lane' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  test('searching by name narrows the list', async () => {
+  test('searching by name narrows the list', () => {
     render(<VisitorTracker data={VISITORS} />);
     type(screen.getByPlaceholderText(/Search guests/i), 'sam');
     expect(screen.getByText('Sam Ford')).toBeInTheDocument();
     expect(screen.queryByText('Pat Lane')).not.toBeInTheDocument();
   });
 
-  test('a search that matches nobody says so', async () => {
+  test('a search that matches nobody says so', () => {
     render(<VisitorTracker data={VISITORS} />);
     type(screen.getByPlaceholderText(/Search guests/i), 'nobody');
     expect(screen.getByText(/No visitors match your search/i)).toBeInTheDocument();
@@ -197,65 +198,56 @@ describe('JobAssignments', () => {
     expect(screen.getByText('April 2025')).toBeInTheDocument();
   });
 
-  test('groups the assignments under their date', () => {
+  test('offers every week of the roster, and opens on the first', () => {
     render(<JobAssignments data={DATA} />);
-    expect(screen.getByRole('heading', { name: 'April 6' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'April 13' })).toBeInTheDocument();
-    expect(screen.getByText('Opening Prayer')).toBeInTheDocument();
+    const weeks = screen.getByRole('combobox', { name: 'Week' });
+
+    expect(within(weeks).getAllByRole('option').map(o => o.textContent)).toEqual(['April 6', 'April 13']);
+    expect(weeks).toHaveValue('April 6');
   });
 
-  test('the AV rotation is shown on its own, not among the other jobs', () => {
+  test('shows one week at a time, in a single table', () => {
     render(<JobAssignments data={DATA} />);
-    expect(screen.getByRole('heading', { name: 'AV Operator' })).toBeInTheDocument();
-    expect(screen.getByText('Monthly prep: Sam Ford')).toBeInTheDocument();
-    // The operator appears once — in the AV column, not in the date groups
-    expect(screen.getAllByText('Jo Reed')).toHaveLength(1);
-    expect(screen.queryByText('Visuals')).not.toBeInTheDocument();
-  });
-
-  test('says so when nobody is on the AV rotation', () => {
-    render(<JobAssignments data={{ month: 'April 2025', assignments: [DATA.assignments[0]] }} />);
-    expect(screen.getByText(/No AV assignments found/i)).toBeInTheDocument();
-  });
-
-  test('omits the monthly prep line when there is none', () => {
-    render(<JobAssignments data={{ assignments: [DATA.assignments[3]] }} />);
-    expect(screen.queryByText(/Monthly prep/i)).not.toBeInTheDocument();
-  });
-
-  test('filters by job, by name and by service alike', async () => {
-    render(<JobAssignments data={DATA} />);
-    const filter = screen.getByPlaceholderText(/Filter by job/i);
-
-    type(filter, 'Opening');
+    expect(screen.getAllByRole('table')).toHaveLength(1);
     expect(screen.getByText('Opening Prayer')).toBeInTheDocument();
     expect(screen.queryByText('Lee Park')).not.toBeInTheDocument();
-    type(filter, 'Lee');
+  });
+
+  test('choosing another week swaps the table over', () => {
+    render(<JobAssignments data={DATA} />);
+    choose(screen.getByRole('combobox', { name: 'Week' }), 'April 13');
+
     expect(screen.getByText('Lee Park')).toBeInTheDocument();
-    expect(screen.queryByText('Tom Nelson')).not.toBeInTheDocument();
-    type(filter, 'PM');
-    expect(screen.getByRole('heading', { name: 'April 13' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'April 6' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Opening Prayer')).not.toBeInTheDocument();
   });
 
-  test('a date whose rows all filter out is dropped, heading and all', async () => {
+  test('the service each job belongs to is left out', () => {
     render(<JobAssignments data={DATA} />);
-    type(screen.getByPlaceholderText(/Filter by job/i), 'Opening');
-    expect(screen.queryByRole('heading', { name: 'April 13' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Service')).not.toBeInTheDocument();
+    expect(screen.queryByText('AM')).not.toBeInTheDocument();
   });
 
-  test('a filter that matches nothing says so — but keeps the AV column', async () => {
+  test('the AV operator is listed with the rest of that week', () => {
     render(<JobAssignments data={DATA} />);
-    type(screen.getByPlaceholderText(/Filter by job/i), 'zzz');
-    expect(screen.getByText(/No assignments match your filter/i)).toBeInTheDocument();
-    // The AV rotation is deliberately unaffected by the filter
+    expect(screen.getByText('Visuals')).toBeInTheDocument();
     expect(screen.getByText('Jo Reed')).toBeInTheDocument();
+  });
+
+  test('the monthly visual preparation is called out above the table, not as a week', () => {
+    render(<JobAssignments data={DATA} />);
+    expect(screen.getByText(/Visual Preparation: Sam Ford/)).toBeInTheDocument();
+    expect(within(screen.getByRole('combobox', { name: 'Week' })).getAllByRole('option')).toHaveLength(2);
+  });
+
+  test('omits the monthly line when there is none', () => {
+    render(<JobAssignments data={{ assignments: [DATA.assignments[0]] }} />);
+    expect(screen.queryByText(/Visual Preparation/)).not.toBeInTheDocument();
   });
 
   test('a roster with no assignments at all renders empty rather than breaking', () => {
     render(<JobAssignments data={{}} />);
-    expect(screen.getByText(/No assignments match your filter/i)).toBeInTheDocument();
-    expect(screen.getByText(/No AV assignments found/i)).toBeInTheDocument();
+    expect(screen.getByText(/Nobody is rostered yet/i)).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Week' })).not.toBeInTheDocument();
   });
 });
 

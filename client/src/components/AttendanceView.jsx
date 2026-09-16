@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { toCsv, downloadCsv } from '../lib/csv';
 
 const SERVICE_COLORS = {
   'Sun AM':                 'bg-blue-100 text-blue-800',
@@ -32,9 +33,29 @@ export default function AttendanceView({ data }) {
   const max = filtered.length ? Math.max(...filtered.map(r => r.count)) : 0;
   const min = filtered.length ? Math.min(...filtered.map(r => r.count)) : 0;
 
+  function handleExport() {
+    const suffix = serviceFilter === 'All' ? 'all-services' : serviceFilter.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    downloadCsv(
+      `attendance-${suffix}.csv`,
+      toCsv(['Date', 'Service', 'Count'], filtered.map(r => [r.date, r.service, r.count])),
+    );
+  }
+
   return (
     <div className="space-y-4">
-      <h2 className="section-heading">Attendance</h2>
+      <div className="flex items-end justify-between flex-wrap gap-3">
+        <h2 className="section-heading mb-0">Attendance</h2>
+        <button
+          onClick={handleExport}
+          disabled={filtered.length === 0}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border border-church-navy text-church-navy hover:bg-church-navy hover:text-white transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-church-navy"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+          </svg>
+          Export CSV
+        </button>
+      </div>
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">

@@ -812,7 +812,24 @@ export default function DatabaseAdminView() {
   const tableKeys = Object.keys(TABLE_DEFS);
 
   return (
-    <div className="flex gap-0 h-[calc(100vh-10rem)] min-h-[500px]">
+    // Below lg the table picker is a dropdown above the grid; from lg up it is
+    // the sidebar. The dropdown is part of the flow — floating it over the grid
+    // left it behind the sticky table header and unreachable.
+    <div className="flex flex-col lg:flex-row gap-3 lg:gap-0 lg:h-[calc(100vh-10rem)] lg:min-h-[500px]">
+
+      {/* Mobile table select */}
+      <div className="lg:hidden">
+        <select
+          value={activeTable}
+          onChange={e => setActiveTable(e.target.value)}
+          aria-label="Table"
+          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-church-gold"
+        >
+          <option value="overview">Overview</option>
+          <option value="scrape-status">Scrape Status</option>
+          {tableKeys.map(k => <option key={k} value={k}>{TABLE_DEFS[k].label}</option>)}
+        </select>
+      </div>
 
       {/* Sidebar */}
       <aside className="shrink-0 w-52 bg-white border-r border-gray-100 rounded-l-xl flex flex-col transition-all hidden lg:flex">
@@ -862,21 +879,8 @@ export default function DatabaseAdminView() {
         </nav>
       </aside>
 
-      {/* Mobile table select */}
-      <div className="lg:hidden w-full mb-4 absolute">
-        <select
-          value={activeTable}
-          onChange={e => setActiveTable(e.target.value)}
-          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold"
-        >
-          <option value="overview">Overview</option>
-          <option value="scrape-status">Scrape Status</option>
-          {tableKeys.map(k => <option key={k} value={k}>{TABLE_DEFS[k].label}</option>)}
-        </select>
-      </div>
-
       {/* Main content */}
-      <div className="flex-1 overflow-hidden bg-white rounded-r-xl lg:rounded-l-none border border-gray-100 flex flex-col p-5">
+      <div className="flex-1 min-h-[70vh] lg:min-h-0 overflow-hidden bg-white rounded-xl lg:rounded-l-none border border-gray-100 flex flex-col p-5">
         {scrapeMsg && (
           <div className="mb-4 px-4 py-2.5 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800 flex items-center justify-between">
             <span>{scrapeMsg}</span>

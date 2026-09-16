@@ -1,31 +1,116 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 
-function DeaconCard({ deacon }) {
-  const [open, setOpen] = useState(false);
+function SortIcon({ active, dir }) {
+  if (!active) return (
+    <svg className="w-3 h-3 opacity-30 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" />
+    </svg>
+  );
   return (
-    <div className="card p-0 overflow-hidden">
+    <svg className="w-3 h-3 text-church-gold shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d={dir === 'asc' ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7'} />
+    </svg>
+  );
+}
+
+function SortHeader({ col, label, sort, onSort, className = '' }) {
+  return (
+    <th className={`px-4 py-3 ${className}`}>
       <button
-        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50 transition-colors"
-        onClick={() => setOpen(o => !o)}
+        onClick={() => onSort(col)}
+        aria-label={`Sort by ${label}`}
+        className="flex items-center gap-1 font-medium text-xs uppercase tracking-wide hover:text-church-gold transition-colors"
       >
-        <span className="font-medium text-church-navy">{deacon.name}</span>
-        <span className="text-xs text-gray-400 flex items-center gap-1">
-          {deacon.duties.length} {deacon.duties.length === 1 ? 'duty' : 'duties'}
-          <svg className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-          </svg>
-        </span>
+        <span>{label}</span>
+        <SortIcon active={sort.col === col} dir={sort.dir} />
       </button>
-      {open && (
-        <ul className="px-4 pb-3 space-y-1 border-t border-gray-100">
-          {deacon.duties.map((d, i) => (
-            <li key={i} className="text-sm text-gray-600 flex gap-2 pt-1">
-              <span className="text-church-gold mt-0.5">•</span>
-              {d}
-            </li>
-          ))}
-        </ul>
-      )}
+    </th>
+  );
+}
+
+// One row per deacon, with everything he looks after in a single cell. Sorting
+// and filtering are done here rather than on the server: the whole diaconate
+// is a few dozen rows, and they arrive with the rest of the scraped data.
+function DeaconGrid({ deacons }) {
+  const [filter, setFilter] = useState('');
+  const [sort,   setSort]   = useState({ col: 'name', dir: 'asc' });
+
+  function toggleSort(col) {
+    setSort(s => (s.col === col ? { col, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: 'asc' }));
+  }
+
+  const rows = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    const matched = deacons.filter(d =>
+      !q ||
+      d.name.toLowerCase().includes(q) ||
+      (d.duties || []).some(duty => duty.toLowerCase().includes(q))
+    );
+
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    return [...matched].sort((a, b) => (
+      sort.col === 'duties'
+        ? ((a.duties?.length || 0) - (b.duties?.length || 0)) * dir
+        : a.name.localeCompare(b.name) * dir
+    ));
+  }, [deacons, filter, sort]);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h2 className="section-heading mb-0">Deacons</h2>
+        <div className="flex items-center gap-3">
+          <input
+            type="text"
+            placeholder="Filter by name or responsibility…"
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-church-navy w-72 max-w-full"
+          />
+          <span className="text-sm text-gray-400 whitespace-nowrap">
+            {rows.length} deacon{rows.length !== 1 ? 's' : ''}
+          </span>
+        </div>
+      </div>
+
+      <div className="card p-0 overflow-hidden overflow-x-auto">
+        <table className="w-full text-sm min-w-[560px]">
+          <thead>
+            <tr className="bg-church-navy text-left text-gray-300">
+              <SortHeader col="name"   label="Deacon"           sort={sort} onSort={toggleSort} className="w-56 align-top" />
+              <SortHeader col="duties" label="Responsibilities" sort={sort} onSort={toggleSort} className="align-top" />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((d, i) => (
+              <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                <td className="px-4 py-3 font-medium text-church-navy align-top whitespace-nowrap">{d.name}</td>
+                <td className="px-4 py-3 align-top">
+                  {d.duties?.length ? (
+                    <ul className="space-y-1">
+                      {d.duties.map((duty, j) => (
+                        <li key={j} className="flex gap-2 text-gray-600">
+                          <span className="text-church-gold shrink-0">•</span>
+                          <span>{duty}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <span className="text-gray-300">—</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={2} className="px-4 py-12 text-center text-gray-400">
+                  {deacons.length ? 'No deacons match your filter.' : 'No deacon data found.'}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -39,29 +124,11 @@ export default function LeadershipView({ deacons, bulletins }) {
     );
   }
 
-  const deaconList  = deacons  || [];
   const bulletinList = bulletins || [];
 
   return (
     <div className="space-y-8">
-
-      {/* Deacons */}
-      <section className="space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="section-heading">Deacons</h2>
-          <span className="text-sm text-gray-400">{deaconList.length} deacons</span>
-        </div>
-
-        {deaconList.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {deaconList.map((d, i) => (
-              <DeaconCard key={i} deacon={d} />
-            ))}
-          </div>
-        ) : (
-          <div className="card text-center text-gray-400 py-12">No deacon data found.</div>
-        )}
-      </section>
+      <DeaconGrid deacons={deacons || []} />
 
       {/* Bulletins */}
       <section className="space-y-4">

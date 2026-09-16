@@ -6,7 +6,7 @@ const { listDefinitions, getDefinition, validateDefinitions } = require('../work
 
 // A small cast: an admin, two members (one of them rostered), and a pending
 // user who should not be able to start anything.
-let ADMIN, MEMBER, OTHER, PENDING, RAY, JO, ASSIGNMENT;
+let ADMIN, MEMBER, OTHER, PENDING, RAY, JO, ORPHAN, ASSIGNMENT, VISITOR;
 
 function addUser(name, role, directoryId = null) {
   const { lastInsertRowid: id } = db.prepare(
@@ -34,14 +34,26 @@ function actOn(instanceId, user, actionId, note = '') {
   return engine.act({ taskId: task.id, actionId, note, user });
 }
 
+// The stock request these tests walk through. Aimed by default at somebody in
+// the directory with no login of their own, so the first task falls to the
+// admin queue and any admin can move it along.
+function followUp({ user = MEMBER, assignee = ORPHAN } = {}) {
+  return engine.start({
+    definitionId: 'visitor-follow-up',
+    data: { visitorId: String(VISITOR.id), assigneePersonId: String(assignee.id), notes: '' },
+    user,
+  });
+}
+
 beforeEach(() => {
   for (const t of ['workflow_participants', 'workflow_events', 'workflow_tasks', 'workflow_instances',
                    'job_assignments', 'visitors', 'users', 'directory']) {
     db.prepare(`DELETE FROM ${t}`).run();
   }
 
-  RAY = addPerson('Ray Harris');
-  JO  = addPerson('Jo Harris');
+  RAY    = addPerson('Ray Harris');
+  JO     = addPerson('Jo Harris');
+  ORPHAN = addPerson('Unlinked Person');
 
   ADMIN   = addUser('Ada',  'admin');
   MEMBER  = addUser('Ray',  'approved', RAY.id);
@@ -52,6 +64,9 @@ beforeEach(() => {
     'INSERT INTO job_assignments (month, date, service, job, name) VALUES (?,?,?,?,?)'
   ).run('April 2025', 'April 6', 'Sunday Worship', 'Song Leader', 'Ray Harris');
   ASSIGNMENT = db.prepare('SELECT * FROM job_assignments WHERE id = ?').get(lastInsertRowid);
+
+  const visitor = db.prepare('INSERT INTO visitors (name) VALUES (?)').run('Sam Visitor');
+  VISITOR = db.prepare('SELECT * FROM visitors WHERE id = ?').get(visitor.lastInsertRowid);
 });
 
 // ─── Definitions ──────────────────────────────────────────────────────────────
@@ -81,10 +96,11 @@ describe('workflow definitions', () => {
   });
 
   test('describe() yields a node for every step and outcome', () => {
-    const chart = engine.describe(getDefinition('facility-use'));
-    expect(chart.nodes.filter(n => n.kind === 'step').map(n => n.id).sort()).toEqual(['confirm', 'review']);
+    const chart = engine.describe(getDefinition('visitor-follow-up'));
+    expect(chart.nodes.filter(n => n.kind === 'step').map(n => n.id).sort())
+      .toEqual(['reach-out', 'reassign', 'record-outcome', 'try-again']);
     expect(chart.nodes.filter(n => n.kind === 'outcome').map(n => n.id).sort())
-      .toEqual(['approved', 'declined', 'withdrawn']);
+      .toEqual(['interested', 'no-contact', 'not-interested']);
   });
 });
 
@@ -92,47 +108,39 @@ describe('workflow definitions', () => {
 
 describe('starting a workflow', () => {
   test('a member can start one, and it opens at the first step', () => {
-    const { id } = engine.start({
-      definitionId: 'facility-use',
-      data: { room: 'Kitchen', date: '2026-05-01', time: '6pm', purpose: 'Potluck' },
-      user: MEMBER,
-    });
+    const { id } = followUp();
 
     const row = instanceRow(id);
     expect(row.status).toBe('active');
-    expect(row.step_id).toBe('review');
-    expect(row.title).toBe('Kitchen — 2026-05-01');
+    expect(row.step_id).toBe('reach-out');
+    expect(row.title).toBe('Follow up with Sam Visitor');
     expect(pendingTasks(id)).toHaveLength(1);
   });
 
   test('a pending user is refused', () => {
-    const result = engine.start({
-      definitionId: 'facility-use',
-      data: { room: 'Kitchen', date: '2026-05-01', time: '6pm', purpose: 'Potluck' },
-      user: PENDING,
-    });
-    expect(result).toMatchObject({ status: 403 });
+    expect(followUp({ user: PENDING })).toMatchObject({ status: 403 });
     expect(db.prepare('SELECT COUNT(*) n FROM workflow_instances').get().n).toBe(0);
   });
 
   test('missing required fields are refused before anything is written', () => {
     const result = engine.start({
-      definitionId: 'facility-use',
-      data: { room: 'Kitchen' },
+      definitionId: 'visitor-follow-up',
+      data: { visitorId: String(VISITOR.id) },
       user: MEMBER,
     });
     expect(result.status).toBe(400);
-    expect(result.error).toMatch(/Date is required/);
+    expect(result.error).toMatch(/Who should reach out is required/);
     expect(db.prepare('SELECT COUNT(*) n FROM workflow_instances').get().n).toBe(0);
   });
 
   test('a value outside a select\'s options is refused', () => {
     const result = engine.start({
-      definitionId: 'facility-use',
-      data: { room: 'The Roof', date: '2026-05-01', time: '6pm', purpose: 'Potluck' },
-      user: MEMBER,
+      definitionId: 'worship-schedule',
+      data: { month: 'June 2026', services: 'Whenever we feel like it' },
+      user: ADMIN,
     });
     expect(result.status).toBe(400);
+    expect(db.prepare('SELECT COUNT(*) n FROM workflow_instances').get().n).toBe(0);
   });
 
   test('an unknown workflow is a 404', () => {
@@ -154,12 +162,13 @@ describe('starting a workflow', () => {
 
 describe('who a task lands on', () => {
   test('a role step is offered to anyone holding that role, not one person', () => {
-    const { id } = engine.start({
-      definitionId: 'facility-use',
-      data: { room: 'Kitchen', date: '2026-05-01', time: '6pm', purpose: 'Potluck' },
-      user: MEMBER,
-    });
+    // Jo does the reaching out; recording the outcome afterwards is the
+    // admins' step, and belongs to whichever of them picks it up.
+    const { id } = followUp({ assignee: JO });
+    actOn(id, OTHER, 'spoke');
+
     const [task] = pendingTasks(id);
+    expect(instanceRow(id).step_id).toBe('record-outcome');
     expect(task.assignee_role).toBe('admin');
     expect(task.assignee_user_id).toBeNull();
   });
@@ -175,28 +184,13 @@ describe('who a task lands on', () => {
   });
 
   test('a person step lands on that person\'s linked login', () => {
-    db.prepare('INSERT INTO visitors (name) VALUES (?)').run('Sam Visitor');
-    const visitorId = db.prepare('SELECT id FROM visitors').get().id;
-
-    const { id } = engine.start({
-      definitionId: 'visitor-follow-up',
-      data: { visitorId: String(visitorId), assigneePersonId: String(JO.id), notes: '' },
-      user: MEMBER,
-    });
+    const { id } = followUp({ assignee: JO });
     const [task] = pendingTasks(id);
     expect(task.assignee_user_id).toBe(OTHER.id);
   });
 
   test('a person with no linked login falls back to a role, so nothing stalls', () => {
-    const orphan = addPerson('Unlinked Person');
-    db.prepare('INSERT INTO visitors (name) VALUES (?)').run('Sam Visitor');
-    const visitorId = db.prepare('SELECT id FROM visitors').get().id;
-
-    const { id } = engine.start({
-      definitionId: 'visitor-follow-up',
-      data: { visitorId: String(visitorId), assigneePersonId: String(orphan.id), notes: '' },
-      user: MEMBER,
-    });
+    const { id } = followUp();
     const [task] = pendingTasks(id);
     expect(task.assignee_user_id).toBeNull();
     expect(task.assignee_role).toBe('admin');
@@ -206,66 +200,69 @@ describe('who a task lands on', () => {
 // ─── Acting ───────────────────────────────────────────────────────────────────
 
 describe('acting on a task', () => {
-  function facilityRequest() {
-    return engine.start({
-      definitionId: 'facility-use',
-      data: { room: 'Kitchen', date: '2026-05-01', time: '6pm', purpose: 'Potluck' },
-      user: MEMBER,
-    }).id;
-  }
-
   test('an admin can action a role task, and it advances', () => {
-    const id = facilityRequest();
-    expect(actOn(id, ADMIN, 'approve')).toMatchObject({ id });
-    expect(instanceRow(id).step_id).toBe('confirm');
-    expect(pendingTasks(id)[0].assignee_user_id).toBe(MEMBER.id);
+    const { id } = followUp();
+    expect(actOn(id, ADMIN, 'spoke')).toMatchObject({ id });
+    expect(instanceRow(id).step_id).toBe('record-outcome');
+    expect(pendingTasks(id)).toHaveLength(1);
   });
 
   test('a member cannot action a task aimed at admins', () => {
-    const id = facilityRequest();
-    expect(actOn(id, OTHER, 'approve')).toMatchObject({ status: 403 });
-    expect(instanceRow(id).step_id).toBe('review');
+    const { id } = followUp();
+    expect(actOn(id, OTHER, 'spoke')).toMatchObject({ status: 403 });
+    expect(instanceRow(id).step_id).toBe('reach-out');
   });
 
   test('the same task cannot be actioned twice', () => {
-    const id = facilityRequest();
+    const { id } = followUp();
     const task = pendingTasks(id)[0];
-    engine.act({ taskId: task.id, actionId: 'approve', user: ADMIN });
-    expect(engine.act({ taskId: task.id, actionId: 'approve', user: ADMIN })).toMatchObject({ status: 409 });
+    engine.act({ taskId: task.id, actionId: 'spoke', user: ADMIN });
+    expect(engine.act({ taskId: task.id, actionId: 'spoke', user: ADMIN })).toMatchObject({ status: 409 });
   });
 
   test('an unknown action is refused', () => {
-    const id = facilityRequest();
+    const { id } = followUp();
     expect(actOn(id, ADMIN, 'teleport')).toMatchObject({ status: 400 });
   });
 
   test('an action that requires a note is refused without one', () => {
-    const id = facilityRequest();
+    const { id } = followUp();
     expect(actOn(id, ADMIN, 'decline')).toMatchObject({ status: 400 });
-    expect(instanceRow(id).step_id).toBe('review');
+    expect(instanceRow(id).step_id).toBe('reach-out');
   });
 
   test('reaching an outcome completes the instance and leaves no open task', () => {
-    const id = facilityRequest();
-    actOn(id, ADMIN, 'decline', 'Already booked for a wedding');
+    const { id } = followUp();
+    actOn(id, ADMIN, 'spoke');
+    actOn(id, ADMIN, 'not-interested');
 
     const row = instanceRow(id);
     expect(row.status).toBe('completed');
-    expect(row.outcome).toBe('declined');
+    expect(row.outcome).toBe('not-interested');
     expect(row.step_id).toBe('');
     expect(row.completed_at).toBeTruthy();
     expect(pendingTasks(id)).toHaveLength(0);
   });
 
   test('every action is recorded in the audit trail with its actor', () => {
-    const id = facilityRequest();
-    actOn(id, ADMIN, 'approve');
-    actOn(id, MEMBER, 'confirm');
+    const { id } = followUp({ assignee: JO });
+    actOn(id, OTHER, 'spoke');
+    actOn(id, ADMIN, 'interested');
 
     const events = db.prepare('SELECT * FROM workflow_events WHERE instance_id = ? ORDER BY id').all(id);
-    expect(events.map(e => e.action)).toEqual(['started', 'approve', 'confirm', 'completed']);
-    expect(events[1].actor_user_id).toBe(ADMIN.id);
-    expect(events[2].actor_user_id).toBe(MEMBER.id);
+    expect(events.map(e => e.action)).toEqual(['started', 'spoke', 'interested', 'completed']);
+    expect(events[1].actor_user_id).toBe(OTHER.id);
+    expect(events[2].actor_user_id).toBe(ADMIN.id);
+  });
+
+  test('a step can loop back on itself for another try', () => {
+    const { id } = followUp({ assignee: JO });
+    actOn(id, OTHER, 'no-answer');
+    expect(instanceRow(id).step_id).toBe('try-again');
+
+    actOn(id, OTHER, 'retry');
+    expect(instanceRow(id).step_id).toBe('reach-out');
+    expect(instanceRow(id).status).toBe('active');
   });
 });
 
@@ -338,11 +335,7 @@ describe('job swap — looping and roster write-back', () => {
 
 describe('inbox', () => {
   test('shows role tasks to everyone who could take them', () => {
-    engine.start({
-      definitionId: 'facility-use',
-      data: { room: 'Kitchen', date: '2026-05-01', time: '6pm', purpose: 'Potluck' },
-      user: MEMBER,
-    });
+    followUp();
 
     expect(engine.inbox(ADMIN)).toHaveLength(1);
     expect(engine.inbox(OTHER)).toHaveLength(0);
@@ -360,25 +353,18 @@ describe('inbox', () => {
   });
 
   test('carries the actions the step offers, so the inbox can act inline', () => {
-    engine.start({
-      definitionId: 'facility-use',
-      data: { room: 'Kitchen', date: '2026-05-01', time: '6pm', purpose: 'Potluck' },
-      user: MEMBER,
-    });
+    followUp();
 
     const [task] = engine.inbox(ADMIN);
-    expect(task.actions.map(a => a.id)).toEqual(['approve', 'clash', 'decline']);
+    expect(task.actions.map(a => a.id)).toEqual(['spoke', 'no-answer', 'decline']);
     expect(task.actions.find(a => a.id === 'decline').requiresNote).toBe(true);
-    expect(task.title).toBe('Kitchen — 2026-05-01');
+    expect(task.title).toBe('Follow up with Sam Visitor');
   });
 
   test('empties once the task is done', () => {
-    const { id } = engine.start({
-      definitionId: 'facility-use',
-      data: { room: 'Kitchen', date: '2026-05-01', time: '6pm', purpose: 'Potluck' },
-      user: MEMBER,
-    });
-    actOn(id, ADMIN, 'decline', 'Booked');
+    const { id } = followUp();
+    actOn(id, ADMIN, 'spoke');
+    actOn(id, ADMIN, 'not-interested');
     expect(engine.inbox(ADMIN)).toHaveLength(0);
   });
 });
@@ -386,41 +372,33 @@ describe('inbox', () => {
 // ─── Visibility ───────────────────────────────────────────────────────────────
 
 describe('who can see an instance', () => {
-  function facilityRequest(user = MEMBER) {
-    return engine.start({
-      definitionId: 'facility-use',
-      data: { room: 'Kitchen', date: '2026-05-01', time: '6pm', purpose: 'Potluck' },
-      user,
-    }).id;
-  }
-
   test('the person who started it can see it', () => {
-    const id = facilityRequest();
+    const { id } = followUp();
     expect(engine.detail(id, MEMBER).instance.id).toBe(id);
   });
 
   test('an uninvolved member cannot', () => {
-    const id = facilityRequest();
+    const { id } = followUp();
     expect(engine.detail(id, OTHER)).toMatchObject({ status: 403 });
   });
 
   test('an admin can see anything', () => {
-    const id = facilityRequest();
+    const { id } = followUp();
     expect(engine.detail(id, ADMIN).instance.id).toBe(id);
   });
 
   test('acting on a workflow keeps it visible afterwards', () => {
-    const id = facilityRequest();
-    actOn(id, ADMIN, 'approve');
-    actOn(id, MEMBER, 'confirm');
+    const { id } = followUp();
+    actOn(id, ADMIN, 'spoke');
+    actOn(id, ADMIN, 'interested');
     // Ada is an admin anyway; check the participant row was actually written.
     const rows = db.prepare('SELECT user_id FROM workflow_participants WHERE instance_id = ?').all(id);
     expect(rows.map(r => r.user_id).sort()).toEqual([MEMBER.id, ADMIN.id].sort());
   });
 
   test('list(mine) shows involvement, list(all) is admin-only and shows everything', () => {
-    const mine   = facilityRequest(MEMBER);
-    const theirs = facilityRequest(OTHER);
+    const mine   = followUp({ user: MEMBER }).id;
+    const theirs = followUp({ user: OTHER }).id;
 
     expect(engine.list(MEMBER, { scope: 'mine' }).map(i => i.id)).toContain(mine);
     expect(engine.list(OTHER,  { scope: 'mine' }).map(i => i.id)).not.toContain(mine);
@@ -431,14 +409,14 @@ describe('who can see an instance', () => {
   });
 
   test('detail exposes my actionable task, and not other people\'s', () => {
-    const id = facilityRequest();
-    expect(engine.detail(id, ADMIN).myTask.stepId).toBe('review');
+    const { id } = followUp();
+    expect(engine.detail(id, ADMIN).myTask.stepId).toBe('reach-out');
     expect(engine.detail(id, MEMBER).myTask).toBeNull();
   });
 
   test('detail lists the steps already visited, for the chart', () => {
-    const id = facilityRequest();
-    actOn(id, ADMIN, 'approve');
-    expect(engine.detail(id, ADMIN).visited).toContain('review');
+    const { id } = followUp();
+    actOn(id, ADMIN, 'spoke');
+    expect(engine.detail(id, ADMIN).visited).toContain('reach-out');
   });
 });

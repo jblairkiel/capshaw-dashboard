@@ -13,7 +13,7 @@ function buildApp(user = null) {
   return app;
 }
 
-let ADMIN, MEMBER, OTHER, PENDING, RAY, ASSIGNMENT;
+let ADMIN, MEMBER, OTHER, PENDING, RAY, ORPHAN, ASSIGNMENT, VISITOR;
 
 function addUser(name, role, directoryId = null) {
   const { lastInsertRowid: id } = db.prepare(
@@ -22,12 +22,17 @@ function addUser(name, role, directoryId = null) {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 }
 
-const REQUEST = { room: 'Kitchen', date: '2026-05-01', time: '6pm', purpose: 'Potluck' };
+// The stock request these tests walk through. It is aimed at somebody in the
+// directory with no login of their own, so the first task falls to the admin
+// queue rather than to one named person.
+function followUpData() {
+  return { visitorId: String(VISITOR.id), assigneePersonId: String(ORPHAN.id), notes: 'Sat at the back' };
+}
 
-async function startFacility(user = MEMBER) {
+async function startFollowUp(user = MEMBER) {
   const res = await request(buildApp(user))
     .post('/api/workflows')
-    .send({ definitionId: 'facility-use', data: REQUEST });
+    .send({ definitionId: 'visitor-follow-up', data: followUpData() });
   return res.body.id;
 }
 
@@ -39,6 +44,12 @@ beforeEach(() => {
 
   const { lastInsertRowid: rayId } = db.prepare('INSERT INTO directory (name) VALUES (?)').run('Ray Harris');
   RAY = db.prepare('SELECT * FROM directory WHERE id = ?').get(rayId);
+
+  const { lastInsertRowid: orphanId } = db.prepare('INSERT INTO directory (name) VALUES (?)').run('Unlinked Person');
+  ORPHAN = db.prepare('SELECT * FROM directory WHERE id = ?').get(orphanId);
+
+  const { lastInsertRowid: visitorId } = db.prepare('INSERT INTO visitors (name) VALUES (?)').run('Sam Visitor');
+  VISITOR = db.prepare('SELECT * FROM visitors WHERE id = ?').get(visitorId);
 
   ADMIN   = addUser('Ada', 'admin');
   MEMBER  = addUser('Ray', 'approved', RAY.id);
@@ -71,11 +82,11 @@ describe('GET /api/workflows/definitions', () => {
     const res = await request(buildApp(MEMBER)).get('/api/workflows/definitions');
     expect(res.status).toBe(200);
     expect(res.body.definitions.map(d => d.id).sort())
-      .toEqual(['facility-use', 'job-swap', 'visitor-follow-up']);
+      .toEqual(['job-swap', 'visitor-follow-up']);
 
-    const facility = res.body.definitions.find(d => d.id === 'facility-use');
-    expect(facility.chart.nodes.length).toBeGreaterThan(0);
-    expect(facility.chart.edges.length).toBeGreaterThan(0);
+    const followUp = res.body.definitions.find(d => d.id === 'visitor-follow-up');
+    expect(followUp.chart.nodes.length).toBeGreaterThan(0);
+    expect(followUp.chart.edges.length).toBeGreaterThan(0);
   });
 
   test('resolves dynamic options against the requesting user', async () => {
@@ -102,7 +113,7 @@ describe('POST /api/workflows', () => {
   test('a member can start one', async () => {
     const res = await request(buildApp(MEMBER))
       .post('/api/workflows')
-      .send({ definitionId: 'facility-use', data: REQUEST });
+      .send({ definitionId: 'visitor-follow-up', data: followUpData() });
     expect(res.status).toBe(200);
     expect(res.body.id).toEqual(expect.any(Number));
   });
@@ -110,12 +121,19 @@ describe('POST /api/workflows', () => {
   test('a pending user is refused', async () => {
     const res = await request(buildApp(PENDING))
       .post('/api/workflows')
-      .send({ definitionId: 'facility-use', data: REQUEST });
+      .send({ definitionId: 'visitor-follow-up', data: followUpData() });
+    expect(res.status).toBe(403);
+  });
+
+  test('a workflow a member may not start is refused as well', async () => {
+    const res = await request(buildApp(MEMBER))
+      .post('/api/workflows')
+      .send({ definitionId: 'worship-schedule', data: { month: 'June 2026', services: 'Sunday Worship' } });
     expect(res.status).toBe(403);
   });
 
   test('a bad payload is a 400, not a crash', async () => {
-    const res = await request(buildApp(MEMBER)).post('/api/workflows').send({ definitionId: 'facility-use' });
+    const res = await request(buildApp(MEMBER)).post('/api/workflows').send({ definitionId: 'visitor-follow-up' });
     expect(res.status).toBe(400);
   });
 });
@@ -124,32 +142,37 @@ describe('POST /api/workflows', () => {
 
 describe('GET /api/workflows', () => {
   test('mine shows what I am involved in, not what I am not', async () => {
-    const mine = await startFacility(MEMBER);
-    await startFacility(OTHER);
+    const mine = await startFollowUp(MEMBER);
+    await startFollowUp(OTHER);
 
     const res = await request(buildApp(MEMBER)).get('/api/workflows');
     expect(res.body.instances.map(i => i.id)).toEqual([mine]);
   });
 
   test('scope=all is refused for a member', async () => {
-    await startFacility(MEMBER);
+    await startFollowUp(MEMBER);
     const res = await request(buildApp(OTHER)).get('/api/workflows?scope=all');
     expect(res.status).toBe(403);
   });
 
   test('scope=all shows an admin everything', async () => {
-    const a = await startFacility(MEMBER);
-    const b = await startFacility(OTHER);
+    const a = await startFollowUp(MEMBER);
+    const b = await startFollowUp(OTHER);
     const res = await request(buildApp(ADMIN)).get('/api/workflows?scope=all');
     expect(res.body.instances.map(i => i.id).sort()).toEqual([a, b].sort());
   });
 
   test('completed workflows are filtered out by default and found with status=completed', async () => {
-    const id = await startFacility(MEMBER);
+    const id = await startFollowUp(MEMBER);
     const detail = await request(buildApp(ADMIN)).get(`/api/workflows/${id}`);
     await request(buildApp(ADMIN))
       .post(`/api/workflows/tasks/${detail.body.myTask.id}`)
-      .send({ action: 'decline', note: 'Already booked' });
+      .send({ action: 'spoke' });
+
+    const outcome = await request(buildApp(ADMIN)).get(`/api/workflows/${id}`);
+    await request(buildApp(ADMIN))
+      .post(`/api/workflows/tasks/${outcome.body.myTask.id}`)
+      .send({ action: 'not-interested' });
 
     const active = await request(buildApp(MEMBER)).get('/api/workflows');
     expect(active.body.instances.map(i => i.id)).not.toContain(id);
@@ -163,18 +186,18 @@ describe('GET /api/workflows', () => {
 
 describe('GET /api/workflows/:id', () => {
   test('a participant sees the instance, its chart and its history', async () => {
-    const id = await startFacility(MEMBER);
+    const id = await startFollowUp(MEMBER);
     const res = await request(buildApp(MEMBER)).get(`/api/workflows/${id}`);
 
     expect(res.status).toBe(200);
-    expect(res.body.instance.title).toBe('Kitchen — 2026-05-01');
+    expect(res.body.instance.title).toBe('Follow up with Sam Visitor');
     expect(res.body.definition.nodes.length).toBeGreaterThan(0);
     expect(res.body.events.map(e => e.action)).toEqual(['started']);
-    expect(res.body.instance.fields.find(f => f.key === 'purpose').value).toBe('Potluck');
+    expect(res.body.instance.fields.find(f => f.key === 'notes').value).toBe('Sat at the back');
   });
 
   test('an uninvolved member gets a 403', async () => {
-    const id = await startFacility(MEMBER);
+    const id = await startFollowUp(MEMBER);
     const res = await request(buildApp(OTHER)).get(`/api/workflows/${id}`);
     expect(res.status).toBe(403);
   });
@@ -194,29 +217,29 @@ describe('POST /api/workflows/tasks/:taskId', () => {
   }
 
   test('an admin actions the task from their inbox and gets the updated instance back', async () => {
-    const id = await startFacility(MEMBER);
+    const id = await startFollowUp(MEMBER);
     const task = await inboxTask(ADMIN);
     expect(task.instanceId).toBe(id);
 
     const res = await request(buildApp(ADMIN))
       .post(`/api/workflows/tasks/${task.id ?? task.taskId}`)
-      .send({ action: 'approve' });
+      .send({ action: 'spoke' });
 
     expect(res.status).toBe(200);
-    expect(res.body.instance.stepId).toBe('confirm');
+    expect(res.body.instance.stepId).toBe('record-outcome');
   });
 
   test('somebody the task is not aimed at is refused', async () => {
-    await startFacility(MEMBER);
+    await startFollowUp(MEMBER);
     const task = await inboxTask(ADMIN);
     const res = await request(buildApp(OTHER))
       .post(`/api/workflows/tasks/${task.taskId}`)
-      .send({ action: 'approve' });
+      .send({ action: 'spoke' });
     expect(res.status).toBe(403);
   });
 
   test('an action needing a note is refused without one', async () => {
-    await startFacility(MEMBER);
+    await startFollowUp(MEMBER);
     const task = await inboxTask(ADMIN);
     const res = await request(buildApp(ADMIN))
       .post(`/api/workflows/tasks/${task.taskId}`)
