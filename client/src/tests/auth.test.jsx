@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import App from '../App';
 import LoginPage from '../components/LoginPage';
@@ -145,22 +145,36 @@ function mockUsersFetch() {
   return fetchMock;
 }
 
+/** Opens the detail menu for one user and waits for the drawer to appear. */
+async function openDetail(name) {
+  fireEvent.click(await screen.findByRole('button', { name: `Manage ${name}` }));
+  return screen.findByRole('dialog', { name: `Details for ${name}` });
+}
+
 describe('UsersView — role management', () => {
   beforeEach(() => { mockUsersFetch(); });
 
-  test('renders a role selector set to each user\'s current role', async () => {
+  test('lists every account in the grid', async () => {
     render(<UsersView currentUser={{ id: 4, role: 'admin' }} />);
-    const melSelect = await screen.findByLabelText('Role for Mel');
-    expect(melSelect.value).toBe('approved');
-    expect(screen.getByLabelText('Role for Pat').value).toBe('pending');
+    for (const u of USERS) {
+      expect(await screen.findByRole('button', { name: `Manage ${u.name}` })).toBeInTheDocument();
+    }
   });
 
-  test('changing a role PATCHes /api/auth/users/:id/role', async () => {
+  test('the detail menu shows the role options with the current one selected', async () => {
+    render(<UsersView currentUser={{ id: 4, role: 'admin' }} />);
+    const drawer = await openDetail('Mel');
+
+    expect(within(drawer).getByRole('radio', { name: 'Member role' })).toBeChecked();
+    expect(within(drawer).getByRole('radio', { name: 'Admin role' })).not.toBeChecked();
+  });
+
+  test('assigning a role from the detail menu PATCHes /api/auth/users/:id/role', async () => {
     const fetchMock = mockUsersFetch();
     render(<UsersView currentUser={{ id: 4, role: 'admin' }} />);
-    const select = await screen.findByLabelText('Role for Mel');
+    const drawer = await openDetail('Mel');
 
-    fireEvent.change(select, { target: { value: 'admin' } });
+    fireEvent.click(within(drawer).getByRole('radio', { name: 'Admin role' }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -170,11 +184,50 @@ describe('UsersView — role management', () => {
     });
   });
 
-  test('locks the selector for your own account and for the owner', async () => {
+  test('approving a pending user from the grid PATCHes them to approved', async () => {
+    const fetchMock = mockUsersFetch();
     render(<UsersView currentUser={{ id: 4, role: 'admin' }} />);
-    expect(await screen.findByLabelText('Role for Sam')).toBeDisabled();  // self
-    expect(screen.getByLabelText('Role for Ada')).toBeDisabled();         // owner
-    expect(screen.getByLabelText('Role for Mel')).not.toBeDisabled();
+
+    fireEvent.click(await screen.findByRole('button', { name: /^approve$/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/auth/users/3/role',
+        expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ role: 'approved' }) })
+      );
+    });
+  });
+
+  test('locks the role controls for your own account and for the owner', async () => {
+    render(<UsersView currentUser={{ id: 4, role: 'admin' }} />);
+
+    const self = await openDetail('Sam');
+    expect(within(self).getByRole('radio', { name: 'Admin role' })).toBeDisabled();
+    expect(within(self).getByText(/cannot change your own role/i)).toBeInTheDocument();
+    fireEvent.click(within(self).getByRole('button', { name: /close details/i }));
+
+    const owner = await openDetail('Ada');
+    expect(within(owner).getByRole('radio', { name: 'Admin role' })).toBeDisabled();
+    expect(within(owner).getByText(/owner account is always an admin/i)).toBeInTheDocument();
+    fireEvent.click(within(owner).getByRole('button', { name: /close details/i }));
+
+    const other = await openDetail('Mel');
+    expect(within(other).getByRole('radio', { name: 'Admin role' })).not.toBeDisabled();
+  });
+
+  test('links an account to a directory entry from the detail menu', async () => {
+    const fetchMock = mockUsersFetch();
+    render(<UsersView currentUser={{ id: 4, role: 'admin' }} />);
+    const drawer = await openDetail('Mel');
+
+    fireEvent.change(within(drawer).getByLabelText('Directory entry for Mel'), { target: { value: '' } });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/auth/users/2/directory',
+        expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ directory_id: null }) })
+      );
+    });
   });
 
   test('explains what each role can do', async () => {
