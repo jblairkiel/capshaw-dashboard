@@ -1,0 +1,40 @@
+name: CodeQL
+
+# Static analysis for the kind of bug npm audit can't see — this is exactly
+# how the path-traversal issue in server/routes/documents.js would have been
+# caught automatically instead of by hand: CodeQL's JS/TS query set includes
+# "path constructed from user-controlled input" among its standard checks.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, so a newly published query still gets run against code that
+    # hasn't changed — a query added after this file was written is the
+    # whole point of scheduling this at all.
+    - cron: '17 3 * * 1'
+
+jobs:
+  analyze:
+    name: Analyze (JavaScript)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          config-file: ./.github/codeql/codeql-config.yml
+
+      # No build step: the JS/TS extractor reads source directly and does not
+      # need the app installed or compiled first.
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"

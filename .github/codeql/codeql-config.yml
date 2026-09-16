@@ -1,0 +1,8 @@
+name: "CodeQL config"
+
+# Excludes the specific query the team has decided not to gate on right now,
+# without touching whatever suite Initialize CodeQL runs by default — an
+# empty `queries:` list here would replace it, not narrow it.
+query-filters:
+  - exclude:
+      id: js/missing-token-validation

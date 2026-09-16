@@ -47,6 +47,19 @@ async function docxToHtml(filePath) {
 
 const uploadsDir = path.join(__dirname, '../uploads');
 
+// ─── Path traversal guard ─────────────────────────────────────────────────────
+// Express decodes a route param *after* matching it against the URL, so a
+// request for /api/documents/..%2F..%2F.env arrives here with
+// req.params.filename literally equal to "../../.env" — one URL segment on
+// the wire, a full traversal once decoded. path.basename() strips any
+// directory component that survives that decode, so the name we join can
+// only ever point inside uploadsDir.
+function safeUploadPath(filename) {
+  const base = path.basename(String(filename ?? ''));
+  if (!base || base === '.' || base === '..') return null;
+  return path.join(uploadsDir, base);
+}
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadsDir),
   filename: (req, file, cb) => {
@@ -119,7 +132,10 @@ router.get('/', (req, res) => {
 
 // GET /api/documents/:filename — convert and return HTML for a stored doc
 router.get('/:filename', async (req, res) => {
-  const filePath = path.join(uploadsDir, req.params.filename);
+  const filePath = safeUploadPath(req.params.filename);
+  if (!filePath) {
+    return res.status(400).json({ success: false, error: 'Invalid filename' });
+  }
 
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ success: false, error: 'File not found' });
@@ -140,7 +156,10 @@ router.get('/:filename', async (req, res) => {
 
 // DELETE /api/documents/:filename
 router.delete('/:filename', requireAdmin, (req, res) => {
-  const filePath = path.join(uploadsDir, req.params.filename);
+  const filePath = safeUploadPath(req.params.filename);
+  if (!filePath) {
+    return res.status(400).json({ success: false, error: 'Invalid filename' });
+  }
 
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ success: false, error: 'File not found' });
