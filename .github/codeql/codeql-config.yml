@@ -6,3 +6,12 @@ name: "CodeQL config"
 query-filters:
   - exclude:
       id: js/missing-token-validation
+
+# Test code is not deployed, and its scaffolding trips queries that only make
+# sense about a real server: a fake auth middleware in a supertest harness is
+# reported as an unrate-limited route handler touching the database. Scanning
+# the application itself is the point, so the suites are left out rather than
+# the queries being switched off for everybody.
+paths-ignore:
+  - 'server/tests/**'
+  - 'client/src/tests/**'

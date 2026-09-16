@@ -86,11 +86,6 @@ function createApp() {
   }));
   app.use(passport.initialize());
   app.use(passport.session());
-  // Straight after passport: an admin viewing the portal as a member has their
-  // own account in the session, and every request below this line is answered
-  // as the member. The admin stays on req.impersonator, which is what stops it
-  // again and who the action history names.
-  app.use(applyImpersonation);
 
   // A ceiling on the whole authenticated surface, well above real usage —
   // the per-endpoint limits in routes/auth.js exist to slow down password
@@ -108,7 +103,14 @@ function createApp() {
   // flow itself and the health check stay open. requireTrustedOrigin runs
   // first so a cross-site page riding the visitor's session cookie is
   // rejected before it ever reaches a route that trusts that session.
-  app.use('/api', apiRateLimit, requireTrustedOrigin(allowedOrigins), requireSiteAuth);
+  //
+  // applyImpersonation comes last in the chain, and only here: an admin viewing
+  // the portal as a member has their own account in the session, and every API
+  // request below this line is answered as the member instead. It reads the
+  // borrowed account from the database, so it sits behind the rate limit rather
+  // than above it — and under /api rather than on every request, since a static
+  // asset has no use for it.
+  app.use('/api', apiRateLimit, requireTrustedOrigin(allowedOrigins), requireSiteAuth, applyImpersonation);
 
   app.use('/api/auth', authRoutes);
   app.use('/api/scraper', scraperRoutes);
