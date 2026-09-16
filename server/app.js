@@ -24,7 +24,7 @@ const mailRoutes                 = require('./routes/mailGroups');
 const adminRoutes                = require('./routes/admin');
 const { requireSiteAuth }        = require('./middleware/auth');
 const { requireTrustedOrigin }   = require('./middleware/csrf');
-const { rateLimit }              = require('./middleware/rateLimit');
+const rateLimit                  = require('express-rate-limit');
 
 function createApp() {
   const isProd = process.env.NODE_ENV === 'production';
@@ -86,9 +86,11 @@ function createApp() {
   // guessing specifically; this one just caps a flood before it does any
   // real work.
   const apiRateLimit = rateLimit({
-    max: 600,
     windowMs: 15 * 60 * 1000,
-    message: 'Too many requests. Please wait a few minutes and try again.',
+    limit: 600,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, error: 'Too many requests. Please wait a few minutes and try again.' },
   });
 
   // Nothing under /api is readable until you have signed in — only the sign-in
@@ -122,9 +124,11 @@ function createApp() {
     // ceiling sits far above the API's — it's still a cap on a flood of
     // disk reads, not a limit a real visitor could ever hit.
     const staticRateLimit = rateLimit({
-      max: 3000,
       windowMs: 15 * 60 * 1000,
-      message: 'Too many requests. Please wait a few minutes and try again.',
+      limit: 3000,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { success: false, error: 'Too many requests. Please wait a few minutes and try again.' },
     });
     app.use(staticRateLimit, express.static(clientDist));
     app.get('*', staticRateLimit, (req, res) => {
