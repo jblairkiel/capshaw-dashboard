@@ -208,6 +208,46 @@ describe('GET /api/documents/:filename', () => {
   });
 });
 
+// ─── Path traversal ───────────────────────────────────────────────────────────
+// Express decodes a route param *after* matching it against the URL, so a
+// request built with a %2F-encoded slash carries a real ../ once
+// req.params.filename is read — one URL segment on the wire, a full
+// traversal once decoded. These prove that can no longer escape uploadsDir.
+
+describe('path traversal via an encoded filename', () => {
+  test('GET cannot read a file outside the uploads directory', async () => {
+    const outside = path.join(uploadsDir, '..', 'traversal-canary.txt');
+    fs.writeFileSync(outside, 'top secret contents');
+    try {
+      const res = await request(buildApp(MEMBER)).get('/api/documents/..%2Ftraversal-canary.txt');
+      // Reduced to a plain (nonexistent) filename inside uploadsDir, not a
+      // path outside it — the canary's contents never appear anywhere.
+      expect(res.status).toBe(404);
+      expect(JSON.stringify(res.body)).not.toContain('top secret');
+    } finally {
+      fs.unlinkSync(outside);
+    }
+  });
+
+  test('DELETE cannot remove a file outside the uploads directory', async () => {
+    const outside = path.join(uploadsDir, '..', 'traversal-canary.txt');
+    fs.writeFileSync(outside, 'top secret contents');
+    try {
+      const res = await request(buildApp(ADMIN)).delete('/api/documents/..%2Ftraversal-canary.txt');
+      expect(res.status).toBe(404);
+      expect(fs.existsSync(outside)).toBe(true);
+    } finally {
+      fs.unlinkSync(outside);
+    }
+  });
+
+  test('a filename that decodes to nothing but ".." is rejected outright', async () => {
+    const res = await request(buildApp(ADMIN)).delete('/api/documents/..%2F..');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Invalid filename');
+  });
+});
+
 // ─── DELETE /:filename ────────────────────────────────────────────────────────
 
 describe('DELETE /api/documents/:filename', () => {
