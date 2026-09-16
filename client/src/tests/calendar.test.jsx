@@ -42,7 +42,9 @@ describe('CalendarView', () => {
   test('shows the current month and its dated events', async () => {
     render(<CalendarView user={{ role: 'admin' }} />);
     expect(await screen.findByText('May 2026')).toBeInTheDocument();
-    expect(screen.getByText(/Fellowship Breakfast/)).toBeInTheDocument();
+    // The month header renders before the events arrive, so wait for the event
+    // itself rather than assuming one await covers both.
+    expect(await screen.findByText(/Fellowship Breakfast/)).toBeInTheDocument();
   });
 
   test('leaves undated announcements off the grid', async () => {
