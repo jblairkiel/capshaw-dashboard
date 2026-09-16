@@ -42,9 +42,18 @@ jobs:
       - name: Build client
         run: npm run build
 
-      - name: Security audit
+      # Blocks the merge (and therefore the deploy, which needs this job) on
+      # any high or critical known vulnerability in either package tree —
+      # dependencies are the check where "found later" usually means "found
+      # by someone using it against you". Moderate/low findings still show up
+      # in `npm audit` output locally and in Dependabot PRs; they don't fail
+      # the build, so an advisory in an unrelated dev tool can't hold every
+      # PR hostage.
+      - name: Security audit (root)
         run: npm audit --audit-level=high
-        continue-on-error: true
+
+      - name: Security audit (client)
+        run: cd client && npm audit --audit-level=high
 
       # ── Coverage reporting ───────────────────────────────────────────────────
       # Runs even if a test step above failed, so a coverage report is still

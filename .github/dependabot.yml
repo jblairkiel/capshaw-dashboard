@@ -1,0 +1,42 @@
+version: 2
+
+updates:
+  # Server dependencies (project root)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    groups:
+      # Patch/minor bumps rarely need individual review — batch them so a
+      # quiet week doesn't turn into ten separate PRs to click through.
+      # Anything major still opens on its own, since those are the ones
+      # worth reading the changelog for.
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "deps"
+
+  # Client dependencies
+  - package-ecosystem: "npm"
+    directory: "/client"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 10
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "deps(client)"
+
+  # The Actions the CI/CD pipeline itself runs — a stale pinned action can
+  # carry its own vulnerabilities.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "ci"
