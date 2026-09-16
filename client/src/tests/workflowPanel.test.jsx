@@ -1,5 +1,5 @@
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
-import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { describe, test, expect, vi, afterEach } from 'vitest';
 import WorkflowPanel from '../components/workflow/WorkflowPanel';
 
 // WorkflowPanel is the composed surface — starting a workflow, seeing a list of
@@ -293,7 +293,7 @@ describe('WorkflowPanel — opening the detail view', () => {
 
   test('a failed detail fetch is reported', async () => {
     const fetchMock = mockApi({ list: { success: true, instances: [INSTANCE_ROW] } });
-    fetchMock.mockImplementationOnce((...args) => Promise.resolve({ json: () => Promise.resolve({ success: true, definitions: [DEFINITION] }) }));
+    fetchMock.mockImplementationOnce(() => Promise.resolve({ json: () => Promise.resolve({ success: true, definitions: [DEFINITION] }) }));
     fetchMock.mockImplementationOnce(() => Promise.resolve({ json: () => Promise.resolve({ success: true, instances: [INSTANCE_ROW] }) }));
     fetchMock.mockImplementationOnce(() => Promise.resolve({ json: () => Promise.resolve({ success: false, error: 'Instance not found' }) }));
 

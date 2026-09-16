@@ -362,7 +362,7 @@ describe('DirectoryView — syncing from the church site', () => {
 
   test('the button is disabled while a sync is running', async () => {
     let finish;
-    const fetchMock = vi.fn((url, opts = {}) => {
+    const fetchMock = vi.fn((url) => {
       if (url.includes('/api/members/update')) return new Promise(r => { finish = () => r({ json: () => Promise.resolve({ success: true }) }); });
       return Promise.resolve({ json: () => Promise.resolve({ success: true, rows: HOUSEHOLD }) });
     });

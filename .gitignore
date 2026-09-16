@@ -19,6 +19,11 @@ server/data/bible_questions.db-wal
 client/dist/
 client/dist-ssr/
 
+# Test coverage — regenerated on every run
+coverage/
+client/coverage/
+coverage-summary.md
+
 # Logs
 *.log
 npm-debug.log*

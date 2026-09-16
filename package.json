@@ -10,7 +10,9 @@
     "start": "NODE_ENV=production node server/index.js",
     "install:all": "npm install && cd client && npm install",
     "test": "jest --testPathPattern=server/tests",
-    "test:client": "cd client && npm test"
+    "test:coverage": "jest --testPathPattern=server/tests --coverage",
+    "test:client": "cd client && npm test",
+    "test:client:coverage": "cd client && npm run test:coverage"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.90.0",
@@ -39,6 +41,18 @@
     ],
     "setupFiles": [
       "<rootDir>/server/tests/helpers/isolateData.js"
+    ],
+    "collectCoverageFrom": [
+      "server/**/*.js",
+      "!server/tests/**",
+      "!server/data/**"
+    ],
+    "coverageDirectory": "<rootDir>/coverage",
+    "coverageReporters": [
+      "text",
+      "text-summary",
+      "lcov",
+      "json-summary"
     ]
   }
 }

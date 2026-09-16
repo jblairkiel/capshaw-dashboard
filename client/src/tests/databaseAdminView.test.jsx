@@ -175,7 +175,7 @@ describe('DatabaseAdminView — a table grid', () => {
   });
 
   test('a load failure is reported', async () => {
-    const fetchMock = mockApi({ tableRows: { success: false, error: 'Admin access required' } });
+    mockApi({ tableRows: { success: false, error: 'Admin access required' } });
     render(<DatabaseAdminView />);
     fireEvent.click(await screen.findByRole('button', { name: /Sermons/ }));
     expect(await screen.findByText('Admin access required')).toBeInTheDocument();
@@ -212,7 +212,7 @@ describe('DatabaseAdminView — a table grid', () => {
 
   test('clear filters empties every filter box and reloads', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const fetchMock = await openSermons();
+    await openSermons();
     const filterInput = screen.getAllByPlaceholderText('filter…')[2];
 
     fireEvent.change(filterInput, { target: { value: 'Harris' } });

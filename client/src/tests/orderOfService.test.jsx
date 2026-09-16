@@ -174,7 +174,7 @@ describe('OrderOfService — viewing a document', () => {
 describe('OrderOfService — assigning jobs', () => {
   const HTML = '<p>Song Leading</p><p>Lord\'s Supper</p><p>Sermon</p>';
 
-  function openDocAs(user) {
+  function openDocAs() {
     axios.get.mockImplementation(url => {
       if (url === '/api/documents') return Promise.resolve({ data: { files: DOC_LIST } });
       if (url === '/api/members/data') return Promise.resolve({
@@ -195,7 +195,7 @@ describe('OrderOfService — assigning jobs', () => {
   }
 
   test('an approved member sees no "Assign Jobs" control', async () => {
-    openDocAs(MEMBER);
+    openDocAs();
     render(<OrderOfService user={MEMBER} />);
     fireEvent.click(screen.getByRole('button', { name: 'Load' }));
     fireEvent.click(await screen.findByText('bulletin.docx'));
@@ -208,7 +208,7 @@ describe('OrderOfService — assigning jobs', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date('2025-04-06T12:00:00Z'));
 
-    openDocAs(ADMIN);
+    openDocAs();
     render(<OrderOfService user={ADMIN} />);
     fireEvent.click(screen.getByRole('button', { name: 'Load' }));
     fireEvent.click(await screen.findByText('bulletin.docx'));

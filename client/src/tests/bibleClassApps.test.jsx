@@ -1,5 +1,5 @@
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
-import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, test, expect, vi, afterEach } from 'vitest';
 import BibleClassView    from '../components/BibleClassView';
 import QuestionGenerator from '../components/QuestionGenerator';
 import QuestionLibrary   from '../components/QuestionLibrary';
