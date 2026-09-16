@@ -89,7 +89,7 @@ function GuestForm({ guest, onClose, onSaved, onDeleted }) {
     setBusy(true); setError('');
     try {
       const body = { ...BLANK, ...form };
-      delete body.id; delete body.visits; delete body.created_at;
+      delete body.id; delete body.visits; delete body.created_at; delete body.comments;
       if (isNew && visit.date.trim()) body.visit = visit;
 
       const json = await send(isNew ? API : `${API}/${guest.id}`, {
@@ -136,7 +136,7 @@ function GuestForm({ guest, onClose, onSaved, onDeleted }) {
         </div>
 
         <label className="block">
-          <span className={label}>Comments</span>
+          <span className={label}>Our notes</span>
           <textarea
             rows={3}
             value={form.notes ?? ''}
@@ -144,6 +144,12 @@ function GuestForm({ guest, onClose, onSaved, onDeleted }) {
             placeholder="What was said, who spoke with them, anything worth remembering"
             className={field}
           />
+          {guest?.comments?.trim() && (
+            <span className="block text-xs text-gray-400 mt-1">
+              The tracker&apos;s own comments are shown separately and are replaced by the next refresh,
+              so anything worth keeping belongs here.
+            </span>
+          )}
         </label>
 
         {isNew && (
@@ -253,10 +259,21 @@ function GuestDetail({ guest, canManage, onClose, onChanged, onEdit }) {
           )}
         </section>
 
-        {/* Comments */}
+        {/* What the church site's tracker recorded, which a re-scrape replaces */}
+        {guest.comments?.trim() && (
+          <section>
+            <h4 className="text-sm font-semibold text-church-navy mb-1">Comments from the tracker</h4>
+            <p className="text-sm text-gray-700 whitespace-pre-line">{guest.comments}</p>
+            <p className="text-xs text-gray-400 mt-1">
+              From capshawchurch.org. Refreshing the site replaces this; notes added here are kept.
+            </p>
+          </section>
+        )}
+
+        {/* What we have added ourselves, which nothing overwrites */}
         {guest.notes?.trim() && (
           <section>
-            <h4 className="text-sm font-semibold text-church-navy mb-1">Comments</h4>
+            <h4 className="text-sm font-semibold text-church-navy mb-1">Our notes</h4>
             <p className="text-sm text-gray-700 whitespace-pre-line">{guest.notes}</p>
           </section>
         )}
@@ -371,7 +388,9 @@ export default function VisitorTracker() {
     return guests.filter(g =>
       !q ||
       g.name.toLowerCase().includes(q) ||
-      DETAIL_FIELDS.some(f => String(g[f.key] || '').toLowerCase().includes(q))
+      DETAIL_FIELDS.some(f => String(g[f.key] || '').toLowerCase().includes(q)) ||
+      String(g.comments || '').toLowerCase().includes(q) ||
+      String(g.notes || '').toLowerCase().includes(q)
     );
   }, [guests, search]);
 

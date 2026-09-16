@@ -319,6 +319,22 @@ function initSchema(db) {
     sent_at      TEXT
   );
 
+  -- ── Service types ───────────────────────────────────────────────────────────
+  -- The services the congregation meets for, as a list an admin keeps rather
+  -- than free text typed afresh on every attendance record. Attendance points
+  -- at one of these by name, so renaming one here is a rename everywhere it is
+  -- offered; the records already written keep the name they were saved with.
+
+  CREATE TABLE IF NOT EXISTS service_types (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT    NOT NULL UNIQUE,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    -- Retired rather than deleted: a service the church no longer holds should
+    -- stop being offered without erasing the attendance recorded under it.
+    active     INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
   -- ── Areas of responsibility ─────────────────────────────────────────────────
   -- One row per area an account looks after. Admins are never listed here:
   -- their access comes from the role, so demoting one leaves nothing behind.
@@ -443,6 +459,10 @@ function initSchema(db) {
   // name. '' means nobody has said.
   addColumn('directory', 'gender', "TEXT NOT NULL DEFAULT ''");
 
+  // What the church site's own tracker records about a guest, kept apart from
+  // `notes`, which is ours: a re-scrape replaces this and never touches that.
+  addColumn('visitors', 'comments', "TEXT NOT NULL DEFAULT ''");
+
   // ── Guest details ────────────────────────────────────────────────────────────
   // The scraper only ever knew a guest's name and the dates they came. Anything
   // learned since — how to reach them, who invited them, what was said — is
@@ -476,6 +496,54 @@ function initSchema(db) {
     db.transaction(() => {
       for (const c of coordinators) { grant.run(c.id); demote.run(c.id); }
     })();
+  }
+
+  // ─── Guests the old visitor parser invented ───────────────────────────────────
+  // It paired each heading on the tracker with the table after it, so every
+  // guest arrived named after the section holding their dates — "Visit
+  // History", "Comments" — rather than after themselves. Those rows are pure
+  // scrape artifacts: they are removed here, and their visits go with them, so
+  // the next scrape can put the real guests in their place. Anything somebody
+  // has since typed into (details, comments of our own) is left alone, however
+  // it is named.
+  const ARTIFACT_NAMES = [
+    'Visit History', 'Visits', 'Visit', 'History', 'Comments', 'Comment',
+    'Notes', 'Note', 'Visitor Tracker', 'Visitors', 'Visitor', 'Attendance',
+  ];
+  const removeArtifact = db.prepare(`
+    DELETE FROM visitors
+     WHERE lower(trim(name)) = lower(?)
+       AND trim(coalesce(phone, ''))      = ''
+       AND trim(coalesce(email, ''))      = ''
+       AND trim(coalesce(address, ''))    = ''
+       AND trim(coalesce(invited_by, '')) = ''
+       AND trim(coalesce(status, ''))     = ''
+       AND trim(coalesce(notes, ''))      = ''
+  `);
+  db.transaction(() => { for (const name of ARTIFACT_NAMES) removeArtifact.run(name); })();
+
+  // ─── Seed the service types ───────────────────────────────────────────────────
+  // From the attendance already on record first, so every existing row still
+  // matches something on the list. A database with no attendance in it yet gets
+  // the services this congregation actually holds, which an admin can rename,
+  // reorder or retire from Church Office.
+
+  const haveServiceTypes = db.prepare('SELECT COUNT(*) AS n FROM service_types').get().n;
+  if (!haveServiceTypes) {
+    const fromRecords = db.prepare(
+      "SELECT DISTINCT trim(service) AS name FROM attendance WHERE trim(coalesce(service, '')) <> '' ORDER BY name"
+    ).all().map(r => r.name);
+
+    const DEFAULT_SERVICE_TYPES = [
+      'Sunday Bible Study', 'Sunday AM Worship', 'Sunday PM Worship',
+      'Wednesday Bible Study', 'Gospel Meeting', 'Monthly Singing',
+    ];
+
+    const insertServiceType = db.prepare(
+      'INSERT OR IGNORE INTO service_types (name, sort_order) VALUES (?, ?)'
+    );
+    (fromRecords.length ? fromRecords : DEFAULT_SERVICE_TYPES)
+      .forEach((name, i) => insertServiceType.run(name, i));
   }
 
   // ─── Seed the distribution groups ─────────────────────────────────────────────

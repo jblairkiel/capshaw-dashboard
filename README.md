@@ -167,7 +167,7 @@ implicitly, and nobody else holds one until an admin grants it.
 | `songs` | Songs We Sing | Add songs, record what was sung, keep the song of the week |
 | `announcements` | Announcements | Write, edit and retire announcements and events |
 | `serving-schedule` | Serving Schedule, Member Jobs | Build a month of worship jobs, fill or clear any slot, and decide which jobs each member may sign up for |
-| `attendance` | Attendance | Record attendance counts and correct earlier ones |
+| `attendance` | Attendance | Record attendance counts and correct earlier ones (the list of services they pick from is an admin's — see [Service types](#service-types)) |
 | `visitors` | Guests | Add guests, keep their details and comments, record their visits |
 | `leadership` | Elders & Deacons | Keep the elders and deacons, and what each looks after, up to date |
 | `calendar` | Church Calendar | Add and edit dated events |
@@ -306,6 +306,36 @@ sign-up and every clearing is recorded in the action history by name.
 
 ---
 
+## Service types
+
+Attendance is recorded against a service, and the service is picked from a list
+rather than typed afresh each time — so two records of the same service always
+agree on its name, and the filters and the CSV export group the way anybody
+would expect.
+
+That list is **an admin's to keep**, not the attendance area's: every record has
+to agree on it, so it is not one page's to change. Admins reach it from
+**Attendance → Service types** (and, like every other table, from Church Office
+→ Church Records).
+
+| Action | What it does |
+|---|---|
+| Add | Offers a new service on the attendance form |
+| Rename | Changes what the form offers. Attendance already recorded **keeps the name it was saved under** — nothing is rewritten behind anybody's back |
+| Retire | Takes a service off the form without touching the records made under it. A retired service can be brought back |
+| Reorder | Sets the order the form offers them in |
+
+Editing a record whose service has since been renamed or retired keeps that
+service selected, marked *no longer offered*, so correcting a count never
+silently reassigns it to something else.
+
+The list is seeded on first run from the services already present in the
+attendance table, so an existing database keeps working with nothing to do. A
+database with no attendance yet gets this congregation's usual services, which
+an admin can then change.
+
+---
+
 ## Personal Info & Worship Preferences
 
 Every member can keep their own details current instead of asking an admin.
@@ -407,6 +437,33 @@ recognises a date header row, a date in the first column (blank on
 continuation rows), and a standalone date row above its assignments. Rows whose
 name is still blank are kept, so an unfilled slot is visible rather than
 dropped.
+
+### The visitor tracker
+
+The tracker gives each guest a heading and then splits what it knows about them
+under headings of its own — **Comments**, **Visit History** — each with a table
+beneath it. Pairing every heading with the table after it therefore named each
+guest after the section holding their dates, so the page listed guests called
+"Visit History" and "Comments" and dropped the real names and the comments
+entirely.
+
+The parser now tracks the last heading that is *not* one of the tracker's own
+section labels as the guest's name, and reads each section for what it holds.
+It handles the sectioned shape, the simpler *name then dates* shape, comments
+written as paragraphs rather than tables, and — if the headings yield nothing —
+a single table of everybody, read by its column names. Guests the old parser
+invented are removed from the database on start-up, and any that somebody has
+since typed into are kept whatever they are named.
+
+A guest's `comments` are the tracker's and are replaced on every scrape;
+`notes` are ours and nothing overwrites them. Both are shown, separately, on
+the guest's details.
+
+**A page that loads but reads as nothing is now a warning.** A layout change
+used to look exactly like a section that is genuinely empty: the previous rows
+were kept and the scrape reported success. It now says
+`visitors: the page loaded but nothing could be read from it`, which shows up
+in Church Office → Church Records alongside the other scrape warnings.
 
 ---
 

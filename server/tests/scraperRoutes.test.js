@@ -175,7 +175,9 @@ describe('GET /api/members/data', () => {
     expect(data.lastUpdated).toBe('2025-03-01T00:00:00Z');
     expect(data.warnings).toEqual(['sermons: parse error']);
     expect(data.attendance).toEqual([{ date: '2025-01-05', service: 'AM', count: 142 }]);
-    expect(data.visitors).toEqual([{ name: 'Pat Lane', visits: [{ date: '2025-01-05', service: 'AM' }] }]);
+    expect(data.visitors).toEqual([
+      { name: 'Pat Lane', comments: '', visits: [{ date: '2025-01-05', service: 'AM' }] },
+    ]);
     // Duties come back in the order they were recorded, not alphabetically
     expect(data.deacons).toEqual([{ name: 'Tom Nelson', duties: ['Grounds', 'Benevolence'] }]);
     expect(data.bulletins).toEqual([{ url: '/b.pdf', label: 'January 5' }]);
@@ -274,6 +276,24 @@ describe('POST /api/members/update', () => {
 
     const { body } = await request(buildApp(MEMBER)).post('/api/members/update');
     expect(body.warnings.some(w => w.startsWith('visitors: page not found (404)'))).toBe(true);
+  });
+
+  test('a page that loads but reads as nothing is a warning, not a silent success', async () => {
+    // The visitor tracker's layout changing is what this is about: the page
+    // comes back full, the parser makes nothing of it, and the old rows are
+    // kept. That used to be reported as a clean scrape.
+    const unreadable = `<html><body>${'<div>something the parser does not know</div>'.repeat(80)}</body></html>`;
+    serveSite({ '/members/visitor-tracker': page(unreadable) });
+
+    const { body } = await request(buildApp(MEMBER)).post('/api/members/update');
+    expect(body.warnings.some(w => w.startsWith('visitors: the page loaded but nothing could be read'))).toBe(true);
+  });
+
+  test('a section that is genuinely empty is not reported as a parse miss', async () => {
+    serveSite({ '/members/visitor-tracker': page('<h2>Visitor Tracker</h2><p>No visitors recorded.</p>') });
+
+    const { body } = await request(buildApp(MEMBER)).post('/api/members/update');
+    expect(body.warnings.some(w => w.startsWith('visitors:'))).toBe(false);
   });
 
   test('a section that fails keeps the rows the last good scrape left', async () => {

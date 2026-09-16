@@ -203,17 +203,154 @@ function parseSermons(html) {
   return sermons;
 }
 
+// ─── Visitors ─────────────────────────────────────────────────────────────────
+//
+// The visitor tracker gives each guest a heading, and then splits what it knows
+// about them under headings of its own:
+//
+//   <h3>Pat Lane</h3>
+//     <h4>Comments</h4>       <table>…what was said…</table>
+//     <h4>Visit History</h4>  <table>…dates they came…</table>
+//
+// Pairing each heading with the table after it — which is what this used to do
+// — therefore names every guest "Visit History", because that is the heading
+// nearest their dates. The guest's own name is the last heading that is *not*
+// one of the tracker's section labels, so that is what is tracked here, and
+// the sections are read for what they hold rather than for their name.
+
+const VISITOR_SECTION_LABELS = new Set([
+  'visitor tracker', 'visitors', 'visitor', 'guests', 'guest',
+  'comments', 'comment', 'notes', 'note',
+  'visit history', 'visits', 'visit', 'history', 'attendance',
+  'member news', 'menu', 'search',
+]);
+
+// Which part of a guest's entry a heading opens. '' means the heading is the
+// guest themselves.
+function visitorSection(heading) {
+  const label = heading.toLowerCase();
+  if (!VISITOR_SECTION_LABELS.has(label)) return null;
+  if (label.includes('comment') || label.includes('note')) return 'comments';
+  if (label.includes('visit') || label === 'history' || label === 'attendance') return 'visits';
+  return 'other';
+}
+
+// A visit date as the tracker writes them: 04/13/25, and tolerant of 4/13/2025.
+const VISIT_DATE_RE = /^\d{1,2}\/\d{1,2}\/\d{2,4}$/;
+
+function looksLikeVisitRow(row) {
+  return VISIT_DATE_RE.test((row[0] || '').trim());
+}
+
 function parseVisitors(html) {
-  const visitors = [];
-  for (const sec of [...html.matchAll(/<h[2-4][^>]*>([\s\S]*?)<\/h[2-4]>[\s\S]*?(<table[\s\S]*?<\/table>)/gi)]) {
-    const name = stripTags(sec[1]);
-    if (name === 'Visitor Tracker') continue;
-    const visits = (extractTables(sec[2])[0] || [])
-      .filter(r => r[0] !== 'Date' && r[0]?.match(/\d{2}\/\d{2}\/\d{2}/))
-      .map(r => ({ date: r[0], service: r[1] || '' }));
-    if (visits.length > 0) visitors.push({ name, visits });
+  const guests  = [];
+  let   current = null;
+  let   section = '';
+
+  function keep() {
+    if (!current) return;
+    // A heading with nothing under it is a page artifact, not a guest.
+    if (current.visits.length || current.comments.length) {
+      guests.push({
+        name:     current.name,
+        visits:   current.visits,
+        comments: current.comments.join('\n'),
+      });
+    }
+    current = null;
   }
-  return visitors;
+
+  // Headings, tables and paragraphs in the order they appear, so a guest's
+  // sections can be read in sequence rather than guessed at by proximity.
+  const tokens = html.matchAll(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>|<table[\s\S]*?<\/table>|<p[^>]*>([\s\S]*?)<\/p>/gi);
+
+  for (const token of tokens) {
+    const [match, , headingText, paragraphText] = token;
+
+    // ── A heading: either a guest's name, or one of their sections ──────────
+    if (headingText !== undefined) {
+      const heading = stripTags(headingText);
+      if (!heading) continue;
+
+      const known = visitorSection(heading);
+      if (known) { section = known; continue; }
+
+      keep();
+      current = { name: heading, visits: [], comments: [] };
+      section = '';
+      continue;
+    }
+
+    if (!current) continue;
+
+    // ── A table: visit rows if it holds dates, comments otherwise ───────────
+    if (paragraphText === undefined) {
+      const rows = extractTables(match)[0] || [];
+      const visits = rows.filter(looksLikeVisitRow).map(r => ({ date: r[0], service: r[1] || '' }));
+
+      if (visits.length) { current.visits.push(...visits); continue; }
+
+      if (section === 'comments') {
+        for (const row of rows) {
+          const text = row.join(' — ').trim();
+          // Skip the header row, whatever it is called.
+          if (text && !/^comments?$/i.test(text)) current.comments.push(text);
+        }
+      }
+      continue;
+    }
+
+    // ── A paragraph under a comments heading ────────────────────────────────
+    if (section === 'comments') {
+      const text = stripTags(paragraphText);
+      if (text) current.comments.push(text);
+    }
+  }
+
+  keep();
+
+  if (guests.length) return guests;
+
+  // Nothing came out of the headings: some versions of the page put every
+  // guest in one table instead. Read it by its column names rather than
+  // returning an empty list and calling that a successful scrape.
+  return parseVisitorTable(html);
+}
+
+// One table, a guest per row: Name | Date | Service, in whatever order the
+// header gives them. Rows for the same person are merged into one guest.
+function parseVisitorTable(html) {
+  for (const rows of extractTables(html)) {
+    if (rows.length < 2) continue;
+
+    const header = rows[0].map(c => c.toLowerCase());
+    const nameAt = header.findIndex(c => c.includes('name') || c.includes('visitor') || c.includes('guest'));
+    const dateAt = header.findIndex(c => c.includes('date'));
+    if (nameAt < 0 || dateAt < 0) continue;
+
+    const serviceAt = header.findIndex(c => c.includes('service'));
+    const commentAt = header.findIndex(c => c.includes('comment') || c.includes('note'));
+
+    const byName = new Map();
+    for (const row of rows.slice(1)) {
+      const name = (row[nameAt] || '').trim();
+      if (!name) continue;
+
+      if (!byName.has(name)) byName.set(name, { name, visits: [], comments: '' });
+      const guest = byName.get(name);
+
+      const date = (row[dateAt] || '').trim();
+      if (VISIT_DATE_RE.test(date)) {
+        guest.visits.push({ date, service: serviceAt >= 0 ? (row[serviceAt] || '') : '' });
+      }
+      const comment = commentAt >= 0 ? (row[commentAt] || '').trim() : '';
+      if (comment) guest.comments = guest.comments ? `${guest.comments}\n${comment}` : comment;
+    }
+
+    if (byName.size) return [...byName.values()];
+  }
+
+  return [];
 }
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -389,6 +526,7 @@ module.exports = {
   parseAttendance,
   parseSermons,
   parseVisitors,
+  parseVisitorTable,
   parseAnniversaries,
   parseDeacons,
   parseBulletins,
