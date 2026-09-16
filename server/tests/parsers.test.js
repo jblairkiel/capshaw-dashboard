@@ -298,3 +298,102 @@ describe('parseVisitors', () => {
     expect(guest.visits).toEqual([{ date: '6/1/2025', service: 'Sun AM' }]);
   });
 });
+
+// ─── parseVisitors — when the name is not in a heading ────────────────────────
+//
+// The live tracker turned out to keep only its own section labels in headings:
+// "Comments" and "Visit History". The guest's name is in something else, which
+// is why keying on headings found seven tables of visits and nobody to attach
+// them to. These pin the fallback that reads the name from whatever sits
+// closest above the table, whichever element that is.
+
+describe('parseVisitors — the name above the table', () => {
+  const VISITS = `
+    <table>
+      <tr><th>Date</th><th>Service</th></tr>
+      <tr><td>09/13/26</td><td>Sun AM</td></tr>
+      <tr><td>09/06/26</td><td>Sun AM</td></tr>
+    </table>`;
+
+  function namesAndVisits(html) {
+    return parseVisitors(html).map(g => [g.name, g.visits.length]);
+  }
+
+  test('a name in a paragraph, with the tracker\'s own headings above the tables', () => {
+    const guests = parseVisitors(`
+      <h2>Visitor Tracker</h2>
+      <p class="visitor-name">Pat Lane</p>
+        <h4>Comments</h4><table><tr><td>Came with the Carters</td></tr></table>
+        <h4>Visit History</h4>${VISITS}
+      <p class="visitor-name">Sam Ford</p>
+        <h4>Visit History</h4>${VISITS}
+    `);
+
+    expect(guests.map(g => g.name)).toEqual(['Pat Lane', 'Sam Ford']);
+    expect(guests[0].visits).toHaveLength(2);
+    expect(guests[0].comments).toBe('Came with the Carters');
+  });
+
+  test('a comment is never mistaken for the next guest\'s name', () => {
+    // The text inside a table is that table's contents, whatever it says.
+    const guests = parseVisitors(`
+      <p>Pat Lane</p>
+      <h4>Comments</h4><table><tr><td>Spoke to Ray Harris about a study</td></tr></table>
+      <h4>Visit History</h4>${VISITS}
+    `);
+
+    expect(guests).toHaveLength(1);
+    expect(guests[0].name).toBe('Pat Lane');
+    expect(guests[0].visits).toHaveLength(2);
+  });
+
+  test('a name in a card title, a bold line, a link or a caption all read the same', () => {
+    expect(namesAndVisits(`
+      <div class="card"><div class="card-title">Pat Lane</div><h5>Visit History</h5>${VISITS}</div>
+      <div class="card"><div class="card-title">Sam Ford</div><h5>Visit History</h5>${VISITS}</div>
+    `)).toEqual([['Pat Lane', 2], ['Sam Ford', 2]]);
+
+    expect(namesAndVisits(`<strong>Pat Lane</strong><h4>Visit History</h4>${VISITS}`))
+      .toEqual([['Pat Lane', 2]]);
+
+    expect(namesAndVisits(`<a href="/members/visitor/12">Pat Lane</a>${VISITS}`))
+      .toEqual([['Pat Lane', 2]]);
+
+    expect(namesAndVisits(`<caption>Pat Lane</caption>${VISITS}`))
+      .toEqual([['Pat Lane', 2]]);
+  });
+
+  test('the page\'s own furniture is not a guest', () => {
+    const guests = parseVisitors(`
+      <h2>Visitor Tracker</h2>
+      <a href="/">Home</a><a href="/members">Members</a><span>«</span><span>12</span>
+      <p>Pat Lane</p>
+      <h4>Visit History</h4>${VISITS}
+    `);
+
+    expect(guests.map(g => g.name)).toEqual(['Pat Lane']);
+  });
+
+  test('several tables under one name land on one guest', () => {
+    const guests = parseVisitors(`
+      <p>Pat Lane</p>
+      <h4>Visit History</h4>${VISITS}
+      <h4>Visit History</h4><table><tr><th>Date</th><th>Service</th></tr><tr><td>08/30/26</td><td>Sun PM</td></tr></table>
+    `);
+
+    expect(guests).toHaveLength(1);
+    expect(guests[0].visits).toHaveLength(3);
+  });
+
+  test('the heading shape still wins when the page does use headings for names', () => {
+    // The fallback only runs when reading the headings found nobody, so a page
+    // that names its guests properly is unaffected by any of the above.
+    const guests = parseVisitors(`
+      <h2>Visitor Tracker</h2>
+      <h3>Jo Reed</h3>
+      <h4>Visit History</h4>${VISITS}
+    `);
+
+    expect(guests.map(g => g.name)).toEqual(['Jo Reed']);
+  });
+});
