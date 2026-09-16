@@ -68,31 +68,51 @@ const _saveScraped = db.transaction((data) => {
     for (const r of ja.assignments) insJA.run(ja.month || '', r.date, r.service, r.job, r.name);
   }
 
-  // Visitors. A guest's details — how to reach them, who invited them, what was
-  // said — are typed in here and exist nowhere on the church site, so guests are
-  // matched by name and updated rather than wiped and re-created. Only the
-  // visit list, which the site is the authority for, is replaced.
-  const findVisitor = db.prepare('SELECT id FROM visitors WHERE lower(trim(name)) = lower(trim(?))');
+  // Visitors. Guests are matched by name and updated rather than wiped and
+  // re-created, because `notes`, `invited_by` and the follow-up history are
+  // ours and exist nowhere on the church site. What the tracker does publish —
+  // the visit list, the comments, and now the address, phone and email on each
+  // card — is the site's to own, and replaces what is held here whenever the
+  // scrape actually read something. A field the tracker leaves blank keeps
+  // whatever somebody typed in: an empty scrape is not a correction.
+  const SCRAPED_FIELDS = ['phone', 'email', 'address', 'city', 'state', 'zip'];
+
+  const findVisitor = db.prepare('SELECT * FROM visitors WHERE lower(trim(name)) = lower(trim(?))');
   const insVisitor  = db.prepare("INSERT INTO visitors (name, created_at) VALUES (?, datetime('now'))");
   const setComments = db.prepare('UPDATE visitors SET comments = ? WHERE id = ?');
+  const setDetails  = db.prepare(`
+    UPDATE visitors
+       SET phone = ?, email = ?, address = ?, city = ?, state = ?, zip = ?
+     WHERE id = ?
+  `);
   const clearVisits = db.prepare('DELETE FROM visitor_visits WHERE visitor_id = ?');
   const insVisit    = db.prepare('INSERT INTO visitor_visits (visitor_id, date, service) VALUES (?, ?, ?)');
   for (const v of (data.visitors || [])) {
-    const vid = findVisitor.get(v.name)?.id ?? insVisitor.run(v.name).lastInsertRowid;
+    const existing = findVisitor.get(v.name);
+    const vid      = existing?.id ?? insVisitor.run(v.name).lastInsertRowid;
+
     // The tracker's own comments are the site's to own; `notes` is ours and is
     // never written here.
     setComments.run(v.comments || '', vid);
+
+    const merged = SCRAPED_FIELDS.map(field =>
+      String(v[field] ?? '').trim() || String(existing?.[field] ?? '').trim());
+    if (merged.some(Boolean)) setDetails.run(...merged, vid);
+
     clearVisits.run(vid);
     for (const vv of (v.visits || [])) insVisit.run(vid, vv.date, vv.service);
   }
 
-  // A guest read from the tracker before the parser could tell a name from a
-  // comment arrived named after their own comment — "Just moved from Foley, AL"
-  // where "Pat Lane" belonged. Matching by name means those rows survive the
-  // re-scrape that fixes them, sitting beside the real guest forever, so a name
-  // this scrape has just read as somebody's comment is removed. Anything typed
-  // in by hand — details, our own notes, a follow-up — is left alone however it
-  // is named, exactly as when a guest is matched rather than re-created.
+  // Every earlier reading of this page mistook one of the other lines in a
+  // guest's card for their name, and guests are matched by name, so those rows
+  // survive the scrape that fixes them — the real person arriving beside a row
+  // called "Just moved from Foley, AL" or "Last on 09/13/26". Two kinds are
+  // cleared once a scrape has read guests properly: a name this scrape has
+  // just read as somebody's comment, and a name carrying a digit, which no
+  // person's does. Anything typed in by hand — details, our own notes, a
+  // follow-up — is left alone however it is named, exactly as when a guest is
+  // matched rather than re-created. A duplicate in the list can be fixed by
+  // hand; a deleted phone number cannot.
   const removeMisread = db.prepare(`
     DELETE FROM visitors
      WHERE lower(trim(name)) = lower(trim(?))
@@ -104,10 +124,27 @@ const _saveScraped = db.transaction((data) => {
        AND trim(coalesce(notes, ''))             = ''
        AND trim(coalesce(last_contacted_at, '')) = ''
   `);
-  for (const v of (data.visitors || [])) {
-    for (const line of String(v.comments || '').split('\n')) {
-      if (line.trim()) removeMisread.run(line);
+  const removeNumberedNames = db.prepare(`
+    DELETE FROM visitors
+     WHERE name GLOB '*[0-9]*'
+       AND trim(coalesce(phone, ''))             = ''
+       AND trim(coalesce(email, ''))             = ''
+       AND trim(coalesce(address, ''))           = ''
+       AND trim(coalesce(invited_by, ''))        = ''
+       AND trim(coalesce(status, ''))            = ''
+       AND trim(coalesce(notes, ''))             = ''
+       AND trim(coalesce(last_contacted_at, '')) = ''
+  `);
+
+  // Only once this scrape has actually read guests: a page that parsed to
+  // nothing is a reason to keep every row, not to tidy them.
+  if ((data.visitors || []).length) {
+    for (const v of data.visitors) {
+      for (const line of String(v.comments || '').split('\n')) {
+        if (line.trim()) removeMisread.run(line);
+      }
     }
+    removeNumberedNames.run();
   }
 
   // Anniversaries
@@ -278,14 +315,28 @@ router.get('/debug/:section', requireAdmin, async (req, res) => {
         .filter(h => h.text)
         .slice(0, 40);
 
-      report.aboveEachTable = [...body.matchAll(/<table[\s\S]*?<\/table>/gi)]
-        .slice(0, 10)
-        .map((m, i) => ({
+      const tableMatches = [...body.matchAll(/<table[\s\S]*?<\/table>/gi)].slice(0, 10);
+
+      report.aboveEachTable = tableMatches.map((m, i) => ({
+        table: i,
+        // The last 300 characters before the table, tags and all: enough to
+        // see which element holds the name without returning the page.
+        html: body.slice(Math.max(0, m.index - 300), m.index).replace(/\s+/g, ' ').trim(),
+      }));
+
+      // And the 300 characters *after the previous table*, which is where an
+      // entry begins. The two windows are not the same view: a guest's name is
+      // at the top of their card and their comment is at the bottom, so the
+      // markup immediately above a table showed the comment every time and
+      // never the name. Reading one without the other is what made the last
+      // diagnosis take three tries.
+      report.eachEntryStartsWith = tableMatches.map((m, i) => {
+        const from = i === 0 ? 0 : tableMatches[i - 1].index + tableMatches[i - 1][0].length;
+        return {
           table: i,
-          // The last 300 characters before the table, tags and all: enough to
-          // see which element holds the name without returning the page.
-          html: body.slice(Math.max(0, m.index - 300), m.index).replace(/\s+/g, ' ').trim(),
-        }));
+          html: body.slice(from, Math.min(m.index, from + 300)).replace(/\s+/g, ' ').trim(),
+        };
+      });
     }
 
     let parsed;

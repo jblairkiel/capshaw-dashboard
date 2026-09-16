@@ -247,11 +247,10 @@ function parseVisitors(html) {
   if (byHeading.length) return byHeading;
 
   // The headings on this page are the tracker's own section labels, and the
-  // guest's name is in something else — a card title, a paragraph, a bold line.
-  // Rather than guess which, read the name from whatever sits closest above
-  // each table. See parseVisitorsByProximity.
-  const byProximity = parseVisitorsByProximity(html);
-  if (byProximity.length) return byProximity;
+  // guest's name is in something else — a line in a card header. Rather than
+  // guess which element, read the page in order. See parseVisitorsInOrder.
+  const inOrder = parseVisitorsInOrder(html);
+  if (inOrder.length) return inOrder;
 
   // Some versions of the page put every guest in one table instead.
   return parseVisitorTable(html);
@@ -330,47 +329,116 @@ function parseVisitorsByHeading(html) {
 
 // ─── Reading a guest's entry when the name is not a heading ───────────────────
 //
-// The live tracker gives each guest a table of visits, but puts their name in
-// something that is not a heading — the headings on the page are only its own
-// section labels ("Comments", "Visit History"), which is why keying on them
-// found seven tables and nobody to attach them to.
+// The live tracker gives each guest a card: a header holding their name and a
+// summary line, a body with however much it knows about them — address, phone,
+// comments — and a table of their visits. Only the section labels inside the
+// card are headings ("Comments", "Visit History"), so keying on headings finds
+// the sections and never the guest.
 //
-// So this reads the page the way the heading parser does — in order, a guest
-// then their sections — but takes the name from whatever element holds it. A
-// card title, a paragraph, a bold line and a link all read the same way, which
-// is the point: the tracker's markup is not ours to rely on.
+// So the page is read in order — a guest, then their sections — taking the
+// name from whatever element holds it. Two things about that order are what
+// this gets right, both learned from the page itself rather than assumed:
 //
-// Order is what makes it right, rather than nearness. Taking the nearest text
-// above each table instead names every guest after their own comment, because
-// that is what sits between them and their dates:
+//   1. What sits *closest* above a guest's dates is their comment, not their
+//      name. Text following a "Comments" label belongs to the guest named
+//      before it; only text arriving outside any section is somebody new.
 //
-//     Pat Lane            ← the name
-//     Comments            ← a section label
-//     Just moved from Foley, AL
-//     Visit History       ← a section label
-//     <table of dates>
-//
-// Text that follows a "Comments" label belongs to the guest who was named
-// before it. Only text arriving outside any section is somebody new.
+//   2. A guest's name is not the only line above their dates. The header runs
+//      "Pat Lane" then "Last on 09/13/26", and the body adds an address and a
+//      phone number, so neither the first line nor the last is reliably the
+//      name. Every candidate between one guest's dates and the next's is
+//      collected, and the one that actually looks like a person is chosen.
 
-// Text-bearing elements a name might be written in, small enough that a whole
-// paragraph of prose will not be mistaken for one.
-const LABEL_RE = /<(h[1-6]|p|div|span|strong|b|em|a|td|th|caption|li|dt|summary)[^>]*>([^<]{2,80})<\/\1>/gi;
+// Text-bearing elements a name or a comment might be written in. The upper
+// bound is generous because it has to hold a comment; a name is held to 80
+// characters where the name is chosen.
+const LABEL_RE = /<(h[1-6]|p|div|span|strong|b|em|a|td|th|caption|li|dt|summary)[^>]*>([^<]{2,300})<\/\1>/gi;
 
-// Things that sit above a table and are plainly not a guest: the page's own
+// Things that sit inside a card and are plainly not a guest: the page's own
 // furniture, a column heading, a date, a count.
 const NOT_A_NAME = /^(date|service|comments?|notes?|visits?|visit history|history|attendance|home|menu|search|print|back|next|previous|more|«|»|\d+|[^a-z]*)$/i;
 
-function couldBeAName(text) {
-  if (!text || text.length > 80) return false;
-  if (NOT_A_NAME.test(text)) return false;
-  if (VISIT_DATE_RE.test(text)) return false;
-  // At least two letters in a row somewhere — rules out stray punctuation and
-  // numbering without demanding a particular shape of name.
-  return /[a-z]{2}/i.test(text);
+// Lowercase words that belong inside a surname rather than marking the text as
+// a sentence.
+const NAME_PARTICLES = new Set(['de', 'del', 'della', 'da', 'di', 'dos', 'du', 'van', 'von', 'der', 'den', 'la', 'le', 'bin', 'ter']);
+
+// 0 — not a name at all. 1 — could be, but nothing says so. 2 — reads like a
+// person's name. The middle rank is what keeps a single-word guest readable
+// while still losing to a proper name when both are on offer.
+function nameScore(text) {
+  if (!text || text.length > 80) return 0;
+  if (NOT_A_NAME.test(text)) return 0;
+  // "Last on 09/13/26", a visit date, a phone number, a count — a person's
+  // name does not carry a digit, and every line in the card that is not the
+  // name carries one or is an address.
+  if (/\d/.test(text)) return 0;
+  if (text.includes('@')) return 0;
+  if (!/[a-z]{2}/i.test(text)) return 0;
+
+  const words = text.split(/\s+/);
+  const readsLikeAPerson = words.length >= 2 && words.length <= 4 &&
+    words.every(w => /^[A-Z]/.test(w) || NAME_PARTICLES.has(w.toLowerCase()));
+  return readsLikeAPerson ? 2 : 1;
 }
 
-function parseVisitorsByProximity(html) {
+// The likeliest name among the lines gathered for one guest. Ties go to the
+// first, which is the order a card puts the name in.
+function bestName(candidates) {
+  let best = null;
+  for (const candidate of candidates) {
+    const score = nameScore(candidate.text);
+    if (score > 0 && (!best || score > best.score)) best = { ...candidate, score };
+  }
+  return best;
+}
+
+// ─── What the card says about the guest besides their name ────────────────────
+//
+// The tracker writes these without captions — an icon, then the value — so
+// each is recognised by its own shape rather than by a label beside it. The
+// address is taken from the map link the site wraps it in, whose query is
+// already "street, city, state zip".
+
+const MAPS_LINK_RE  = /maps\.google\.com\/[^"'\s]*[?&]q=([^"'&\s]+)/i;
+const MAILTO_RE     = /mailto:([^"'?>\s]+)/i;
+const PHONE_RE      = /\(?\d{3}\)?[-.\s]?\d{3}[-.\s]\d{4}/;
+const STATE_ZIP_RE  = /^([A-Za-z]{2})\.?\s+(\d{5}(?:-\d{4})?)$/;
+
+function detailsBetween(html, from, to) {
+  if (!(to > from)) return {};
+  const markup  = html.slice(from, to);
+  const details = {};
+
+  const mail = markup.match(MAILTO_RE);
+  if (mail) details.email = decodeURIComponent(mail[1]).trim();
+
+  // Digits inside a tag — an svg path, a href — are not a phone number.
+  const phone = stripTags(markup).match(PHONE_RE);
+  if (phone) details.phone = phone[0].trim();
+
+  const maps = markup.match(MAPS_LINK_RE);
+  if (maps) {
+    let query = '';
+    try { query = decodeURIComponent(maps[1].replace(/\+/g, ' ')); } catch { query = ''; }
+    const parts = query.split(',').map(p => p.trim()).filter(Boolean);
+    if (parts.length) {
+      details.address = parts[0];
+      const last = parts[parts.length - 1];
+      const stateZip = parts.length > 1 ? last.match(STATE_ZIP_RE) : null;
+      if (stateZip) {
+        details.state = stateZip[1].toUpperCase();
+        details.zip   = stateZip[2];
+        if (parts.length > 2) details.city = parts.slice(1, -1).join(', ');
+      } else if (parts.length > 1) {
+        details.city = parts.slice(1).join(', ');
+      }
+    }
+  }
+
+  return details;
+}
+
+function parseVisitorsInOrder(html) {
   // Every table, and every piece of text outside one, in the order the page
   // gives them. Text inside a table is that table's contents — a comment, a
   // date, a service — and never a guest's name, which is worth ruling out by
@@ -388,50 +456,71 @@ function parseVisitorsByProximity(html) {
     // A section label is recognised in whatever element the page wrote it in,
     // not only in a heading — the same reason the name is.
     const section = visitorSection(text);
-    if (section) tokens.push({ at: match.index, kind: 'section', section });
-    else if (couldBeAName(text)) tokens.push({ at: match.index, kind: 'label', text });
+    tokens.push(section ? { at: match.index, kind: 'section', section }
+                        : { at: match.index, kind: 'label', text });
   }
   tokens.sort((a, b) => a.at - b.at);
 
   const guests  = [];
-  let   current = null;
+  let   pending = [];    // lines seen since the last guest's contents: one is the name
+  let   current = null;  // the guest being assembled, started once their contents arrive
   let   section = '';
 
+  // A guest is only worth starting when there is something to put under them,
+  // which is also what keeps the page's own furniture from becoming one.
+  function startGuest() {
+    if (current) return current;
+    const best = bestName(pending);
+    if (!best) return null;
+    current = { name: best.text, at: best.at, visits: [], comments: [], details: null };
+    return current;
+  }
+
   function keep() {
-    // A line with nothing under it is page furniture, not a guest.
     if (current && (current.visits.length || current.comments.length)) {
       guests.push({
         name:     current.name,
         visits:   current.visits,
         comments: current.comments.join('\n'),
+        ...(current.details || {}),
       });
     }
     current = null;
+    pending = [];
   }
 
   for (const token of tokens) {
     if (token.kind === 'section') { section = token.section; continue; }
 
-    // ── A line of text: the guest's comment, or somebody new ────────────────
+    // ── A line of text: the guest's comment, or one of the lines naming the
+    //    next guest ───────────────────────────────────────────────────────────
     if (token.kind === 'label') {
-      if (section === 'comments' && current) { current.comments.push(token.text); continue; }
-      keep();
-      current = { name: token.text, visits: [], comments: [] };
-      section = '';
+      if (section === 'comments') {
+        const guest = startGuest();
+        if (guest) { guest.comments.push(token.text); continue; }
+      }
+      if (current) keep();   // their contents are already gathered: this is somebody new
+      pending.push(token);
       continue;
     }
 
     // ── A table: visit rows if it holds dates, comments otherwise ───────────
+    const guest = startGuest();
+    if (!guest) { section = ''; continue; }
+    // Everything between the name and the first table is the card's own body,
+    // which is where the address and the phone number are.
+    if (!guest.details) guest.details = detailsBetween(html, guest.at, token.at);
+
     const rows   = extractTables(token.html)[0] || [];
     const visits = rows.filter(looksLikeVisitRow).map(r => ({ date: r[0], service: r[1] || '' }));
 
-    if (current && visits.length) {
-      current.visits.push(...visits);
-    } else if (current) {
+    if (visits.length) {
+      guest.visits.push(...visits);
+    } else {
       const comments = rows
         .map(r => r.join(' — ').trim())
         .filter(text => text && !/^comments?$/i.test(text) && !/^date\b/i.test(text));
-      current.comments.push(...comments);
+      guest.comments.push(...comments);
     }
 
     // The section has delivered what it holds, so the next line of text is a
@@ -653,7 +742,7 @@ module.exports = {
   parseSermons,
   parseVisitors,
   parseVisitorTable,
-  parseVisitorsByProximity,
+  parseVisitorsInOrder,
   parseAnniversaries,
   parseDeacons,
   parseBulletins,

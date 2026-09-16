@@ -428,6 +428,95 @@ describe('parseVisitors — the name above the table', () => {
     expect(guests[0].comments).toBe('Just moved from Foley, AL\nLooking for a home congregation');
   });
 
+  // ─── The live tracker's own card, rebuilt from the debug report ────────────
+  // Everything here is the shape the site actually serves: a header holding
+  // the name and a "Last on …" summary, a body of uncaptioned values beside
+  // icons, the comment at the bottom, then the dates. Three separate misreads
+  // came out of this one card, so it is worth having verbatim.
+  describe('the card the tracker actually serves', () => {
+    const chevron = '<span class="vt-chev"><svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg></span>';
+
+    function card({ name, last = '09/13/26', phone, address, comment }) {
+      const addressRow = address
+        ? `<div class="dir-row"><span class="dir-i"><svg><path d="M21 10c0 7-9 13-9 13"/></svg></span>` +
+          `<span class="dir-v"><a href="https://maps.google.com/?q=${encodeURIComponent(address.join(','))}" ` +
+          `target="_blank" rel="noopener">${address[0]}<br>${address[1]}<br>${address[2]}</a></span></div>`
+        : '';
+      const phoneRow = phone
+        ? `<div class="dir-row"><span class="dir-i"><svg><path d="M22 16.92v3a2 2 0 0 1-2.18 2z"/></svg></span><span class="dir-v">${phone}</span></div>`
+        : '';
+      const commentCol = comment
+        ? `<div class="vt-col"> <h4 class="vt-sub">Comments</h4> <p class="dir-note">${comment}</p> </div>`
+        : '';
+      return `
+        <div class="vt-card">
+          <button class="vt-head" type="button">
+            <span class="vt-name">${name}</span>
+            <span class="vt-meta">Last on ${last}</span>
+            ${chevron}
+          </button>
+          <div class="vt-body">
+            <div class="vt-cols"><div class="vt-col"> ${addressRow} ${phoneRow} </div>${commentCol}</div>
+            <h4 class="vt-sub">Visit History</h4>${VISITS}
+          </div>
+        </div>`;
+    }
+
+    const trackerPage = cards => `<html><body>
+      <nav><a href="/">Home</a><a href="/members">Members</a></nav>
+      <h2>Visitor Tracker</h2>${cards.map(card).join('')}</body></html>`;
+
+    test('the guest is named, not their summary line', () => {
+      // "Last on 09/13/26" sits between the name and everything else in the
+      // card, so taking either the first or the last line above the dates gets
+      // it. A line carrying a digit is never somebody's name.
+      const guests = parseVisitors(trackerPage([
+        { name: 'Dana Whitfield' }, { name: 'Sam Ford' },
+      ]));
+
+      expect(guests.map(g => g.name)).toEqual(['Dana Whitfield', 'Sam Ford']);
+      expect(guests[0].visits).toHaveLength(2);
+    });
+
+    test('the address, phone and comment on the card are read too', () => {
+      const [guest] = parseVisitors(trackerPage([{
+        name:    'Ray Ann Boyd',
+        phone:   '(662) 312-9064',
+        address: ['6617 Camilla Drive', 'Madison', 'AL 35757'],
+        comment: 'Just moved from Foley, AL',
+      }]));
+
+      expect(guest).toMatchObject({
+        name:    'Ray Ann Boyd',
+        phone:   '(662) 312-9064',
+        address: '6617 Camilla Drive',
+        city:    'Madison',
+        state:   'AL',
+        zip:     '35757',
+        comments: 'Just moved from Foley, AL',
+      });
+    });
+
+    test('a card holds only its own details', () => {
+      const guests = parseVisitors(trackerPage([
+        { name: 'Dana Whitfield', address: ['12 Oak St', 'Athens', 'AL 35611'] },
+        { name: 'Sam Ford' },
+        { name: 'Marcus Reed', phone: '(256) 777-4009' },
+      ]));
+
+      expect(guests.map(g => [g.name, g.city || '', g.phone || ''])).toEqual([
+        ['Dana Whitfield', 'Athens', ''],
+        ['Sam Ford',       '',       ''],
+        ['Marcus Reed',    '',       '(256) 777-4009'],
+      ]);
+    });
+
+    test('the svg path data inside the icons is not mistaken for a phone number', () => {
+      const [guest] = parseVisitors(trackerPage([{ name: 'Sam Ford' }]));
+      expect(guest.phone).toBeUndefined();
+    });
+  });
+
   test('the heading shape still wins when the page does use headings for names', () => {
     // The fallback only runs when reading the headings found nobody, so a page
     // that names its guests properly is unaffected by any of the above.
