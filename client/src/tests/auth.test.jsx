@@ -184,18 +184,27 @@ describe('UsersView — role management', () => {
     });
   });
 
-  test('approving a pending user from the grid PATCHes them to approved', async () => {
+  test('approving from the grid asks who the person is rather than approving outright', async () => {
     const fetchMock = mockUsersFetch();
     render(<UsersView currentUser={{ id: 4, role: 'admin' }} />);
 
     fireEvent.click(await screen.findByRole('button', { name: /^approve$/i }));
 
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        '/api/auth/users/3/role',
-        expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ role: 'approved' }) })
-      );
-    });
+    expect(await screen.findByRole('dialog', { name: /approve pat/i })).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining('/approve'),
+      expect.anything(),
+    );
+  });
+
+  test('picking a role for a waiting account opens the approval dialog too', async () => {
+    mockUsersFetch();
+    render(<UsersView currentUser={{ id: 4, role: 'admin' }} />);
+    const drawer = await openDetail('Pat');
+
+    fireEvent.click(within(drawer).getByRole('radio', { name: 'Member role' }));
+
+    expect(await screen.findByRole('dialog', { name: /approve pat/i })).toBeInTheDocument();
   });
 
   test('locks the role controls for your own account and for the owner', async () => {

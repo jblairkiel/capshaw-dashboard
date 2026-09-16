@@ -346,7 +346,38 @@ addColumn('directory', 'photo', "TEXT NOT NULL DEFAULT ''");
 // Info, so a new account is opted in by default.
 addColumn('users', 'wants_monthly_report', 'INTEGER NOT NULL DEFAULT 1');
 
+// ── Email + password accounts (provider = 'local') ───────────────────────────
+// Accounts that came from Google or Facebook leave every column below empty:
+// their address is confirmed by the provider and there is no password here to
+// protect. See server/lib/passwords.js for what is actually stored.
+
+// scrypt digest of the password, salt and cost parameters included. Never the
+// password itself, and never anything reversible.
+addColumn('users', 'password_hash', "TEXT NOT NULL DEFAULT ''");
+// When the person proved they can read the address they signed up with. Null
+// means the confirmation email has not been answered, and they cannot sign in.
+addColumn('users', 'email_verified_at', 'TEXT');
+// SHA-256 of the outstanding confirmation token — never the token, so a copy
+// of this table cannot be used to confirm anybody's address.
+addColumn('users', 'email_verify_hash', "TEXT NOT NULL DEFAULT ''");
+addColumn('users', 'email_verify_expires_at', 'TEXT');
+// Throttles "send it again" so the button cannot be used to mail somebody
+// repeatedly.
+addColumn('users', 'email_verify_sent_at', 'TEXT');
+// Consecutive failed sign-ins, and the time the account stops accepting
+// attempts for a while. Reset the moment a correct password arrives.
+addColumn('users', 'failed_logins', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('users', 'locked_until', 'TEXT');
+// Who let this account in, and when. An approval is the moment an account
+// gains access to the congregation's information, so it is worth a record.
+addColumn('users', 'approved_at', 'TEXT');
+addColumn('users', 'approved_by', 'INTEGER REFERENCES users(id) ON DELETE SET NULL');
+
 db.exec(`CREATE INDEX IF NOT EXISTS idx_users_directory ON users(directory_id);`);
+// Sign-in looks an account up by address, and two accounts must never share
+// one: 'local' rows store the folded address in provider_id, so the existing
+// UNIQUE(provider, provider_id) already enforces that.
+db.exec(`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);`);
 
 // ─── Seed the distribution groups ─────────────────────────────────────────────
 // Created empty; an admin fills in who is in each from Admin → Email Groups.

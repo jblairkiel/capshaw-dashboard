@@ -79,6 +79,69 @@ of the portal, not even the `/display` announcement board.
 A lobby screen showing `/display` therefore needs to be signed in once as a
 member — the session cookie lasts seven days.
 
+There are three ways in: Google, Facebook, and an email address with a
+password. The first two are unchanged. The third is described below.
+
+### Registering with an email address and a password
+
+Anyone may create an account from the sign-in page, but a new account is worth
+nothing on its own. Two separate things have to happen before it can sign in at
+all, and neither one substitutes for the other:
+
+1. **The person confirms their address.** Registering mails them a one-time
+   link. Until they open it, `/api/auth/login` answers `403`
+   (`code: email_unverified`) even with the right password.
+2. **An admin approves them.** Confirming the address puts them in the church
+   office's queue; until somebody approves, `/api/auth/login` answers `403`
+   (`code: pending_approval`).
+
+Because no session is ever created until both are done, an unapproved
+registrant cannot read anything at all — `requireSiteAuth` needs a session
+before it will serve any route.
+
+Approving is also where the account gets a member profile; see
+[Roles & Permissions](#roles--permissions).
+
+### How the credentials are stored
+
+`server/lib/passwords.js` holds all of it, and nothing reversible is ever
+written to the database.
+
+- **Passwords** are hashed with **scrypt** (`N=2^15, r=8, p=1`, 64-byte digest),
+  a per-account 16-byte random salt, and a constant-time comparison. Roughly
+  32 MB and a fraction of a second per guess: unnoticeable once, ruinous for a
+  word list. The cost parameters are stored alongside the digest
+  (`scrypt$N$r$p$salt$hash`) so they can be raised later without stranding the
+  rows already written. scrypt ships with Node, so there is no native module to
+  build and no dependency to keep patched.
+- **Confirmation tokens** are 32 random bytes. The token goes in the email;
+  only its SHA-256 digest is stored, so a stolen copy of the database cannot be
+  used to confirm anybody's address. Tokens expire after 48 hours, work once,
+  and are replaced whenever a new one is asked for.
+- **Password policy** is a 10-character minimum, a 200-character maximum (so a
+  stranger cannot choose how much work this server does), and a refusal of the
+  obvious guesses and of a password that is only the address or name it
+  protects.
+
+Some smaller guardrails around the same routes:
+
+- **No account enumeration.** Registering answers identically whether or not
+  the address is already in use — the difference is only in which email goes
+  out, which only the mailbox owner sees. A wrong password and an unknown
+  address give the same `401`, and the unknown-address path spends the same
+  hashing time so it is not visibly faster.
+- **Per-account lockout.** Eight consecutive wrong passwords lock an account
+  for 15 minutes; a correct password clears the count.
+- **Per-caller rate limits** on `/register`, `/login` and
+  `/resend-verification` (`server/middleware/rateLimit.js`), so nobody can make
+  the server hash passwords in a loop. In-process and dependency-free — a cap
+  on nuisance, with the lockout above doing the real work.
+- **A fresh session id** is issued at sign-in, so a cookie handed out before
+  sign-in cannot be reused after it.
+
+The Google and Facebook paths are untouched: those providers vouch for the
+address, so those accounts have nothing to confirm and no password here.
+
 ---
 
 ## Roles & Permissions
@@ -88,7 +151,7 @@ role includes everything below it.
 
 | Role | Can do |
 |---|---|
-| `pending` | Look around the whole portal. Cannot create or edit anything. |
+| `pending` | Waiting on an admin. An account registered with an email address and password cannot sign in at all while it is `pending`; one that came from Google or Facebook can look around the portal but cannot create or edit anything. |
 | `approved` (Member) | Everything a pending user sees, plus: Bible class questions, the lesson planner, site updates, and editing their own household's details and worship preferences. |
 | `worship-coordinator` | Everything a member can do, plus building the worship roster — they own the Monthly Worship Schedule workflow. |
 | `admin` | Everything above, plus writing announcements, the song tracker and the order of service, and the Church Office tabs — member access, the member directory, and direct editing of every database table. |
@@ -107,16 +170,33 @@ change them.
 | Site update (re-scrape) | ✅ | ✅ |
 | Member Directory, Church Records, Members & Access | — | ✅ |
 
-New sign-ins land on `pending`. An admin promotes them from **Church Office →
-Members & Access**, either with the one-click **Approve** button in the grid or
-from the person's detail panel.
+New sign-ins land on `pending`. An admin lets them in from **Church Office →
+Members & Access**, with the **Approve** button in the grid or from the
+person's detail panel.
+
+**Approving is one decision, not two.** Letting somebody in and saying who they
+are happen together, so the approval dialog will not submit until the admin has
+either paired the account with an existing member directory entry or filled in
+a new one. The server enforces the same rule: an approval that carries neither
+`directory_id` nor `person` is refused with `code: directory_required`, and so
+is any attempt to raise a `pending` account out of `pending` by the plain role
+selector. The reason is that an approved account nobody can put a name to can
+read the whole congregation's information while its owner cannot keep their own
+household up to date.
+
+The dialog suggests a directory entry when exactly one matches the account's
+address — always as a suggestion to check, never as an assumption. A role above
+plain member can be handed out in the same step, and the approval records who
+did it and when (`approved_by`, `approved_at`). The person is emailed as soon
+as it is done.
 
 **The members grid.** Accounts are listed in a sortable, filterable grid. Every
 column carries its own filter — free text for names, emails, directory links
 and dates, a picker for role and sign-in provider — and the filters combine.
 Clicking a row (or its **Manage** button) opens a detail panel holding
 everything you can do to that account: assign a role, link it to a directory
-entry, or remove it. The **Columns** menu chooses which columns are shown and
+entry, or remove it. The **Columns** menu chooses which columns are shown — including **Confirmed**, which says whether an
+email-and-password account has answered its confirmation email — and
 remembers the choice in a cookie (`capshaw.users.columns`, a preference only —
 no account data), so the grid comes back the way it was left. Columns the build
 no longer has are dropped when the cookie is read, and the name column is always
@@ -325,8 +405,20 @@ logs any action pointing at a step or outcome that does not exist.
 
 ## Email
 
-Workflow notifications and distribution groups. **Church Office → Email Groups** manages
-who is on each list and shows what the site has recently tried to send.
+Workflow notifications, account mail, and distribution groups. **Church Office →
+Email Groups** manages who is on each list and shows what the site has recently
+tried to send.
+
+`server/mail/notify.js` turns workflow events into messages;
+`server/mail/accounts.js` handles the four about accounts themselves — the
+confirmation link, the note to somebody who already has an account, the "waiting
+for approval" nudge to the admins, and the "your account is ready" to the person.
+
+> **Registration needs working mail.** The confirmation link only reaches people
+> once `SMTP_HOST` is set and `MAIL_REDIRECT_TO` is cleared. Until then the
+> messages sit in the outbox — nothing is lost, but nobody can finish
+> registering, so an admin has to read the link out of `mail_outbox` or invite
+> people through Google or Facebook instead.
 
 ### Test mode is the default
 
