@@ -1,91 +1,11 @@
 require('dotenv').config();
-const express  = require('express');
-const cors     = require('cors');
-const path     = require('path');
-const fs       = require('fs');
-const session  = require('express-session');
-const passport = require('passport');
 
-const { router: scraperRoutes, runUpdate, readData } = require('./routes/scraper');
-const documentRoutes      = require('./routes/documents');
-const bibleClassRoutes    = require('./routes/bibleClass');
-const gameQuestionRoutes  = require('./routes/gameQuestions');
-const lessonPlannerRoutes  = require('./routes/lessonPlanner');
-const announcementRoutes   = require('./routes/announcements');
-const authRoutes           = require('./routes/auth');
-const songRoutes           = require('./routes/songTracker');
-const profileRoutes = require('./routes/profile');
-const workflowRoutes = require('./routes/workflows');
-const mailRoutes = require('./routes/mailGroups');
-const adminRoutes          = require('./routes/admin');
-const { requireSiteAuth }  = require('./middleware/auth');
+const { createApp } = require('./app');
+const { runUpdate, readData } = require('./routes/scraper');
 
-const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Ensure uploads directory exists
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-const isProd = process.env.NODE_ENV === 'production';
-
-// Trust nginx reverse proxy so req.protocol, req.ip, and secure cookies work correctly
-if (isProd) app.set('trust proxy', 1);
-
-app.use(cors({
-  origin: isProd
-    ? ['https://capshaw.jblairkiel.com']
-    : ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'],
-  credentials: true,
-}));
-app.use(express.json());
-
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'dev-secret-change-in-production',
-  resave: false,
-  saveUninitialized: false,
-  cookie: {
-    httpOnly: true,
-    secure: isProd,
-    sameSite: 'lax',
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-  },
-}));
-app.use(passport.initialize());
-app.use(passport.session());
-
-// Nothing under /api is readable until you have signed in — only the sign-in
-// flow itself and the health check stay open.
-app.use('/api', requireSiteAuth);
-
-app.use('/api/auth', authRoutes);
-app.use('/api/scraper', scraperRoutes);
-app.use('/api/members', scraperRoutes);
-app.use('/api/documents',    documentRoutes);
-app.use('/api/bible-class',  bibleClassRoutes);
-app.use('/api/game-questions',  gameQuestionRoutes);
-app.use('/api/lesson-planner',  lessonPlannerRoutes);
-app.use('/api/announcements',   announcementRoutes);
-app.use('/api/songs',           songRoutes);
-app.use('/api/admin',           adminRoutes);
-app.use('/api/profile',         profileRoutes);
-app.use('/api/workflows',       workflowRoutes);
-app.use('/api/mail',            mailRoutes);
-
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-// Serve React build in production
-if (isProd) {
-  const clientDist = path.join(__dirname, '../client/dist');
-  app.use(express.static(clientDist));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(clientDist, 'index.html'));
-  });
-}
+const app = createApp();
 
 const SCRAPE_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 const MAIL_SWEEP_MS     = 5 * 60 * 1000;      // 5 minutes
