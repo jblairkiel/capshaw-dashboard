@@ -38,7 +38,7 @@
       "**/server/tests/**/*.test.js"
     ],
     "setupFiles": [
-      "<rootDir>/server/tests/helpers/isolatePhotos.js"
+      "<rootDir>/server/tests/helpers/isolateData.js"
     ]
   }
 }
