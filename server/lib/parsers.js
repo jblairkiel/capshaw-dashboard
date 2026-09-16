@@ -328,17 +328,30 @@ function parseVisitorsByHeading(html) {
   return guests;
 }
 
-// ─── Reading the name from whatever is above the table ────────────────────────
+// ─── Reading a guest's entry when the name is not a heading ───────────────────
 //
 // The live tracker gives each guest a table of visits, but puts their name in
 // something that is not a heading — the headings on the page are only its own
 // section labels ("Comments", "Visit History"), which is why keying on them
 // found seven tables and nobody to attach them to.
 //
-// So this does what a person reading the page does: for each table, take the
-// nearest piece of text above it that could be somebody's name. It does not
-// care which element holds it, which is the point — a card title, a paragraph
-// and a bold line all read the same way.
+// So this reads the page the way the heading parser does — in order, a guest
+// then their sections — but takes the name from whatever element holds it. A
+// card title, a paragraph, a bold line and a link all read the same way, which
+// is the point: the tracker's markup is not ours to rely on.
+//
+// Order is what makes it right, rather than nearness. Taking the nearest text
+// above each table instead names every guest after their own comment, because
+// that is what sits between them and their dates:
+//
+//     Pat Lane            ← the name
+//     Comments            ← a section label
+//     Just moved from Foley, AL
+//     Visit History       ← a section label
+//     <table of dates>
+//
+// Text that follows a "Comments" label belongs to the guest who was named
+// before it. Only text arriving outside any section is somebody new.
 
 // Text-bearing elements a name might be written in, small enough that a whole
 // paragraph of prose will not be mistaken for one.
@@ -358,72 +371,76 @@ function couldBeAName(text) {
 }
 
 function parseVisitorsByProximity(html) {
-  // Where every table starts and ends. Text inside one is that table's
-  // contents — a comment, a date, a service — and never the name of the guest
-  // the next table belongs to, which is a mistake worth ruling out by
+  // Every table, and every piece of text outside one, in the order the page
+  // gives them. Text inside a table is that table's contents — a comment, a
+  // date, a service — and never a guest's name, which is worth ruling out by
   // position rather than by trying to recognise prose.
-  const tableRanges = [...html.matchAll(/<table[\s\S]*?<\/table>/gi)]
-    .map(m => [m.index, m.index + m[0].length]);
-  const insideATable = at => tableRanges.some(([from, to]) => at >= from && at < to);
+  const tables = [...html.matchAll(/<table[\s\S]*?<\/table>/gi)]
+    .map(m => ({ at: m.index, end: m.index + m[0].length, kind: 'table', html: m[0] }));
+  const insideATable = at => tables.some(t => at >= t.at && at < t.end);
 
-  // Every label on the page, with where it starts, so the nearest one above a
-  // given table can be found by position.
-  const labels = [];
+  const tokens = [...tables];
   for (const match of html.matchAll(LABEL_RE)) {
     if (insideATable(match.index)) continue;
     const text = stripTags(match[2]);
-    if (couldBeAName(text)) labels.push({ at: match.index, text, isSection: !!visitorSection(text) });
-  }
+    if (!text) continue;
 
-  // Section labels are kept in the list rather than dropped: one sitting
-  // between a name and a table is what tells us the table belongs to that
-  // section, and the name is further up.
-  for (const match of html.matchAll(/<(h[1-6])[^>]*>([^<]{1,80})<\/\1>/gi)) {
-    if (insideATable(match.index)) continue;
-    const text = stripTags(match[2]);
-    if (visitorSection(text)) labels.push({ at: match.index, text, isSection: true });
+    // A section label is recognised in whatever element the page wrote it in,
+    // not only in a heading — the same reason the name is.
+    const section = visitorSection(text);
+    if (section) tokens.push({ at: match.index, kind: 'section', section });
+    else if (couldBeAName(text)) tokens.push({ at: match.index, kind: 'label', text });
   }
-  labels.sort((a, b) => a.at - b.at);
+  tokens.sort((a, b) => a.at - b.at);
 
-  function nameAbove(index) {
-    for (let i = labels.length - 1; i >= 0; i--) {
-      if (labels[i].at >= index) continue;
-      if (labels[i].isSection) continue;      // "Visit History" — keep looking up
-      return labels[i].text;
+  const guests  = [];
+  let   current = null;
+  let   section = '';
+
+  function keep() {
+    // A line with nothing under it is page furniture, not a guest.
+    if (current && (current.visits.length || current.comments.length)) {
+      guests.push({
+        name:     current.name,
+        visits:   current.visits,
+        comments: current.comments.join('\n'),
+      });
     }
-    return '';
+    current = null;
   }
 
-  // Guests in the order the page lists them, so several tables under one name
-  // (comments and visits, say) land on the same guest.
-  const guests = new Map();
+  for (const token of tokens) {
+    if (token.kind === 'section') { section = token.section; continue; }
 
-  for (const match of html.matchAll(/<table[\s\S]*?<\/table>/gi)) {
-    const rows   = extractTables(match[0])[0] || [];
-    const visits = rows.filter(looksLikeVisitRow).map(r => ({ date: r[0], service: r[1] || '' }));
-
-    const name = nameAbove(match.index);
-    if (!name) continue;
-
-    if (!guests.has(name)) guests.set(name, { name, visits: [], comments: '' });
-    const guest = guests.get(name);
-
-    if (visits.length) {
-      guest.visits.push(...visits);
+    // ── A line of text: the guest's comment, or somebody new ────────────────
+    if (token.kind === 'label') {
+      if (section === 'comments' && current) { current.comments.push(token.text); continue; }
+      keep();
+      current = { name: token.text, visits: [], comments: [] };
+      section = '';
       continue;
     }
 
-    // A table above the visits that is not dates is what the tracker has to
-    // say about them.
-    const comments = rows
-      .map(r => r.join(' — ').trim())
-      .filter(text => text && !/^comments?$/i.test(text) && !/^date\b/i.test(text));
-    if (comments.length) {
-      guest.comments = [guest.comments, ...comments].filter(Boolean).join('\n');
+    // ── A table: visit rows if it holds dates, comments otherwise ───────────
+    const rows   = extractTables(token.html)[0] || [];
+    const visits = rows.filter(looksLikeVisitRow).map(r => ({ date: r[0], service: r[1] || '' }));
+
+    if (current && visits.length) {
+      current.visits.push(...visits);
+    } else if (current) {
+      const comments = rows
+        .map(r => r.join(' — ').trim())
+        .filter(text => text && !/^comments?$/i.test(text) && !/^date\b/i.test(text));
+      current.comments.push(...comments);
     }
+
+    // The section has delivered what it holds, so the next line of text is a
+    // new guest rather than more of it.
+    section = '';
   }
 
-  return [...guests.values()].filter(g => g.visits.length || g.comments);
+  keep();
+  return guests;
 }
 
 // One table, a guest per row: Name | Date | Service, in whatever order the

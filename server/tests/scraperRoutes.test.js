@@ -296,6 +296,47 @@ describe('POST /api/members/update', () => {
     expect(body.warnings.some(w => w.startsWith('visitors:'))).toBe(false);
   });
 
+  test('a guest the old parser named after their comment is cleared by the re-scrape', async () => {
+    // Before the parser could tell a name from a comment, this page produced a
+    // guest called "Just moved from Foley, AL". Guests are matched by name, so
+    // that row survives the scrape that reads the page correctly unless it is
+    // taken out — leaving the same person listed twice, once under a sentence.
+    const tracker = `
+      <p class="visitor-name">Pat Lane</p>
+      <h4>Comments</h4><p>Just moved from Foley, AL</p>
+      <h4>Visit History</h4>${table([['Date', 'Service'], ['09/13/26', 'Sun AM']])}`;
+
+    const misread = db.prepare('INSERT INTO visitors (name) VALUES (?)').run('Just moved from Foley, AL').lastInsertRowid;
+    db.prepare('INSERT INTO visitor_visits (visitor_id, date, service) VALUES (?,?,?)').run(misread, '09/13/26', 'Sun AM');
+
+    serveSite({ '/members/visitor-tracker': page(tracker) });
+    const res = await request(buildApp(MEMBER)).post('/api/members/update');
+    expect(res.status).toBe(200);
+
+    expect(db.prepare('SELECT name, comments FROM visitors').all()).toEqual([
+      { name: 'Pat Lane', comments: 'Just moved from Foley, AL' },
+    ]);
+    // The row went, and its visits went with it rather than being orphaned.
+    expect(db.prepare('SELECT COUNT(*) AS n FROM visitor_visits WHERE visitor_id = ?').get(misread).n).toBe(0);
+  });
+
+  test('a misread guest somebody has since typed into is left alone', async () => {
+    // Removing it would throw away the only copy of what was typed. A duplicate
+    // in the list is recoverable by hand; a deleted phone number is not.
+    const tracker = `
+      <p class="visitor-name">Pat Lane</p>
+      <h4>Comments</h4><p>Just moved from Foley, AL</p>
+      <h4>Visit History</h4>${table([['Date', 'Service'], ['09/13/26', 'Sun AM']])}`;
+
+    db.prepare('INSERT INTO visitors (name, phone) VALUES (?, ?)').run('Just moved from Foley, AL', '256-555-0134');
+
+    serveSite({ '/members/visitor-tracker': page(tracker) });
+    await request(buildApp(MEMBER)).post('/api/members/update');
+
+    expect(db.prepare('SELECT name FROM visitors ORDER BY name').all().map(v => v.name))
+      .toEqual(['Just moved from Foley, AL', 'Pat Lane']);
+  });
+
   test('a section that fails keeps the rows the last good scrape left', async () => {
     db.prepare("INSERT INTO scraped_meta (id, last_updated, last_warnings) VALUES (1, 'earlier', '[]')").run();
     db.prepare('INSERT INTO sermons (date, title, speaker) VALUES (?,?,?)').run('2024-12-01', 'Kept from before', 'Ray Harris');
