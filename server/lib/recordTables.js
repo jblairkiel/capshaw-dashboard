@@ -149,8 +149,17 @@ const TABLES = {
   },
 };
 
-function tableDef(name) {
-  return Object.prototype.hasOwnProperty.call(TABLES, name) ? TABLES[name] : null;
+// Every table name this module will ever put in a query, as literals from this
+// file rather than strings from a request.
+const TABLE_NAMES = Object.keys(TABLES);
+
+// Looks a table up by what somebody asked for, and hands back *our* name for
+// it. The distinction matters: `def.name` is the literal above, matched against
+// the request rather than taken from it, so the SQL built around it is never
+// assembled out of anything a caller sent.
+function tableDef(requested) {
+  const name = TABLE_NAMES.find(known => known === requested);
+  return name ? { ...TABLES[name], name } : null;
 }
 
 // Which areas may write this table at all. The gate itself still lives in the
@@ -167,4 +176,4 @@ function describeRow(name, row) {
   try { return def.describe(row); } catch { return ''; }
 }
 
-module.exports = { TABLES, tableDef, areasForTable, describeRow };
+module.exports = { TABLES, TABLE_NAMES, tableDef, areasForTable, describeRow };

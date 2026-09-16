@@ -231,16 +231,20 @@ router.delete('/:table/:id', (req, res) => {
 router.delete('/:table', (req, res) => {
   try {
     const protected_ = new Set(['users', 'songs', 'song_services', 'service_songs']);
-    if (!tableDef(req.params.table)) return res.status(404).json({ success: false, error: 'Unknown table' });
-    if (protected_.has(req.params.table)) return res.status(403).json({ success: false, error: 'Cannot bulk-clear this table' });
+    // `def.name` is the registry's own literal for this table, matched against
+    // what was asked for rather than taken from it, so the statement below is
+    // built from this application's strings and nothing from the request.
+    const def = tableDef(req.params.table);
+    if (!def) return res.status(404).json({ success: false, error: 'Unknown table' });
+    if (protected_.has(def.name)) return res.status(403).json({ success: false, error: 'Cannot bulk-clear this table' });
 
-    const { changes } = db.prepare(`DELETE FROM "${req.params.table}"`).run();
+    const { changes } = db.prepare(`DELETE FROM "${def.name}"`).run();
     actionLog.record(req.user, {
-      area:    tableDef(req.params.table).area,
+      area:    def.area,
       action:  'delete',
-      entity:  tableDef(req.params.table).entity,
-      summary: `Cleared every row from ${req.params.table} (${changes} removed)`,
-      details: { table: req.params.table, removed: changes },
+      entity:  def.entity,
+      summary: `Cleared every row from ${def.name} (${changes} removed)`,
+      details: { table: def.name, removed: changes },
     });
     res.json({ success: true });
   } catch (err) {

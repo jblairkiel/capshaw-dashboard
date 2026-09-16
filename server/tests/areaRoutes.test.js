@@ -253,3 +253,50 @@ describe('/api/leadership', () => {
     expect(db.prepare('SELECT COUNT(*) n FROM deacon_duties').get().n).toBe(0);
   });
 });
+
+// ─── Nothing a caller sends reaches the SQL ───────────────────────────────────
+//
+// The record screens take a table name off the URL, which is exactly the shape
+// CodeQL flags. The registry is what keeps it safe: the query is built from our
+// own name for the table, matched against the request rather than taken from
+// it, so an unknown one is a 404 and never a statement.
+
+describe('table names are ours, not the caller\'s', () => {
+  const { tableDef } = require('../lib/recordTables');
+
+  test('a known table comes back with the registry\'s own name', () => {
+    expect(tableDef('attendance').name).toBe('attendance');
+    expect(tableDef('elders').name).toBe('elders');
+  });
+
+  test('anything else is refused outright', () => {
+    expect(tableDef('users')).toBeNull();
+    expect(tableDef('attendance; DROP TABLE users')).toBeNull();
+    expect(tableDef('')).toBeNull();
+    expect(tableDef(undefined)).toBeNull();
+    // Inherited properties are not tables either.
+    expect(tableDef('constructor')).toBeNull();
+    expect(tableDef('toString')).toBeNull();
+  });
+
+  test('a table that is not in the registry never reaches the database', async () => {
+    for (const path of ['/api/records/users', '/api/records/sqlite_master']) {
+      expect((await request(buildApp(ADMIN)).get(path)).status).toBe(404);
+      expect((await request(buildApp(ADMIN)).post(path).send({ name: 'x' })).status).toBe(404);
+    }
+    // The accounts table is still there, and still has everybody in it.
+    expect(db.prepare('SELECT COUNT(*) n FROM users').get().n).toBeGreaterThan(0);
+  });
+
+  test('a sort column that is not the table\'s own is ignored rather than used', async () => {
+    await request(buildApp(ATTENDANCE))
+      .post('/api/records/attendance')
+      .send({ date: '2026-06-07', service: 'Sun AM', count: 91 });
+
+    const res = await request(buildApp(MEMBER))
+      .get('/api/records/attendance?sort=count%20DESC%3B%20DROP%20TABLE%20users&dir=asc');
+    expect(res.status).toBe(200);
+    expect(res.body.rows).toHaveLength(1);
+    expect(db.prepare('SELECT COUNT(*) n FROM users').get().n).toBeGreaterThan(0);
+  });
+});
