@@ -402,7 +402,7 @@ function UserDetail({ user, currentUserId, people, busy, onSetRole, onLink, onRe
               disabled={busy}
               className="text-sm px-3 py-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors disabled:opacity-50"
             >
-              Remove from dashboard
+              Remove from the portal
             </button>
           ) : <span className="text-xs text-gray-400">This account cannot be removed.</span>}
           <button onClick={onClose} className="btn-primary text-sm">Done</button>
@@ -567,7 +567,7 @@ export default function UsersView({ currentUser }) {
   }
 
   async function remove(id, name) {
-    if (!window.confirm(`Remove ${name} from the dashboard? They will need to sign in and be re-approved.`)) return;
+    if (!window.confirm(`Remove ${name} from the member portal? They will need to sign in again and be confirmed.`)) return;
     setNotice('');
     setBusy(true);
     const res  = await fetch(`/api/auth/users/${id}`, { method: 'DELETE' });
@@ -646,7 +646,7 @@ export default function UsersView({ currentUser }) {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h2 className="section-heading mb-0">Users &amp; Roles</h2>
+        <h2 className="section-heading mb-0">Members &amp; Access</h2>
         <div className="flex items-center gap-2">
           <ColumnPicker visible={visibleKeys} onChange={setVisibleKeys} />
           <button onClick={load} className="text-sm text-church-gold hover:text-church-navy transition-colors px-2">
@@ -668,7 +668,7 @@ export default function UsersView({ currentUser }) {
           className="w-full text-left card border border-orange-200 bg-orange-50 text-sm text-orange-800 hover:bg-orange-100 transition-colors"
         >
           <strong>{pendingCount}</strong> {pendingCount === 1 ? 'person is' : 'people are'} waiting to be
-          given a role. They can view the dashboard but cannot change anything — click to show just them.
+          confirmed. They can look around the portal but cannot change anything — click to show just them.
         </button>
       )}
 

@@ -309,7 +309,7 @@ export default function CalendarView({ user }) {
 
       {!canEdit && (
         <p className="text-xs text-gray-400">
-          Events come from the announcements page. Ask an admin to add or change one.
+          Events come from the announcements page. Ask the church office to add or change one.
         </p>
       )}
 

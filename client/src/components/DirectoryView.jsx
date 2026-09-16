@@ -275,7 +275,7 @@ export default function DirectoryView() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="section-heading mb-0">Congregation Directory</h2>
+          <h2 className="section-heading mb-0">Member Directory</h2>
           <p className="text-xs text-gray-400 mt-0.5">
             {familyCount} {familyCount === 1 ? 'family' : 'families'} · {memberCount} members
           </p>
