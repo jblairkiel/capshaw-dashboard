@@ -78,6 +78,149 @@ describe('AttendanceView', () => {
   });
 });
 
+// ─── Recording attendance ─────────────────────────────────────────────────────
+//
+// The service is picked from a list an admin keeps, rather than typed afresh
+// every time, so two records of the same service always agree on its name.
+
+describe('AttendanceView — recording a count', () => {
+  const RECORDS = [
+    { id: 1, date: '2026-06-07', service: 'Sunday AM Worship', count: 142 },
+  ];
+
+  const TYPES = [
+    { id: 1, name: 'Sunday Bible Study',    sort_order: 0, active: 1 },
+    { id: 2, name: 'Sunday AM Worship',     sort_order: 1, active: 1 },
+    { id: 3, name: 'Wednesday Bible Study', sort_order: 2, active: 1 },
+    { id: 4, name: 'Gospel Meeting',        sort_order: 3, active: 0 },   // retired
+  ];
+
+  function mockApi({ records = RECORDS, types = TYPES } = {}) {
+    const fetchMock = vi.fn((url, options) => {
+      if (String(url).includes('/service_types')) {
+        if (options?.method) return Promise.resolve({ json: () => Promise.resolve({ success: true, row: {} }) });
+        return Promise.resolve({ json: () => Promise.resolve({ success: true, rows: types }) });
+      }
+      if (options?.method) return Promise.resolve({ json: () => Promise.resolve({ success: true, row: {} }) });
+      return Promise.resolve({ json: () => Promise.resolve({ success: true, rows: records }) });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  const ATTENDANCE = { id: 2, role: 'approved', areas: ['attendance'] };
+  const ADMIN      = { id: 1, role: 'admin' };
+  const MEMBER     = { id: 3, role: 'approved', areas: [] };
+
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  test('only the attendance area is offered the button', async () => {
+    mockApi();
+    const { unmount } = render(<AttendanceView data={RECORDS} user={MEMBER} />);
+    await waitFor(() => expect(screen.queryByRole('button', { name: /record attendance/i })).not.toBeInTheDocument());
+    unmount();
+
+    mockApi();
+    render(<AttendanceView data={RECORDS} user={ATTENDANCE} />);
+    expect(await screen.findByRole('button', { name: /record attendance/i })).toBeInTheDocument();
+  });
+
+  test('the service is chosen from the list, not typed', async () => {
+    mockApi();
+    render(<AttendanceView data={RECORDS} user={ATTENDANCE} />);
+    fireEvent.click(await screen.findByRole('button', { name: /record attendance/i }));
+
+    const dialog = screen.getByRole('dialog');
+    const select = within(dialog).getByLabelText(/^Service/);
+    expect(select.tagName).toBe('SELECT');
+
+    // Only the services still held, and the first one is ready to save.
+    expect(within(select).getAllByRole('option').map(o => o.textContent))
+      .toEqual(['Sunday Bible Study', 'Sunday AM Worship', 'Wednesday Bible Study']);
+    expect(select).toHaveValue('Sunday Bible Study');
+  });
+
+  test('saving posts the service as it is named on the list', async () => {
+    const fetchMock = mockApi();
+    render(<AttendanceView data={RECORDS} user={ATTENDANCE} />);
+    fireEvent.click(await screen.findByRole('button', { name: /record attendance/i }));
+
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText(/^Date/),    { target: { value: '2026-06-14' } });
+    fireEvent.change(within(dialog).getByLabelText(/^Service/), { target: { value: 'Wednesday Bible Study' } });
+    fireEvent.change(within(dialog).getByLabelText(/^Count/),   { target: { value: '63' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, o]) => String(url) === '/api/records/attendance' && o?.method === 'POST');
+      expect(JSON.parse(call[1].body)).toEqual({ date: '2026-06-14', service: 'Wednesday Bible Study', count: 63 });
+    });
+  });
+
+  test('a record saved under a service since retired keeps it rather than being reassigned', async () => {
+    mockApi({ records: [{ id: 9, date: '2026-05-31', service: 'Gospel Meeting', count: 210 }] });
+    render(<AttendanceView data={RECORDS} user={ATTENDANCE} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /edit gospel meeting/i }));
+    const select = within(screen.getByRole('dialog')).getByLabelText(/^Service/);
+    expect(select).toHaveValue('Gospel Meeting');
+    expect(within(select).getByRole('option', { name: /no longer offered/i })).toBeInTheDocument();
+  });
+
+  test('the list itself is an admin\'s to keep, not the attendance area\'s', async () => {
+    mockApi();
+    const { unmount } = render(<AttendanceView data={RECORDS} user={ATTENDANCE} />);
+    await screen.findByRole('button', { name: /record attendance/i });
+    expect(screen.queryByRole('button', { name: /service types/i })).not.toBeInTheDocument();
+    unmount();
+
+    mockApi();
+    render(<AttendanceView data={RECORDS} user={ADMIN} />);
+    expect(await screen.findByRole('button', { name: /service types/i })).toBeInTheDocument();
+  });
+
+  test('an admin can add a service, and retire one without deleting it', async () => {
+    const fetchMock = mockApi();
+    render(<AttendanceView data={RECORDS} user={ADMIN} />);
+    fireEvent.click(await screen.findByRole('button', { name: /service types/i }));
+
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText(/add a service/i), { target: { value: 'Sunrise Service' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /^add$/i }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, o]) => String(url) === '/api/records/service_types' && o?.method === 'POST');
+      expect(JSON.parse(call[1].body)).toMatchObject({ name: 'Sunrise Service', active: 1 });
+    });
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /retire sunday am worship/i }));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, o]) => String(url).endsWith('/service_types/2') && o?.method === 'PATCH');
+      expect(JSON.parse(call[1].body)).toEqual({ active: 0 });
+    });
+  });
+
+  test('a retired service can be brought back', async () => {
+    const fetchMock = mockApi();
+    render(<AttendanceView data={RECORDS} user={ADMIN} />);
+    fireEvent.click(await screen.findByRole('button', { name: /service types/i }));
+
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /bring back gospel meeting/i }));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, o]) => String(url).endsWith('/service_types/4') && o?.method === 'PATCH');
+      expect(JSON.parse(call[1].body)).toEqual({ active: 1 });
+    });
+  });
+
+  test('with no services on the list yet, it says who can add them', async () => {
+    mockApi({ types: [] });
+    render(<AttendanceView data={RECORDS} user={ATTENDANCE} />);
+    fireEvent.click(await screen.findByRole('button', { name: /record attendance/i }));
+
+    expect(within(screen.getByRole('dialog')).getByText(/An admin needs to add the services/i)).toBeInTheDocument();
+  });
+});
+
 // ─── AnniversariesView ────────────────────────────────────────────────────────
 
 describe('AnniversariesView', () => {

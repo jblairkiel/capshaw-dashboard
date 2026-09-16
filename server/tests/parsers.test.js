@@ -4,6 +4,7 @@ const {
   parseSermons,
   parseJobAssignments,
   parseAnniversaries,
+  parseVisitors,
   parseDeacons,
   parseBulletins,
 } = require('../lib/parsers');
@@ -182,5 +183,118 @@ describe('parseBulletins', () => {
 
   test('returns empty for html with no bulletin section', () => {
     expect(parseBulletins('<html><h2>Member News</h2></html>')).toEqual([]);
+  });
+});
+
+// ─── parseVisitors ────────────────────────────────────────────────────────────
+//
+// The tracker gives each guest a heading, then splits what it knows about them
+// under headings of its own. Pairing a heading with the table after it named
+// every guest "Visit History" — the heading nearest their dates — so these
+// pin the shapes down.
+
+describe('parseVisitors', () => {
+  const SECTIONED = `
+    <h2>Visitor Tracker</h2>
+    <h3>Pat Lane</h3>
+      <h4>Comments</h4>
+      <table><tr><th>Comment</th></tr><tr><td>Neighbour of the Carters</td></tr></table>
+      <h4>Visit History</h4>
+      <table>
+        <tr><th>Date</th><th>Service</th></tr>
+        <tr><td>04/13/25</td><td>Sun AM</td></tr>
+        <tr><td>03/30/25</td><td>Sun PM</td></tr>
+      </table>
+    <h3>Sam Ford</h3>
+      <h4>Comments</h4>
+      <table><tr><th>Comment</th></tr><tr><td>Asked about the Wednesday class</td></tr></table>
+      <h4>Visit History</h4>
+      <table><tr><th>Date</th><th>Service</th></tr><tr><td>04/06/25</td><td>Sun AM</td></tr></table>
+  `;
+
+  test('names each guest after themselves, not after the section holding their dates', () => {
+    const guests = parseVisitors(SECTIONED);
+    expect(guests.map(g => g.name)).toEqual(['Pat Lane', 'Sam Ford']);
+  });
+
+  test('keeps every visit under the guest it belongs to', () => {
+    const [pat, sam] = parseVisitors(SECTIONED);
+    expect(pat.visits).toEqual([
+      { date: '04/13/25', service: 'Sun AM' },
+      { date: '03/30/25', service: 'Sun PM' },
+    ]);
+    expect(sam.visits).toEqual([{ date: '04/06/25', service: 'Sun AM' }]);
+  });
+
+  test('keeps what the tracker says about them rather than dropping it', () => {
+    const [pat, sam] = parseVisitors(SECTIONED);
+    expect(pat.comments).toBe('Neighbour of the Carters');
+    expect(sam.comments).toBe('Asked about the Wednesday class');
+  });
+
+  test('a section heading never becomes a guest of its own', () => {
+    const names = parseVisitors(SECTIONED).map(g => g.name);
+    for (const label of ['Comments', 'Visit History', 'Visitor Tracker']) {
+      expect(names).not.toContain(label);
+    }
+  });
+
+  test('reads the simpler shape too: a name, then the dates', () => {
+    const guests = parseVisitors(`
+      <h2>Visitor Tracker</h2>
+      <h3>Jo Reed</h3>
+      <table><tr><th>Date</th><th>Service</th></tr><tr><td>05/04/25</td><td>Sun AM</td></tr></table>
+    `);
+    expect(guests).toEqual([
+      { name: 'Jo Reed', comments: '', visits: [{ date: '05/04/25', service: 'Sun AM' }] },
+    ]);
+  });
+
+  test('reads comments written as paragraphs rather than as a table', () => {
+    const [guest] = parseVisitors(`
+      <h3>Ray Nolan</h3>
+      <h4>Comments</h4><p>Moving to Harvest in June.</p><p>Would like a study.</p>
+      <h4>Visit History</h4><table><tr><td>06/01/25</td><td>Sun AM</td></tr></table>
+    `);
+    expect(guest.name).toBe('Ray Nolan');
+    expect(guest.comments).toBe('Moving to Harvest in June.\nWould like a study.');
+  });
+
+  test('falls back to a single table of everybody, merging a guest\'s rows', () => {
+    const guests = parseVisitors(`
+      <h2>Visitor Tracker</h2>
+      <table>
+        <tr><th>Name</th><th>Date</th><th>Service</th><th>Comments</th></tr>
+        <tr><td>Dana Webb</td><td>05/11/25</td><td>Sun AM</td><td>Came with the Carters</td></tr>
+        <tr><td>Dana Webb</td><td>05/18/25</td><td>Sun PM</td><td></td></tr>
+        <tr><td>Lee Park</td><td>05/18/25</td><td>Sun PM</td><td></td></tr>
+      </table>
+    `);
+    expect(guests).toHaveLength(2);
+    expect(guests[0]).toEqual({
+      name: 'Dana Webb',
+      comments: 'Came with the Carters',
+      visits: [
+        { date: '05/11/25', service: 'Sun AM' },
+        { date: '05/18/25', service: 'Sun PM' },
+      ],
+    });
+  });
+
+  test('a heading with nothing under it is not a guest', () => {
+    expect(parseVisitors('<h2>Visitor Tracker</h2><h3>Section Header</h3>')).toEqual([]);
+  });
+
+  test('a page with no guests on it parses to nothing rather than throwing', () => {
+    expect(parseVisitors('<h2>Visitor Tracker</h2><p>No visitors recorded.</p>')).toEqual([]);
+    expect(parseVisitors('')).toEqual([]);
+  });
+
+  test('a four-digit year is still a visit', () => {
+    const [guest] = parseVisitors(`
+      <h3>Ann Poole</h3>
+      <table><tr><th>Date</th><th>Service</th></tr><tr><td>6/1/2025</td><td>Sun AM</td></tr></table>
+    `);
+    expect(guest.visits).toEqual([{ date: '6/1/2025', service: 'Sun AM' }]);
   });
 });

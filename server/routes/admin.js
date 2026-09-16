@@ -44,10 +44,12 @@ router.post('/import-cache', (req, res) => {
       // routes/scraper.js: their details are typed in here and nowhere else.
       const findV = db.prepare('SELECT id FROM visitors WHERE lower(trim(name)) = lower(trim(?))');
       const insV  = db.prepare("INSERT INTO visitors (name, created_at) VALUES (?, datetime('now'))");
+      const setC  = db.prepare('UPDATE visitors SET comments = ? WHERE id = ?');
       const clrVV = db.prepare('DELETE FROM visitor_visits WHERE visitor_id = ?');
       const insVV = db.prepare('INSERT INTO visitor_visits (visitor_id, date, service) VALUES (?, ?, ?)');
       for (const v of (d.visitors || [])) {
         const vid = findV.get(v.name)?.id ?? insV.run(v.name).lastInsertRowid;
+        setC.run(v.comments || '', vid);
         clrVV.run(vid);
         for (const vv of (v.visits || [])) insVV.run(vid, vv.date, vv.service);
       }

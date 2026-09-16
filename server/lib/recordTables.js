@@ -7,6 +7,19 @@
 // writable in one place and missing in the other.
 
 const TABLES = {
+  // Kept by an admin rather than by an area: the list of services is what
+  // every attendance record has to agree on, so it is not one page's to
+  // change. Everybody can read it — the attendance form is built from it.
+  service_types: {
+    area:      'attendance',
+    writeRole: 'admin',
+    entity:    'service type',
+    columns:   ['id', 'name', 'sort_order', 'active', 'created_at'],
+    writable:  ['name', 'sort_order', 'active'],
+    search:    'name',
+    order:     'sort_order ASC, name ASC',
+    describe:  r => r.name || 'a service type',
+  },
   attendance: {
     area:     'attendance',
     entity:   'attendance record',
@@ -164,9 +177,14 @@ function tableDef(requested) {
 
 // Which areas may write this table at all. The gate itself still lives in the
 // route, because some tables (announcements) split by row rather than wholesale.
+//
+// A table carrying `writeRole` is nobody's area to write — admins only — so it
+// answers with no areas at all rather than with the area it is filed under for
+// reading.
 function areasForTable(name) {
   const def = tableDef(name);
   if (!def) return [];
+  if (def.writeRole) return [];
   return [def.area, def.alsoArea].filter(Boolean);
 }
 

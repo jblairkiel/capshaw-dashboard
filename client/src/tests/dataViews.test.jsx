@@ -158,6 +158,40 @@ describe('VisitorTracker', () => {
     expect(within(row).getAllByText('—').length).toBeGreaterThan(0);
   });
 
+  test('the tracker\'s own comments are shown, and kept apart from ours', async () => {
+    mockGuests([{
+      ...GUESTS[0],
+      comments: 'Came with the Carters',
+      notes:    'Rang them on Tuesday',
+    }]);
+    render(<VisitorTracker />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Pat Lane' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Comments from the tracker')).toBeInTheDocument();
+    expect(within(dialog).getByText('Came with the Carters')).toBeInTheDocument();
+    expect(within(dialog).getByText('Our notes')).toBeInTheDocument();
+    expect(within(dialog).getByText('Rang them on Tuesday')).toBeInTheDocument();
+  });
+
+  test('editing never sends the tracker\'s comments back, since the next refresh owns them', async () => {
+    const fetchMock = mockGuests([{ ...GUESTS[0], comments: 'From the site' }], true);
+    render(<VisitorTracker />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Pat Lane' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /edit details/i }));
+
+    const form = screen.getByRole('dialog');
+    type(within(form).getByLabelText(/^Our notes/), 'Ours to keep');
+    fireEvent.click(within(form).getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, o]) => String(url).includes('/api/visitors/1') && o?.method === 'PATCH');
+      const body = JSON.parse(call[1].body);
+      expect(body.notes).toBe('Ours to keep');
+      expect(body).not.toHaveProperty('comments');
+    });
+  });
+
   test('the details and visit history are spelled out when the guest is clicked', async () => {
     mockGuests();
     render(<VisitorTracker />);
@@ -230,7 +264,7 @@ describe('VisitorTracker', () => {
     const dialog = screen.getByRole('dialog');
     type(within(dialog).getByLabelText(/^Name/), 'Dana Webb');
     type(within(dialog).getByLabelText(/^Phone/), '256-555-0170');
-    type(within(dialog).getByLabelText(/^Comments/), 'Neighbour of the Carters');
+    type(within(dialog).getByLabelText(/^Our notes/), 'Neighbour of the Carters');
     type(within(dialog).getByLabelText(/^First visit/), '05/04/25');
     fireEvent.click(within(dialog).getByRole('button', { name: /add guest/i }));
 

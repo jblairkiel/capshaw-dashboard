@@ -1,13 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
 import { toCsv, downloadCsv } from '../lib/csv';
-import { hasArea } from '../lib/roles';
+import { hasArea, isAdmin } from '../lib/roles';
 import Dialog from './Dialog';
 
 // Attendance counts come off the church site with the rest of the scrape, but
 // whoever looks after Attendance can also record one here and correct an
 // earlier one. Those go through /api/records, which gates on the area and
 // records every change in the action history.
-const API = '/api/records/attendance';
+const API          = '/api/records/attendance';
+// The services the congregation meets for, as a list an admin keeps rather than
+// free text retyped on every record. Everybody can read it; only an admin can
+// change it, which the server enforces.
+const SERVICES_API = '/api/records/service_types';
 
 const BLANK = { date: '', service: '', count: '' };
 
@@ -34,9 +38,15 @@ function svcColor(service) {
 
 // ─── Adding or correcting a count ─────────────────────────────────────────────
 
-function AttendanceForm({ record, services, onClose, onSaved }) {
+function AttendanceForm({ record, serviceTypes, onClose, onSaved }) {
   const isNew = !record?.id;
-  const [form, setForm]   = useState(() => ({ ...BLANK, ...(record || {}) }));
+  const [form, setForm]   = useState(() => ({
+    ...BLANK,
+    ...(record || {}),
+    // A new record starts on the first service rather than on nothing, since
+    // "no service" is not a thing attendance is ever recorded for.
+    service: record?.service ?? serviceTypes[0]?.name ?? '',
+  }));
   const [busy, setBusy]   = useState(false);
   const [error, setError] = useState('');
 
@@ -85,11 +95,21 @@ function AttendanceForm({ record, services, onClose, onSaved }) {
         </label>
         <label className="block">
           <span className={label}>Service</span>
-          <input required list="attendance-services" value={form.service} placeholder="Sun AM"
-            onChange={e => set('service', e.target.value)} className={field} />
-          <datalist id="attendance-services">
-            {services.filter(s => s !== 'All').map(s => <option key={s} value={s} />)}
-          </datalist>
+          <select required value={form.service} onChange={e => set('service', e.target.value)} className={field}>
+            {/* A record saved under a service since renamed or retired keeps
+                the name it was saved with, so editing it never silently
+                reassigns it to something else. */}
+            {!serviceTypes.some(t => t.name === form.service) && form.service && (
+              <option value={form.service}>{form.service} (no longer offered)</option>
+            )}
+            {serviceTypes.length === 0 && <option value="">No service types yet</option>}
+            {serviceTypes.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+          </select>
+          {serviceTypes.length === 0 && (
+            <span className="block text-xs text-amber-700 mt-1">
+              An admin needs to add the services the congregation meets for before attendance can be recorded.
+            </span>
+          )}
         </label>
         <label className="block">
           <span className={label}>Count</span>
@@ -118,14 +138,153 @@ function AttendanceForm({ record, services, onClose, onSaved }) {
   );
 }
 
+
+// ─── The list of services, which an admin keeps ───────────────────────────────
+//
+// Attendance points at a service by name, so this list is what every record has
+// to agree on — which is why it is not the attendance area's to change. A
+// service the church no longer holds is retired rather than deleted: it stops
+// being offered without erasing the attendance recorded under it.
+
+function ServiceTypesDialog({ types, onClose, onChanged }) {
+  const [adding, setAdding] = useState('');
+  const [busy, setBusy]     = useState(false);
+  const [error, setError]   = useState('');
+
+  async function act(request) {
+    setBusy(true); setError('');
+    try {
+      await request();
+      await onChanged();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function add(e) {
+    e.preventDefault();
+    const name = adding.trim();
+    if (!name) return;
+    act(async () => {
+      await send(SERVICES_API, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ name, sort_order: types.length, active: 1 }),
+      });
+      setAdding('');
+    });
+  }
+
+  function patch(type, changes) {
+    return act(() => send(`${SERVICES_API}/${type.id}`, {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(changes),
+    }));
+  }
+
+  function move(type, by) {
+    const ordered = [...types].sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+    const at      = ordered.findIndex(t => t.id === type.id);
+    const swap    = ordered[at + by];
+    if (!swap) return undefined;
+    // Swapping the two positions keeps the rest of the list where it is.
+    return act(async () => {
+      await send(`${SERVICES_API}/${type.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sort_order: swap.sort_order }),
+      });
+      await send(`${SERVICES_API}/${swap.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sort_order: type.sort_order }),
+      });
+    });
+  }
+
+  function rename(type) {
+    const next = window.prompt('What should this service be called?', type.name);
+    if (next === null || !next.trim() || next.trim() === type.name) return;
+    patch(type, { name: next.trim() });
+  }
+
+  const ordered = [...types].sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+
+  return (
+    <Dialog
+      title="Services the congregation meets for"
+      subtitle="What the attendance form offers. Kept by an admin, so every record agrees."
+      onClose={onClose}
+      width="max-w-lg"
+    >
+      <div className="space-y-4">
+        <ul className="divide-y divide-gray-100">
+          {ordered.map((type, i) => (
+            <li key={type.id} className="flex items-center gap-2 py-2">
+              <span className={`flex-1 text-sm ${type.active ? 'text-church-navy' : 'text-gray-400 line-through'}`}>
+                {type.name}
+                {!type.active && <span className="ml-2 text-xs text-gray-400 no-underline">retired</span>}
+              </span>
+
+              <button type="button" onClick={() => move(type, -1)} disabled={busy || i === 0}
+                aria-label={`Move ${type.name} up`}
+                className="text-xs px-2 py-1 rounded-lg border border-gray-200 text-gray-500 disabled:opacity-30">↑</button>
+              <button type="button" onClick={() => move(type, 1)} disabled={busy || i === ordered.length - 1}
+                aria-label={`Move ${type.name} down`}
+                className="text-xs px-2 py-1 rounded-lg border border-gray-200 text-gray-500 disabled:opacity-30">↓</button>
+              <button type="button" onClick={() => rename(type)} disabled={busy}
+                aria-label={`Rename ${type.name}`}
+                className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold disabled:opacity-50">
+                Rename
+              </button>
+              <button type="button" onClick={() => patch(type, { active: type.active ? 0 : 1 })} disabled={busy}
+                aria-label={`${type.active ? 'Retire' : 'Bring back'} ${type.name}`}
+                className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold disabled:opacity-50">
+                {type.active ? 'Retire' : 'Bring back'}
+              </button>
+            </li>
+          ))}
+          {ordered.length === 0 && (
+            <li className="py-6 text-center text-sm text-gray-400">No services yet — add the first one below.</li>
+          )}
+        </ul>
+
+        <form onSubmit={add} className="flex items-end gap-2">
+          <label className="block flex-1">
+            <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Add a service</span>
+            <input
+              value={adding}
+              placeholder="Sunday PM Worship"
+              onChange={e => setAdding(e.target.value)}
+              className="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold"
+            />
+          </label>
+          <button type="submit" disabled={busy || !adding.trim()} className="btn-primary text-sm disabled:opacity-50">Add</button>
+        </form>
+
+        <p className="text-xs text-gray-500">
+          Renaming a service changes what the form offers; attendance already recorded keeps the name
+          it was saved under. Retiring one takes it off the form without touching those records.
+        </p>
+
+        {error && <p className="text-sm text-red-600">{error}</p>}
+      </div>
+    </Dialog>
+  );
+}
+
 export default function AttendanceView({ data, user }) {
   const [serviceFilter, setServiceFilter] = useState('All');
   const [editing, setEditing] = useState(null);   // a record, or {} for a new one
   // The scraped rows the page is handed carry no ids, so our own records are
   // fetched alongside them: they are what an edit can actually point at.
   const [records, setRecords] = useState([]);
+  const [serviceTypes, setServiceTypes] = useState([]);
+  const [managingServices, setManagingServices] = useState(false);
 
-  const canWrite = hasArea(user, 'attendance');
+  const canWrite   = hasArea(user, 'attendance');
+  const canKeepList = isAdmin(user);
 
   const loadRecords = useCallback(() => {
     fetch(`${API}?limit=1000&sort=date&dir=desc`, { credentials: 'include' })
@@ -134,7 +293,18 @@ export default function AttendanceView({ data, user }) {
       .catch(() => {});
   }, []);
 
-  useEffect(() => { loadRecords(); }, [loadRecords]);
+  const loadServiceTypes = useCallback(() => (
+    fetch(`${SERVICES_API}?limit=200&sort=sort_order&dir=asc`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(j => { if (j.success) setServiceTypes(j.rows); })
+      .catch(() => {})
+  ), []);
+
+  useEffect(() => { loadRecords(); loadServiceTypes(); }, [loadRecords, loadServiceTypes]);
+
+  // The form only offers what the church still meets for; a retired service
+  // stays visible on the records already written under it.
+  const offered = serviceTypes.filter(t => t.active);
 
   // Our own records are the same rows, but with the ids an edit needs, so they
   // are preferred when they have arrived. The scraped payload is the fallback
@@ -172,6 +342,14 @@ export default function AttendanceView({ data, user }) {
         {canWrite && (
           <button onClick={() => setEditing({})} className="btn-primary text-sm">
             Record attendance
+          </button>
+        )}
+        {canKeepList && (
+          <button
+            onClick={() => setManagingServices(true)}
+            className="text-sm px-3 py-2 rounded-lg border border-gray-300 text-gray-600 hover:border-church-gold hover:text-church-navy transition-colors"
+          >
+            Service types
           </button>
         )}
         <button
@@ -272,9 +450,17 @@ export default function AttendanceView({ data, user }) {
       {editing && (
         <AttendanceForm
           record={editing.id ? editing : null}
-          services={services}
+          serviceTypes={offered}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); loadRecords(); }}
+        />
+      )}
+
+      {managingServices && (
+        <ServiceTypesDialog
+          types={serviceTypes}
+          onClose={() => setManagingServices(false)}
+          onChanged={loadServiceTypes}
         />
       )}
     </div>

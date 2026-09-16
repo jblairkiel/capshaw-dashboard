@@ -73,10 +73,14 @@ const _saveScraped = db.transaction((data) => {
   // visit list, which the site is the authority for, is replaced.
   const findVisitor = db.prepare('SELECT id FROM visitors WHERE lower(trim(name)) = lower(trim(?))');
   const insVisitor  = db.prepare("INSERT INTO visitors (name, created_at) VALUES (?, datetime('now'))");
+  const setComments = db.prepare('UPDATE visitors SET comments = ? WHERE id = ?');
   const clearVisits = db.prepare('DELETE FROM visitor_visits WHERE visitor_id = ?');
   const insVisit    = db.prepare('INSERT INTO visitor_visits (visitor_id, date, service) VALUES (?, ?, ?)');
   for (const v of (data.visitors || [])) {
     const vid = findVisitor.get(v.name)?.id ?? insVisitor.run(v.name).lastInsertRowid;
+    // The tracker's own comments are the site's to own; `notes` is ours and is
+    // never written here.
+    setComments.run(v.comments || '', vid);
     clearVisits.run(vid);
     for (const vv of (v.visits || [])) insVisit.run(vid, vv.date, vv.service);
   }
@@ -152,8 +156,9 @@ function readData() {
 
     const visitorRows = db.prepare('SELECT * FROM visitors ORDER BY name').all();
     const visitors = visitorRows.map(v => ({
-      name:   v.name,
-      visits: db.prepare('SELECT date, service FROM visitor_visits WHERE visitor_id = ? ORDER BY date DESC').all(v.id),
+      name:     v.name,
+      comments: v.comments || '',
+      visits:   db.prepare('SELECT date, service FROM visitor_visits WHERE visitor_id = ? ORDER BY date DESC').all(v.id),
     }));
 
     const deaconRows = db.prepare('SELECT * FROM deacons ORDER BY name').all();
@@ -310,7 +315,16 @@ async function runUpdate() {
         return fallback;
       }
       try {
-        return parser(page.body);
+        const parsed = parser(page.body);
+        // A page that came back full and parsed to nothing is a parse miss, and
+        // it used to look exactly like a section that is genuinely empty: the
+        // old data was kept and nobody was told. Say so, so Church Office →
+        // Church Records shows it rather than the scrape reporting success.
+        if (Array.isArray(parsed) && parsed.length === 0 && page.body.length > 2000) {
+          warnings.push(`${name}: the page loaded but nothing could be read from it — the site's layout may have changed`);
+          return fallback;
+        }
+        return parsed;
       } catch (e) {
         warnings.push(`${name}: parse error — ${e.message}`);
         return fallback;

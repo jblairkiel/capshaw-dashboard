@@ -10,7 +10,7 @@
 // and these are the same rows the pages have always rendered.
 const express = require('express');
 const router  = express.Router();
-const { requireAuth, requireApproved, holdsArea, areaLabel } = require('../middleware/auth');
+const { requireAuth, requireApproved, holdsArea, hasRole, areaLabel } = require('../middleware/auth');
 const { TABLES, tableDef, areasForTable } = require('../lib/recordTables');
 const store = require('../lib/recordStore');
 
@@ -27,6 +27,11 @@ router.get('/', (req, res) => {
 });
 
 function canWrite(user, table) {
+  // A table that names a role instead of an area is that role's alone — the
+  // service types are the list every attendance record agrees on, so they are
+  // not one page's to change.
+  const def = tableDef(table);
+  if (def?.writeRole) return hasRole(user, def.writeRole);
   return areasForTable(table).some(area => holdsArea(user, area));
 }
 
@@ -39,14 +44,16 @@ function areaUsed(user, table) {
 function guard(req, res, next) {
   const def = tableDef(req.params.table);
   if (!def) return res.status(404).json({ success: false, error: 'Unknown table' });
-  if (!canWrite(req.user, req.params.table)) {
-    return res.status(403).json({
-      success: false,
-      error: `You do not look after ${areasForTable(req.params.table).map(areaLabel).join(' or ')}. Ask an admin if you should.`,
-      areas: areasForTable(req.params.table),
-    });
-  }
-  next();
+  if (canWrite(req.user, req.params.table)) return next();
+
+  const areas = areasForTable(req.params.table);
+  return res.status(403).json({
+    success: false,
+    error: areas.length
+      ? `You do not look after ${areas.map(areaLabel).join(' or ')}. Ask an admin if you should.`
+      : `${def.entity ? `The ${def.entity} list is` : 'This is'} kept by an admin. Ask one to change it.`,
+    areas,
+  });
 }
 
 router.get('/:table', (req, res) => {
