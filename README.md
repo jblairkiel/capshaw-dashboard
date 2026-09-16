@@ -492,44 +492,58 @@ guest after the section holding their dates, so the page listed guests called
 "Visit History" and "Comments" and dropped the real names and the comments
 entirely.
 
-The parser reads the guest's name in three passes, taking the first that finds
-anybody:
+The tracker serves each guest as a card:
+
+```
+Pat Lane                     ← the name
+Last on 09/13/26             ← a summary line
+6617 Camilla Drive …         ← an address, beside an icon and no caption
+(256) 777-4009               ← a phone number, likewise
+Comments                     ← a section label
+Just moved from Foley, AL
+Visit History                ← a section label
+<table of dates>
+```
+
+Only the section labels are headings, so the name has to be found some other
+way. The parser tries three, taking the first that finds anybody:
 
 1. **The last heading that is not a section label** — the shape the tracker
    documents, and the simpler *name then dates* shape.
-2. **The same reading, in whatever element the page writes it in** — which is
-   what the live tracker needs, because it keeps only its own labels in
-   headings and puts the name in a card title, a paragraph or a bold line. The
-   page is read in order rather than by nearness: a name, then their sections.
-   That distinction is the whole of it, because what sits *closest* above a
-   guest's dates is their own comment —
-
-   ```
-   Pat Lane                     ← the name
-   Comments                     ← a section label
-   Just moved from Foley, AL
-   Visit History                ← a section label
-   <table of dates>
-   ```
-
-   — so text following a **Comments** label belongs to the guest named before
-   it, and only text outside any section is somebody new. Section labels are
-   recognised in whatever element they are written in too, not only in
-   headings. Text *inside* a table is never a name, and the page's own
-   furniture (Home, «, a page number) is ruled out.
+2. **The page read in order** — a guest, then their sections — which is what
+   the live card needs. Two things about that order matter, and each was a
+   separate misreading first: what sits *closest* above a guest's dates is
+   their comment, and the name is not the only line above them either. So text
+   following a **Comments** label belongs to the guest named before it, and
+   every candidate line between one guest's dates and the next's is collected
+   and the one that reads like a person's name is chosen — never a line
+   carrying a digit, which rules out the summary line, a date and a phone
+   number. Section labels are recognised in whatever element the page writes
+   them in, text *inside* a table is never a name, and the page's own furniture
+   (Home, «, a page number) is ruled out.
 3. **One table of everybody**, read by its column names.
 
-Comments written as paragraphs rather than tables are read either way. Guests
-the old parser invented are cleared up in two places: the ones named after a
-section label ("Visit History", "Comments") on start-up, and the ones named
-after a guest's own comment on the next scrape, which is when the comment that
-names them is read correctly. Either way, a guest somebody has since typed into
-is kept whatever they are named — a duplicate in the list can be fixed by hand,
-a deleted phone number cannot.
+The card's other values carry no captions — an icon, then the value — so each
+is recognised by its own shape: an address from the map link the site wraps it
+in (whose query is already *street, city, state zip*), an email from its
+`mailto:`, a phone number by its digits, counting only text and never the path
+data inside an icon.
 
-A guest's `comments` are the tracker's and are replaced on every scrape;
-`notes` are ours and nothing overwrites them. Both are shown, separately, on
-the guest's details.
+Comments written as paragraphs rather than tables are read either way. Guests
+that earlier readings invented are cleared up in two places: the ones named
+after a section label ("Visit History", "Comments") on start-up, and on the
+next scrape that reads guests properly, the ones named after a guest's own
+comment or after the summary line — no person's name carries a digit. A scrape
+that read nothing tidies nothing. Either way a guest somebody has since typed
+into is kept whatever they are named: a duplicate in the list can be fixed by
+hand, a deleted phone number cannot.
+
+A guest's `comments`, and the address, phone and email on their card, are the
+tracker's: they are replaced on every scrape that reads them, and a field the
+tracker leaves blank keeps whatever was typed in here — an empty scrape is not
+a correction. `notes`, `invited_by`, `status` and the follow-up history are
+ours, exist nowhere on the church site, and nothing overwrites them. Comments
+and notes are both shown, separately, on the guest's details.
 
 **A page that loads but reads as nothing is now a warning.** A layout change
 used to look exactly like a section that is genuinely empty: the previous rows

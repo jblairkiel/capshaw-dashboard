@@ -296,6 +296,49 @@ describe('POST /api/members/update', () => {
     expect(body.warnings.some(w => w.startsWith('visitors:'))).toBe(false);
   });
 
+  test("a guest's address and phone come across from the tracker", async () => {
+    const tracker = `
+      <div class="vt-card">
+        <button class="vt-head"><span class="vt-name">Ray Ann Boyd</span><span class="vt-meta">Last on 09/13/26</span></button>
+        <div class="vt-body">
+          <div class="dir-row"><span class="dir-v"><a href="https://maps.google.com/?q=6617%20Camilla%20Drive%2CMadison%2CAL%2035757">6617 Camilla Drive</a></span></div>
+          <div class="dir-row"><span class="dir-v">(256) 777-4009</span></div>
+          <h4 class="vt-sub">Visit History</h4>${table([['Date', 'Service'], ['09/13/26', 'Sun AM']])}
+        </div>
+      </div>`;
+
+    serveSite({ '/members/visitor-tracker': page(tracker) });
+    await request(buildApp(MEMBER)).post('/api/members/update');
+
+    expect(db.prepare('SELECT name, phone, address, city, state, zip FROM visitors').get()).toEqual({
+      name: 'Ray Ann Boyd', phone: '(256) 777-4009',
+      address: '6617 Camilla Drive', city: 'Madison', state: 'AL', zip: '35757',
+    });
+  });
+
+  test('a detail the tracker does not carry keeps what somebody typed in', async () => {
+    // An empty scrape is not a correction: the card has no email on it, so the
+    // one entered by hand stays, while the phone the card does carry wins.
+    const tracker = `
+      <div class="vt-card">
+        <button class="vt-head"><span class="vt-name">Ray Ann Boyd</span><span class="vt-meta">Last on 09/13/26</span></button>
+        <div class="vt-body">
+          <div class="dir-row"><span class="dir-v">(256) 777-4009</span></div>
+          <h4 class="vt-sub">Visit History</h4>${table([['Date', 'Service'], ['09/13/26', 'Sun AM']])}
+        </div>
+      </div>`;
+
+    db.prepare('INSERT INTO visitors (name, email, phone, notes) VALUES (?, ?, ?, ?)')
+      .run('Ray Ann Boyd', 'ray@example.com', '(000) 000-0000', 'Sat with the Carters');
+
+    serveSite({ '/members/visitor-tracker': page(tracker) });
+    await request(buildApp(MEMBER)).post('/api/members/update');
+
+    expect(db.prepare('SELECT email, phone, notes FROM visitors').get()).toEqual({
+      email: 'ray@example.com', phone: '(256) 777-4009', notes: 'Sat with the Carters',
+    });
+  });
+
   test('a guest the old parser named after their comment is cleared by the re-scrape', async () => {
     // Before the parser could tell a name from a comment, this page produced a
     // guest called "Just moved from Foley, AL". Guests are matched by name, so
@@ -318,6 +361,37 @@ describe('POST /api/members/update', () => {
     ]);
     // The row went, and its visits went with it rather than being orphaned.
     expect(db.prepare('SELECT COUNT(*) AS n FROM visitor_visits WHERE visitor_id = ?').get(misread).n).toBe(0);
+  });
+
+  test("a guest named after the card's summary line is cleared too", async () => {
+    // "Last on 09/13/26" is what the card puts beside the name, and what every
+    // guest was called before the name was read properly. No person's name
+    // carries a digit, so a row whose does is a scrape artifact.
+    const tracker = `
+      <div class="vt-card">
+        <button class="vt-head"><span class="vt-name">Ray Ann Boyd</span><span class="vt-meta">Last on 09/13/26</span></button>
+        <div class="vt-body"><h4 class="vt-sub">Visit History</h4>${table([['Date', 'Service'], ['09/13/26', 'Sun AM']])}</div>
+      </div>`;
+
+    db.prepare('INSERT INTO visitors (name) VALUES (?)').run('Last on 09/13/26');
+    db.prepare('INSERT INTO visitors (name, notes) VALUES (?, ?)').run('Last on 08/30/26', 'Sat with the Carters');
+
+    serveSite({ '/members/visitor-tracker': page(tracker) });
+    await request(buildApp(MEMBER)).post('/api/members/update');
+
+    // The untouched one goes; the one somebody wrote a note on stays.
+    expect(db.prepare('SELECT name FROM visitors ORDER BY name').all().map(v => v.name))
+      .toEqual(['Last on 08/30/26', 'Ray Ann Boyd']);
+  });
+
+  test('a scrape that read no guests tidies nothing', async () => {
+    // A page that comes back unreadable must never be a reason to delete rows.
+    db.prepare('INSERT INTO visitors (name) VALUES (?)').run('Last on 09/13/26');
+
+    serveSite({ '/members/visitor-tracker': page('<h2>Visitor Tracker</h2><p>No visitors recorded.</p>') });
+    await request(buildApp(MEMBER)).post('/api/members/update');
+
+    expect(db.prepare('SELECT COUNT(*) AS n FROM visitors').get().n).toBe(1);
   });
 
   test('a misread guest somebody has since typed into is left alone', async () => {
