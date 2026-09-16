@@ -497,16 +497,35 @@ anybody:
 
 1. **The last heading that is not a section label** — the shape the tracker
    documents, and the simpler *name then dates* shape.
-2. **Whatever sits closest above each table** — which is what the live tracker
-   needs, because it keeps only its own labels in headings and puts the name in
-   a card title, a paragraph or a bold line. Text *inside* a table is never a
-   candidate, so a comment is not mistaken for the next guest's name, and the
-   page's own furniture (Home, «, a page number) is ruled out.
+2. **The same reading, in whatever element the page writes it in** — which is
+   what the live tracker needs, because it keeps only its own labels in
+   headings and puts the name in a card title, a paragraph or a bold line. The
+   page is read in order rather than by nearness: a name, then their sections.
+   That distinction is the whole of it, because what sits *closest* above a
+   guest's dates is their own comment —
+
+   ```
+   Pat Lane                     ← the name
+   Comments                     ← a section label
+   Just moved from Foley, AL
+   Visit History                ← a section label
+   <table of dates>
+   ```
+
+   — so text following a **Comments** label belongs to the guest named before
+   it, and only text outside any section is somebody new. Section labels are
+   recognised in whatever element they are written in too, not only in
+   headings. Text *inside* a table is never a name, and the page's own
+   furniture (Home, «, a page number) is ruled out.
 3. **One table of everybody**, read by its column names.
 
-Comments written as paragraphs rather than tables are read either way. Guests the old parser
-invented are removed from the database on start-up, and any that somebody has
-since typed into are kept whatever they are named.
+Comments written as paragraphs rather than tables are read either way. Guests
+the old parser invented are cleared up in two places: the ones named after a
+section label ("Visit History", "Comments") on start-up, and the ones named
+after a guest's own comment on the next scrape, which is when the comment that
+names them is read correctly. Either way, a guest somebody has since typed into
+is kept whatever they are named — a duplicate in the list can be fixed by hand,
+a deleted phone number cannot.
 
 A guest's `comments` are the tracker's and are replaced on every scrape;
 `notes` are ours and nothing overwrites them. Both are shown, separately, on

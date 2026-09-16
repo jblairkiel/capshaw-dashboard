@@ -385,6 +385,49 @@ describe('parseVisitors — the name above the table', () => {
     expect(guests[0].visits).toHaveLength(3);
   });
 
+  test('a comment between the name and the dates is not the guest\'s name', () => {
+    // What the live tracker does, and what naming a guest after the nearest
+    // text above their table gets wrong: the nearest text is their comment.
+    const guests = parseVisitors(`
+      <h2>Visitor Tracker</h2>
+      <p class="visitor-name">Pat Lane</p>
+        <h4>Comments</h4><p>Just moved from Foley, AL</p>
+        <h4>Visit History</h4>${VISITS}
+      <p class="visitor-name">Sam Ford</p>
+        <h4>Comments</h4><p>Invited by the Carters</p>
+        <h4>Visit History</h4>${VISITS}
+    `);
+
+    expect(guests.map(g => g.name)).toEqual(['Pat Lane', 'Sam Ford']);
+    expect(guests[0].comments).toBe('Just moved from Foley, AL');
+    expect(guests[0].visits).toHaveLength(2);
+    expect(guests[1].comments).toBe('Invited by the Carters');
+  });
+
+  test('a section label is recognised in whatever element it is written in', () => {
+    // The labels are only headings on some of the tracker's pages, so keying
+    // on <h*> would put us back to naming the guest after their comment.
+    const guests = parseVisitors(`
+      <div class="card-title">Pat Lane</div>
+      <div class="section">Comments</div><div>Just moved from Foley, AL</div>
+      <div class="section">Visit History</div>${VISITS}
+    `);
+
+    expect(guests.map(g => g.name)).toEqual(['Pat Lane']);
+    expect(guests[0].comments).toBe('Just moved from Foley, AL');
+  });
+
+  test('every line of a multi-paragraph comment is kept, and none of them is a name', () => {
+    const guests = parseVisitors(`
+      <p>Pat Lane</p>
+      <h4>Comments</h4><p>Just moved from Foley, AL</p><p>Looking for a home congregation</p>
+      <h4>Visit History</h4>${VISITS}
+    `);
+
+    expect(guests).toHaveLength(1);
+    expect(guests[0].comments).toBe('Just moved from Foley, AL\nLooking for a home congregation');
+  });
+
   test('the heading shape still wins when the page does use headings for names', () => {
     // The fallback only runs when reading the headings found nobody, so a page
     // that names its guests properly is unaffected by any of the above.

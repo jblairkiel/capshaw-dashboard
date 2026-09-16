@@ -86,6 +86,30 @@ const _saveScraped = db.transaction((data) => {
     for (const vv of (v.visits || [])) insVisit.run(vid, vv.date, vv.service);
   }
 
+  // A guest read from the tracker before the parser could tell a name from a
+  // comment arrived named after their own comment — "Just moved from Foley, AL"
+  // where "Pat Lane" belonged. Matching by name means those rows survive the
+  // re-scrape that fixes them, sitting beside the real guest forever, so a name
+  // this scrape has just read as somebody's comment is removed. Anything typed
+  // in by hand — details, our own notes, a follow-up — is left alone however it
+  // is named, exactly as when a guest is matched rather than re-created.
+  const removeMisread = db.prepare(`
+    DELETE FROM visitors
+     WHERE lower(trim(name)) = lower(trim(?))
+       AND trim(coalesce(phone, ''))             = ''
+       AND trim(coalesce(email, ''))             = ''
+       AND trim(coalesce(address, ''))           = ''
+       AND trim(coalesce(invited_by, ''))        = ''
+       AND trim(coalesce(status, ''))            = ''
+       AND trim(coalesce(notes, ''))             = ''
+       AND trim(coalesce(last_contacted_at, '')) = ''
+  `);
+  for (const v of (data.visitors || [])) {
+    for (const line of String(v.comments || '').split('\n')) {
+      if (line.trim()) removeMisread.run(line);
+    }
+  }
+
   // Anniversaries
   db.prepare('DELETE FROM anniversaries').run();
   const insAnn = db.prepare('INSERT INTO anniversaries (month, date, names, month_num, day) VALUES (?, ?, ?, ?, ?)');
