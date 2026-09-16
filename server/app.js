@@ -23,6 +23,8 @@ const workflowRoutes             = require('./routes/workflows');
 const mailRoutes                 = require('./routes/mailGroups');
 const adminRoutes                = require('./routes/admin');
 const { requireSiteAuth }        = require('./middleware/auth');
+const { requireTrustedOrigin }   = require('./middleware/csrf');
+const { rateLimit }              = require('./middleware/rateLimit');
 
 function createApp() {
   const isProd = process.env.NODE_ENV === 'production';
@@ -58,12 +60,11 @@ function createApp() {
   // in other apps.
   app.use(helmet({ crossOriginEmbedderPolicy: false }));
 
-  app.use(cors({
-    origin: isProd
-      ? ['https://capshaw.jblairkiel.com']
-      : ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'],
-    credentials: true,
-  }));
+  const allowedOrigins = isProd
+    ? ['https://capshaw.jblairkiel.com']
+    : ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'];
+
+  app.use(cors({ origin: allowedOrigins, credentials: true }));
   app.use(express.json());
 
   app.use(session({
@@ -80,9 +81,21 @@ function createApp() {
   app.use(passport.initialize());
   app.use(passport.session());
 
+  // A ceiling on the whole authenticated surface, well above real usage —
+  // the per-endpoint limits in routes/auth.js exist to slow down password
+  // guessing specifically; this one just caps a flood before it does any
+  // real work.
+  const apiRateLimit = rateLimit({
+    max: 600,
+    windowMs: 15 * 60 * 1000,
+    message: 'Too many requests. Please wait a few minutes and try again.',
+  });
+
   // Nothing under /api is readable until you have signed in — only the sign-in
-  // flow itself and the health check stay open.
-  app.use('/api', requireSiteAuth);
+  // flow itself and the health check stay open. requireTrustedOrigin runs
+  // first so a cross-site page riding the visitor's session cookie is
+  // rejected before it ever reaches a route that trusts that session.
+  app.use('/api', apiRateLimit, requireTrustedOrigin(allowedOrigins), requireSiteAuth);
 
   app.use('/api/auth', authRoutes);
   app.use('/api/scraper', scraperRoutes);
@@ -105,8 +118,16 @@ function createApp() {
   // Serve React build in production
   if (isProd) {
     const clientDist = path.join(__dirname, '../client/dist');
-    app.use(express.static(clientDist));
-    app.get('*', (req, res) => {
+    // A single page load pulls in a dozen-plus asset requests, so this
+    // ceiling sits far above the API's — it's still a cap on a flood of
+    // disk reads, not a limit a real visitor could ever hit.
+    const staticRateLimit = rateLimit({
+      max: 3000,
+      windowMs: 15 * 60 * 1000,
+      message: 'Too many requests. Please wait a few minutes and try again.',
+    });
+    app.use(staticRateLimit, express.static(clientDist));
+    app.get('*', staticRateLimit, (req, res) => {
       res.sendFile(path.join(clientDist, 'index.html'));
     });
   }

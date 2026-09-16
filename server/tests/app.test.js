@@ -58,6 +58,43 @@ describe('createApp — the site-wide auth gate', () => {
   });
 });
 
+describe('createApp — CSRF via trusted-origin check', () => {
+  test('a mutating request with no Origin or Referer is rejected before auth runs', async () => {
+    const app = buildApp({ NODE_ENV: 'test' });
+    // /api/auth/login is public, so a 403 here can only come from the
+    // origin check — proof it runs ahead of (and independent from) auth.
+    const res = await request(app).post('/api/auth/login').send({});
+    expect(res.status).toBe(403);
+    expect(res.body.error).toBe('Request origin not allowed');
+  });
+
+  test('a mutating request from an origin outside the allowed list is rejected', async () => {
+    const app = buildApp({ NODE_ENV: 'test' });
+    const res = await request(app)
+      .post('/api/auth/login')
+      .set('Origin', 'https://evil.example.com')
+      .send({});
+    expect(res.status).toBe(403);
+  });
+
+  test('a mutating request from an allowed dev origin reaches the route', async () => {
+    const app = buildApp({ NODE_ENV: 'test' });
+    const res = await request(app)
+      .post('/api/auth/login')
+      .set('Origin', 'http://localhost:5173')
+      .send({});
+    // Past the origin check; the login itself fails for lack of real
+    // credentials, but that 400/401 (not 403) is the proof.
+    expect(res.status).not.toBe(403);
+  });
+
+  test('a safe GET request needs no Origin at all', async () => {
+    const app = buildApp({ NODE_ENV: 'test' });
+    const res = await request(app).get('/api/health');
+    expect(res.status).toBe(200);
+  });
+});
+
 describe('createApp — session secret', () => {
   test('refuses to start in production without SESSION_SECRET', () => {
     expect(() => buildApp({ NODE_ENV: 'production', SESSION_SECRET: '' }))
