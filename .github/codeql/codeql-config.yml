@@ -5,4 +5,4 @@ name: "CodeQL config"
 # empty `queries:` list here would replace it, not narrow it.
 query-filters:
   - exclude:
-      id: js/missing-csrf-middleware
+      id: js/missing-token-validation
