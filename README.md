@@ -468,7 +468,12 @@ It distinguishes:
 
 The same report is available directly at `GET /api/members/debug/:section`
 (admin only) for `jobAssignments`, `attendance`, `sermons`, `visitors`,
-`anniversaries`, `deacons` and `directory`.
+`anniversaries`, `deacons` and `directory`. Besides every table on the page it
+reports the page's **headings** and the **markup immediately above each
+table** — the two things a parser keys on that a table dump alone cannot show.
+A section whose tables look right while `parsed.count` is 0 is a question about
+exactly that, and it was answerable only by guessing until the report carried
+it.
 
 ### Job assignments
 
@@ -487,11 +492,19 @@ guest after the section holding their dates, so the page listed guests called
 "Visit History" and "Comments" and dropped the real names and the comments
 entirely.
 
-The parser now tracks the last heading that is *not* one of the tracker's own
-section labels as the guest's name, and reads each section for what it holds.
-It handles the sectioned shape, the simpler *name then dates* shape, comments
-written as paragraphs rather than tables, and — if the headings yield nothing —
-a single table of everybody, read by its column names. Guests the old parser
+The parser reads the guest's name in three passes, taking the first that finds
+anybody:
+
+1. **The last heading that is not a section label** — the shape the tracker
+   documents, and the simpler *name then dates* shape.
+2. **Whatever sits closest above each table** — which is what the live tracker
+   needs, because it keeps only its own labels in headings and puts the name in
+   a card title, a paragraph or a bold line. Text *inside* a table is never a
+   candidate, so a comment is not mistaken for the next guest's name, and the
+   page's own furniture (Home, «, a page number) is ruled out.
+3. **One table of everybody**, read by its column names.
+
+Comments written as paragraphs rather than tables are read either way. Guests the old parser
 invented are removed from the database on start-up, and any that somebody has
 since typed into are kept whatever they are named.
 

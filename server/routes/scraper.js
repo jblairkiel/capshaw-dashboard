@@ -23,6 +23,7 @@ const { scrapeDirectory } = require('../lib/directoryPhotos');
 // ─── HTML parsers ─────────────────────────────────────────────────────────────
 
 const {
+  stripTags,
   parseJobAssignments,
   parseAttendance,
   parseSermons,
@@ -242,6 +243,25 @@ router.get('/debug/:section', requireAdmin, async (req, res) => {
         rowCount:   rows.length,
         sampleRows: rows.slice(0, 5).map(r => r.map(c => (c.length > 40 ? c.slice(0, 40) + '…' : c))),
       }));
+
+      // What a parser has to key on besides the tables: the page's headings,
+      // and — because a name is not always in a heading — whatever text sits
+      // immediately above each table. A section that parses to nothing while
+      // its tables look right is a question about exactly this, and answering
+      // it from a table dump alone meant guessing.
+      report.headings = [...body.matchAll(/<(h[1-6])[^>]*>([\s\S]*?)<\/\1>/gi)]
+        .map(m => ({ level: m[1].toLowerCase(), text: stripTags(m[2]) }))
+        .filter(h => h.text)
+        .slice(0, 40);
+
+      report.aboveEachTable = [...body.matchAll(/<table[\s\S]*?<\/table>/gi)]
+        .slice(0, 10)
+        .map((m, i) => ({
+          table: i,
+          // The last 300 characters before the table, tags and all: enough to
+          // see which element holds the name without returning the page.
+          html: body.slice(Math.max(0, m.index - 300), m.index).replace(/\s+/g, ' ').trim(),
+        }));
     }
 
     let parsed;
