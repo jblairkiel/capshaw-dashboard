@@ -7,8 +7,9 @@ const path = require('path');
 const crypto = require('crypto');
 
 // Redirectable so a test run can never reach the real photo library: syncing a
-// fixture database prunes against whatever this points at.
-const PHOTO_DIR = process.env.CAPSHAW_PHOTO_DIR || path.join(__dirname, '../data/photos');
+// fixture database prunes against whatever this points at. CAPSHAW_PHOTO_DIR
+// moves it on its own; CAPSHAW_DATA_DIR moves it with everything else.
+const PHOTO_DIR = require('./paths').photos;
 
 const EXTENSIONS = {
   'image/jpeg': 'jpg',

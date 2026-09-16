@@ -1,13 +1,13 @@
 const Database = require('better-sqlite3');
-const path     = require('path');
-const fs       = require('fs');
 
 const { initSchema } = require('./schema');
+// Where this installation keeps what it writes. Defaults to server/data, and a
+// container points it at its volume instead — see server/lib/paths.js.
+const paths = require('./lib/paths');
 
-const DATA_DIR = path.join(__dirname, 'data');
-fs.mkdirSync(DATA_DIR, { recursive: true });
+paths.ensure();
 
-const db = new Database(path.join(DATA_DIR, 'bible_questions.db'));
+const db = new Database(paths.database);
 
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');

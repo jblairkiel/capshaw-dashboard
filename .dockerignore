@@ -1,0 +1,35 @@
+# What never enters the build context. Keeping this tight is what makes the
+# build fast: everything here would otherwise be uploaded to the daemon on
+# every build, and some of it would end up in the image.
+
+.git
+.github
+node_modules
+client/node_modules
+client/dist
+
+# The congregation's own data. A built image must never carry a copy of the
+# database, the family photos, or anybody's uploaded documents.
+server/data
+server/uploads
+
+# Test and tooling output
+coverage
+client/coverage
+*.log
+.env
+.env.*
+!.env.example
+
+# Editor and OS noise
+.DS_Store
+.vscode
+.idea
+
+# Nothing here is used at runtime
+**/*.test.js
+**/*.test.jsx
+server/tests
+client/src/tests
+README.md
+ecosystem.config.js

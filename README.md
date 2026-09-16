@@ -16,7 +16,8 @@ you have signed in; see [Signing in](#signing-in) below.
 | Backend | Node.js, Express |
 | Database | SQLite via `better-sqlite3` (question library) |
 | AI | Anthropic Claude API (Bible class question generator) |
-| Process manager | PM2 (production) |
+| Process manager | PM2 (production), or none — see [Running in Docker](#running-in-docker) |
+| Container | One image: API, React build and database ([Dockerfile](Dockerfile)) |
 | CI/CD | GitHub Actions → DigitalOcean via SSH |
 
 ---
@@ -25,7 +26,8 @@ you have signed in; see [Signing in](#signing-in) below.
 
 ### Prerequisites
 
-- Node.js 20+
+- Node.js 22.12 or newer (what `package.json` requires, and what the
+  toolchain needs) — or Docker, which brings its own
 - An Anthropic API key (for Bible class question generation)
 
 ### Setup
@@ -815,11 +817,102 @@ capshaw-dashboard/
 │   │   ├── members.json     # Scraped church data cache
 │   │   └── bible_questions.db  # SQLite question library
 │   └── uploads/             # Temporary uploaded .docx files
+├── Dockerfile               # Three-stage build: client, deps, runtime
+├── docker-compose.yml       # The app and its data volume
+├── .dockerignore            # What never enters the build context
+├── .env.example             # What a deployment has to fill in
 ├── ecosystem.config.js      # PM2 production config
 ├── .github/workflows/
 │   └── ci-cd.yml            # Test + deploy pipeline
 └── package.json
 ```
+
+---
+
+## Running in Docker
+
+The whole portal — API, React build and SQLite database — runs as one
+container. This is the easier path onto a new host: nothing to install but
+Docker, no Node version to match, and no native module compiled against the
+wrong ABI.
+
+```bash
+cp .env.example .env          # fill in at least SESSION_SECRET
+docker compose up -d --build
+```
+
+That is the deployment. `docker compose logs -f` follows it, `docker compose
+down` stops it, and `docker compose up -d --build` after a `git pull` is an
+upgrade.
+
+### What is in the image
+
+Three build stages, so what ships carries neither a compiler nor a source tree:
+
+| Stage | Does |
+|---|---|
+| `client` | `npm ci` and `npm run build` for the React app |
+| `deps` | Installs the server's production dependencies, with the toolchain `better-sqlite3` needs if it has to compile |
+| `runtime` | Copies out `node_modules`, `server/` and the built client. No toolchain, no tests, no source for the client |
+
+Every stage uses the same base image on purpose. `better-sqlite3` is a native
+addon, and a binary built against a different Node or a different libc loads
+happily and then aborts the process from a statement destructor during garbage
+collection — the failure the SSH deploy has to test for by hand. In the image
+the addon is built against the same Node that runs it, and the build proves it
+survives being used and collected before the image is finished.
+
+The container runs as the unprivileged `node` user, and `docker compose`
+passes `--init` so signals reach Node and zombies are reaped. That is all the
+process manager was doing here, so there is none inside the container.
+
+### Data
+
+Everything the app writes lives under `/data`, which the compose file mounts a
+named volume over:
+
+| | |
+|---|---|
+| `/data/bible_questions.db` | The database — accounts, records, the action history |
+| `/data/photos` | Family photos from the directory sync |
+| `/data/members.json` | The cached copy of the last scrape |
+| `/data/uploads` | Uploaded orders of service |
+
+**This volume is the backup.** Nothing else on the host holds congregation
+data, and an image never contains any of it.
+
+```bash
+# Back it up
+docker run --rm -v capshaw-dashboard_capshaw-data:/data -v "$PWD":/backup \
+  busybox tar czf /backup/capshaw-data.tar.gz -C /data .
+```
+
+Outside a container the app writes to `server/data` and `server/uploads`
+exactly as it always has. `CAPSHAW_DATA_DIR` moves the database, photos and
+scrape cache together; `CAPSHAW_UPLOAD_DIR` moves the uploads. See
+`server/lib/paths.js`.
+
+### In front of it
+
+The container publishes on `127.0.0.1:3001` and expects something in front of
+it terminating TLS — the existing nginx does exactly this, unchanged. Two
+things that proxy must do, or sign-in silently fails:
+
+- Pass `X-Forwarded-Proto`, since the session cookie is `secure` in production
+  and the app trusts the proxy to say whether the request arrived over HTTPS.
+- Send an `Origin` (or `Referer`) header on API requests: any mutating request
+  from an origin outside the allowed list is refused before it reaches a route.
+
+### CI builds it on every change
+
+The **Container image** job builds the image and then runs it: waits for the
+health check, asks for the health endpoint, the React build and an
+unauthenticated API call (which must be refused), and checks the database
+landed on the volume and the process is not root. A Dockerfile nothing builds
+is one that has quietly stopped working.
+
+The deploy job still deploys over SSH. Switching the droplet to the image is a
+separate decision, and this PR does not make it.
 
 ---
 
@@ -935,3 +1028,7 @@ pm2 restart capshaw-dashboard
 | `YOUTUBE_CHANNEL_ID` | No | Skips the handle lookup by giving the `UC…` channel id outright |
 | `NODE_ENV` | Production only | Set to `production` to serve the React build |
 | `PORT` | No | API port (default `3001`) |
+| `SESSION_SECRET` | **Yes in production** | Signs the session cookie. The app refuses to start in production without it rather than using the development fallback |
+| `CAPSHAW_DATA_DIR` | No | Moves the database, photos and scrape cache together (default `server/data`). The image sets it to `/data` |
+| `CAPSHAW_UPLOAD_DIR` | No | Where uploaded orders of service go (default `server/uploads`) |
+| `CAPSHAW_DB_FILE` / `CAPSHAW_PHOTO_DIR` / `CAPSHAW_DATA_FILE` | No | Move one of those on its own, overriding `CAPSHAW_DATA_DIR` |

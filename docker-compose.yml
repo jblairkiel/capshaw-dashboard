@@ -1,0 +1,49 @@
+# Running the portal as a container.
+#
+#   cp .env.example .env     # fill in at least SESSION_SECRET
+#   docker compose up -d --build
+#
+# One service and one volume: the app, and everything it writes. TLS and the
+# public hostname stay with whatever is already in front of it — nginx on the
+# droplet terminates HTTPS and proxies to the published port, exactly as it
+# does for the PM2 deployment.
+
+services:
+  app:
+    build:
+      context: .
+    image: capshaw-dashboard:latest
+    # The container is the unit that gets restarted, so it restarts itself
+    # rather than being watched by a process manager inside.
+    restart: unless-stopped
+    # Reaps zombies and forwards signals to Node, which is what PM2 was doing.
+    init: true
+
+    # Everything the app is configured with. See .env.example for what each one
+    # is for, and README → Environment Variables for the full list.
+    env_file:
+      - .env
+
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+
+    # Published on the loopback interface only: nginx in front is what the
+    # internet reaches, so the app has no reason to be exposed directly.
+    ports:
+      - "127.0.0.1:3001:3001"
+
+    # The database, the family photos, the cached scrape and uploaded orders of
+    # service. This is the one thing on the host that must be backed up.
+    volumes:
+      - capshaw-data:/data
+
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  capshaw-data:

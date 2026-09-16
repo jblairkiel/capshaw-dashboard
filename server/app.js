@@ -6,7 +6,6 @@ const express  = require('express');
 const helmet   = require('helmet');
 const cors     = require('cors');
 const path     = require('path');
-const fs       = require('fs');
 const session  = require('express-session');
 const passport = require('passport');
 
@@ -27,6 +26,7 @@ const recordRoutes               = require('./routes/records');
 const servingRoutes              = require('./routes/serving');
 const visitorRoutes              = require('./routes/visitors');
 const leadershipRoutes           = require('./routes/leadership');
+const paths                      = require('./lib/paths');
 const { requireSiteAuth }        = require('./middleware/auth');
 const { applyImpersonation }     = require('./middleware/impersonation');
 const { requireTrustedOrigin }   = require('./middleware/csrf');
@@ -49,11 +49,9 @@ function createApp() {
 
   const app = express();
 
-  // Ensure uploads directory exists
-  const uploadsDir = path.join(__dirname, 'uploads');
-  if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-  }
+  // Every directory this installation writes to, made if it is not there yet:
+  // a fresh volume should not need anybody to mkdir before the app will start.
+  paths.ensure();
 
   // Trust nginx reverse proxy so req.protocol, req.ip, and secure cookies work correctly
   if (isProd) app.set('trust proxy', 1);
