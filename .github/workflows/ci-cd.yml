@@ -18,10 +18,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node 20
+      - name: Set up Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install root deps
@@ -123,6 +123,19 @@ jobs:
             cd /var/www/capshaw-dashboard
 
             git pull origin main
+
+            # The toolchain (vite 8 / vitest 5) requires Node >=22.12 — fail
+            # fast with a clear message rather than a cryptic npm ci error if
+            # this host's Node hasn't been upgraded to match package.json's
+            # engines field.
+            node -e "
+              const need = [22, 12];
+              const have = process.versions.node.split('.').map(Number);
+              if (have[0] < need[0] || (have[0] === need[0] && have[1] < need[1])) {
+                console.error(\`Node \${process.versions.node} is too old — this app needs >=22.12.0. Upgrade Node on this host before deploying.\`);
+                process.exit(1);
+              }
+            "
 
             # Server deps (production only)
             npm ci --omit=dev
