@@ -403,7 +403,12 @@ function MainApp({ user, onLogout }) {
 export default function App() {
   const [user, setUser] = useState(undefined); // undefined=checking, null=signed out
 
-  const authError = new URLSearchParams(window.location.search).get('auth_error');
+  // Set by the OAuth callbacks and by the confirmation link in the registration
+  // email, which the API answers with a redirect back to here.
+  const params      = new URLSearchParams(window.location.search);
+  const authError   = params.get('auth_error');
+  const verified    = params.get('verified');
+  const verifyError = params.get('verify_error');
 
   useEffect(() => {
     fetch('/api/auth/me', { credentials: 'include' })
@@ -420,7 +425,16 @@ export default function App() {
     );
   }
 
-  if (!user) return <LoginPage authError={authError} />;
+  if (!user) {
+    return (
+      <LoginPage
+        authError={authError}
+        verified={verified}
+        verifyError={verifyError}
+        onSignedIn={setUser}
+      />
+    );
+  }
 
   return (
     <BrowserRouter>

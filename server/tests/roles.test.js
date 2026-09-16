@@ -76,13 +76,25 @@ describe('PATCH /api/auth/users/:id/role', () => {
     expect(roleOf(PENDING.id)).toBe('pending');
   });
 
-  test('promotes a pending user to member', async () => {
+  test('promotes a pending user to member once they have a member profile', async () => {
+    const person = addPerson('Pat Nolan');
+    db.prepare('UPDATE users SET directory_id=? WHERE id=?').run(person.id, PENDING.id);
+
     const res = await request(buildApp(ADMIN))
       .patch(`/api/auth/users/${PENDING.id}/role`)
       .send({ role: 'approved' });
     expect(res.status).toBe(200);
     expect(res.body.user).toMatchObject({ id: PENDING.id, role: 'approved' });
     expect(roleOf(PENDING.id)).toBe('approved');
+  });
+
+  test('refuses to let a waiting account in without a member profile', async () => {
+    const res = await request(buildApp(ADMIN))
+      .patch(`/api/auth/users/${PENDING.id}/role`)
+      .send({ role: 'approved' });
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('directory_required');
+    expect(roleOf(PENDING.id)).toBe('pending');
   });
 
   test('promotes a member to admin', async () => {
@@ -146,10 +158,82 @@ describe('PATCH /api/auth/users/:id/role', () => {
 // ─── approve / revoke shortcuts ───────────────────────────────────────────────
 
 describe('approve and revoke shortcuts', () => {
-  test('approve sets the member role', async () => {
-    const res = await request(buildApp(ADMIN)).patch(`/api/auth/users/${PENDING.id}/approve`);
+  test('approve pairs the account with an existing member and sets the member role', async () => {
+    const person = addPerson('Pat Nolan', 'pat@example.com');
+    const res = await request(buildApp(ADMIN))
+      .patch(`/api/auth/users/${PENDING.id}/approve`)
+      .send({ directory_id: person.id });
     expect(res.status).toBe(200);
     expect(roleOf(PENDING.id)).toBe('approved');
+    expect(linkOf(PENDING.id)).toBe(person.id);
+  });
+
+  test('approve creates a member profile when there is nobody to pair with', async () => {
+    const res = await request(buildApp(ADMIN))
+      .patch(`/api/auth/users/${PENDING.id}/approve`)
+      .send({ person: { name: 'Pat Nolan', email: 'pat@example.com', city: 'Harvest' } });
+    expect(res.status).toBe(200);
+    expect(roleOf(PENDING.id)).toBe('approved');
+
+    const created = db.prepare('SELECT * FROM directory WHERE id=?').get(linkOf(PENDING.id));
+    expect(created).toMatchObject({ name: 'Pat Nolan', email: 'pat@example.com', city: 'Harvest' });
+    // Hand-entered fields are protected from the next directory sync.
+    expect(JSON.parse(created.edited_fields).sort()).toEqual(['city', 'email', 'name']);
+  });
+
+  test('approve refuses without a member profile, and leaves the account waiting', async () => {
+    const res = await request(buildApp(ADMIN)).patch(`/api/auth/users/${PENDING.id}/approve`).send({});
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('directory_required');
+    expect(roleOf(PENDING.id)).toBe('pending');
+  });
+
+  test('approve refuses a new profile with no name', async () => {
+    const res = await request(buildApp(ADMIN))
+      .patch(`/api/auth/users/${PENDING.id}/approve`)
+      .send({ person: { email: 'pat@example.com' } });
+    expect(res.status).toBe(400);
+    expect(roleOf(PENDING.id)).toBe('pending');
+  });
+
+  test('approve refuses a directory entry that already belongs to somebody else', async () => {
+    const person = addPerson('Mel Harris');
+    db.prepare('UPDATE users SET directory_id=? WHERE id=?').run(person.id, MEMBER.id);
+
+    const res = await request(buildApp(ADMIN))
+      .patch(`/api/auth/users/${PENDING.id}/approve`)
+      .send({ directory_id: person.id });
+    expect(res.status).toBe(409);
+    expect(roleOf(PENDING.id)).toBe('pending');
+  });
+
+  test('approve keeps a link an earlier sign-in already made', async () => {
+    const person = addPerson('Pat Nolan', 'pat@example.com');
+    db.prepare('UPDATE users SET directory_id=? WHERE id=?').run(person.id, PENDING.id);
+
+    const res = await request(buildApp(ADMIN)).patch(`/api/auth/users/${PENDING.id}/approve`).send({});
+    expect(res.status).toBe(200);
+    expect(linkOf(PENDING.id)).toBe(person.id);
+  });
+
+  test('approve can hand out a role above plain member', async () => {
+    const person = addPerson('Pat Nolan');
+    const res = await request(buildApp(ADMIN))
+      .patch(`/api/auth/users/${PENDING.id}/approve`)
+      .send({ directory_id: person.id, role: 'worship-coordinator' });
+    expect(res.status).toBe(200);
+    expect(roleOf(PENDING.id)).toBe('worship-coordinator');
+  });
+
+  test('approve records who approved, and when', async () => {
+    const person = addPerson('Pat Nolan');
+    await request(buildApp(ADMIN))
+      .patch(`/api/auth/users/${PENDING.id}/approve`)
+      .send({ directory_id: person.id });
+
+    const row = db.prepare('SELECT approved_at, approved_by FROM users WHERE id=?').get(PENDING.id);
+    expect(row.approved_by).toBe(ADMIN.id);
+    expect(row.approved_at).toBeTruthy();
   });
 
   test('revoke sets the pending role', async () => {

@@ -7,8 +7,23 @@ import { useCookieState } from '../lib/cookies';
 const COLUMN_COOKIE = 'capshaw.users.columns';
 
 const PROVIDERS = [
+  { value: 'local',    label: 'Email & password' },
   { value: 'google',   label: 'Google'   },
   { value: 'facebook', label: 'Facebook' },
+];
+
+// The directory fields an admin fills in when they create a profile for
+// somebody who is not in the directory yet. The rest can be added later from
+// the directory screen.
+const NEW_PERSON_FIELDS = [
+  { key: 'name',    label: 'Name',            required: true },
+  { key: 'email',   label: 'Email',           type: 'email' },
+  { key: 'cell',    label: 'Mobile',          type: 'tel'   },
+  { key: 'phone',   label: 'Home phone',      type: 'tel'   },
+  { key: 'address', label: 'Address'   },
+  { key: 'city',    label: 'City'      },
+  { key: 'state',   label: 'State'     },
+  { key: 'zip',     label: 'ZIP'       },
 ];
 
 function formatDate(value) {
@@ -30,6 +45,17 @@ function Dash() {
 // ─── Small presentational pieces ──────────────────────────────────────────────
 
 function ProviderBadge({ provider }) {
+  if (provider === 'local') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200">
+        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+            d="M3 8l9 6 9-6M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+        </svg>
+        Email
+      </span>
+    );
+  }
   if (provider === 'google') {
     return (
       <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
@@ -158,6 +184,30 @@ const COLUMNS = [
       : <span className="text-gray-400 text-xs">Not linked</span>,
   },
   {
+    key:    'verified',
+    label:  'Confirmed',
+    filter: {
+      type: 'select',
+      options: [
+        { value: 'Confirmed',      label: 'Confirmed' },
+        { value: 'Not confirmed',  label: 'Not confirmed' },
+        { value: 'Not needed',     label: 'Not needed' },
+      ],
+    },
+    match: 'exact',
+    // Google and Facebook vouch for the address themselves, so only accounts
+    // made here have anything to confirm.
+    text:  u => u.provider !== 'local'
+      ? 'Not needed'
+      : u.email_verified_at ? 'Confirmed' : 'Not confirmed',
+    render: u => {
+      if (u.provider !== 'local') return <span className="text-gray-400 text-xs">Not needed</span>;
+      return u.email_verified_at
+        ? <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">Confirmed</span>
+        : <span className="text-xs px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">Waiting on them</span>;
+    },
+  },
+  {
     key:    'created_at',
     label:  'Joined',
     filter: { type: 'text' },
@@ -267,11 +317,201 @@ function ColumnPicker({ visible, onChange }) {
   );
 }
 
+// ─── Approving: letting somebody in and saying who they are, together ─────────
+//
+// The server refuses an approval that does not carry a member profile, because
+// an approved account nobody can put a name to can read the whole
+// congregation's information while its owner cannot keep their own household
+// up to date. This dialog is where that one decision gets made.
+
+function ApproveDialog({ user, people, busy, error, onApprove, onClose }) {
+  // Somebody already in the directory with this address is almost certainly
+  // who this account belongs to — offer them rather than making the admin
+  // hunt, but never assume it.
+  const suggested = useMemo(() => {
+    if (user.directory_id) return String(user.directory_id);
+    const email = (user.email || '').trim().toLowerCase();
+    if (!email) return '';
+    const matches = people.filter(p => (p.email || '').trim().toLowerCase() === email);
+    return matches.length === 1 ? String(matches[0].id) : '';
+  }, [user, people]);
+
+  const [choice, setChoice]     = useState(suggested ? 'existing' : 'new');
+  const [personId, setPersonId] = useState(suggested);
+  const [role, setRole]         = useState('approved');
+  const [fields, setFields]     = useState(() => ({
+    name:  user.name  || '',
+    email: user.email || '',
+  }));
+
+  useEffect(() => {
+    function onKey(e) { if (e.key === 'Escape') onClose(); }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const ready = choice === 'existing' ? !!personId : !!fields.name?.trim();
+
+  function submit(e) {
+    e.preventDefault();
+    if (!ready) return;
+    onApprove(
+      user.id,
+      choice === 'existing'
+        ? { role, directory_id: Number(personId) }
+        : { role, person: fields },
+    );
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4 py-8"
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <form
+        onSubmit={submit}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Approve ${user.name}`}
+        className="bg-white w-full max-w-lg max-h-full rounded-2xl shadow-2xl flex flex-col"
+      >
+        <div className="px-5 py-4 border-b border-gray-100">
+          <h3 className="font-semibold text-church-navy">Approve {user.name}</h3>
+          <p className="text-xs text-gray-500 mt-1">
+            {user.email || 'No email on file'} &middot; signed up with{' '}
+            {user.provider === 'local' ? 'an email address and password' : user.provider}
+          </p>
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+          {error && (
+            <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+
+          <p className="text-xs text-gray-600">
+            Approving lets this person into the portal. Say who they are at the same time, so
+            their household and worship preferences are theirs to keep up to date.
+          </p>
+
+          {/* Who is this? */}
+          <fieldset className="border-0 p-0 m-0 space-y-2" disabled={busy}>
+            <legend className="text-sm font-semibold text-church-navy mb-1">Who is this?</legend>
+
+            <label className={`flex gap-3 items-start p-2.5 rounded-lg border cursor-pointer transition-colors ${
+              choice === 'existing' ? 'border-church-gold bg-church-gold/5' : 'border-gray-200 hover:border-church-gold'
+            }`}>
+              <input
+                type="radio"
+                name="who"
+                value="existing"
+                checked={choice === 'existing'}
+                onChange={() => setChoice('existing')}
+                className="mt-1 accent-church-gold"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm text-church-navy font-medium">Someone already in the directory</span>
+                <span className="block text-xs text-gray-500 mb-2">Pair this sign-in with their existing entry.</span>
+                <select
+                  aria-label="Member directory entry"
+                  value={personId}
+                  disabled={busy || choice !== 'existing'}
+                  onChange={e => setPersonId(e.target.value)}
+                  onFocus={() => setChoice('existing')}
+                  className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-church-gold disabled:opacity-50"
+                >
+                  <option value="">Choose a person…</option>
+                  {people.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}{p.email ? ` · ${p.email}` : ''}</option>
+                  ))}
+                </select>
+                {suggested && String(suggested) === String(personId) && (
+                  <span className="block text-xs text-gray-400 mt-1">
+                    Suggested because it matches this account — please check it is right.
+                  </span>
+                )}
+              </span>
+            </label>
+
+            <label className={`flex gap-3 items-start p-2.5 rounded-lg border cursor-pointer transition-colors ${
+              choice === 'new' ? 'border-church-gold bg-church-gold/5' : 'border-gray-200 hover:border-church-gold'
+            }`}>
+              <input
+                type="radio"
+                name="who"
+                value="new"
+                checked={choice === 'new'}
+                onChange={() => setChoice('new')}
+                className="mt-1 accent-church-gold"
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm text-church-navy font-medium">Somebody new to us</span>
+                <span className="block text-xs text-gray-500 mb-2">
+                  Create their directory entry now. Only a name is needed — the rest can wait.
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  {NEW_PERSON_FIELDS.map(f => (
+                    <div key={f.key} className={f.key === 'address' || f.key === 'name' ? 'col-span-2' : ''}>
+                      <label htmlFor={`new-${f.key}`} className="block text-xs text-gray-500 mb-0.5">
+                        {f.label}{f.required && <span className="text-red-500"> *</span>}
+                      </label>
+                      <input
+                        id={`new-${f.key}`}
+                        type={f.type || 'text'}
+                        value={fields[f.key] ?? ''}
+                        disabled={busy || choice !== 'new'}
+                        onFocus={() => setChoice('new')}
+                        onChange={e => setFields(v => ({ ...v, [f.key]: e.target.value }))}
+                        className="w-full text-sm px-2.5 py-1.5 rounded-lg border border-gray-200 focus:outline-none focus:ring-1 focus:ring-church-gold disabled:opacity-50"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </span>
+            </label>
+          </fieldset>
+
+          {/* What may they do? */}
+          <div>
+            <label htmlFor="approve-role" className="block text-sm font-semibold text-church-navy mb-1">
+              What may they do?
+            </label>
+            <select
+              id="approve-role"
+              value={role}
+              disabled={busy}
+              onChange={e => setRole(e.target.value)}
+              className="w-full text-sm px-3 py-2 rounded-lg border border-gray-200 bg-white text-gray-700 focus:outline-none focus:ring-1 focus:ring-church-gold disabled:opacity-50"
+            >
+              {ROLES.filter(r => r.id !== 'pending').map(r => (
+                <option key={r.id} value={r.id}>{r.label}</option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500 mt-1">{roleInfo(role).description}</p>
+          </div>
+        </div>
+
+        <div className="px-5 py-4 border-t border-gray-100 flex items-center justify-end gap-2">
+          <button type="button" onClick={onClose} disabled={busy}
+            className="text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600 hover:border-gray-300 disabled:opacity-50">
+            Cancel
+          </button>
+          <button type="submit" disabled={busy || !ready} className="btn-primary text-sm disabled:opacity-50">
+            {busy ? 'Approving…' : `Approve ${user.name}`}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 // ─── Detail panel: everything you can do to one account ───────────────────────
 
-function UserDetail({ user, currentUserId, people, busy, onSetRole, onLink, onRemove, onClose }) {
+function UserDetail({ user, currentUserId, people, busy, onSetRole, onLink, onRemove, onApproveRequest, onClose }) {
   const isSelf  = user.id === currentUserId;
   const locked  = isSelf || !!user.is_owner;
+  const waiting = user.role === 'pending' && !isSelf && !user.is_owner;
   const lockReason = isSelf
     ? 'You cannot change your own role.'
     : user.is_owner
@@ -313,6 +553,25 @@ function UserDetail({ user, currentUserId, people, busy, onSetRole, onLink, onRe
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+          {waiting && (
+            <div className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3">
+              <p className="text-sm text-orange-900 font-medium">This account is waiting on you.</p>
+              <p className="text-xs text-orange-800 mt-1">
+                {user.provider === 'local' && !user.email_verified_at
+                  ? 'They have not opened the confirmation email yet, so they cannot sign in even once you approve them. You can still approve now — it will be waiting for them.'
+                  : 'They cannot sign in until you approve them. Approving is also where you say who they are in the member directory.'}
+              </p>
+              <button
+                type="button"
+                onClick={() => onApproveRequest(user.id)}
+                disabled={busy}
+                className="mt-2 text-xs px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors font-medium disabled:opacity-50"
+              >
+                Approve and give them a profile…
+              </button>
+            </div>
+          )}
+
           {/* At a glance */}
           <dl className="grid grid-cols-2 gap-3 text-xs">
             <div>
@@ -525,6 +784,8 @@ export default function UsersView({ currentUser }) {
   const [notice, setNotice]     = useState('');
   const [busy, setBusy]         = useState(false);
   const [openId, setOpenId]     = useState(null);
+  const [approveId, setApproveId]       = useState(null);
+  const [approveError, setApproveError] = useState('');
   const [filters, setFilters]   = useState({});
   const [sort, setSort]         = useState({ key: 'role', dir: 'asc' });
 
@@ -552,7 +813,18 @@ export default function UsersView({ currentUser }) {
 
   useEffect(() => { load(); }, [load]);
 
+  function openApproval(id) {
+    setApproveError('');
+    setApproveId(id);
+  }
+
   async function setRole(id, role) {
+    // Letting a waiting account in is an approval, and an approval has to say
+    // who the person is — so it goes through the dialog rather than straight
+    // to the server, which would refuse it anyway.
+    const target = users.find(u => u.id === id);
+    if (target?.role === 'pending' && role !== 'pending') return openApproval(id);
+
     setNotice('');
     setBusy(true);
     const res  = await fetch(`/api/auth/users/${id}/role`, {
@@ -563,6 +835,27 @@ export default function UsersView({ currentUser }) {
     const json = await res.json().catch(() => ({}));
     if (!json.success) setNotice(json.error || 'Could not change that role');
     setBusy(false);
+    load();
+  }
+
+  // `payload` carries either directory_id, to pair with somebody already in
+  // the directory, or person, to create their entry as part of approving.
+  async function approve(id, payload) {
+    setApproveError('');
+    setBusy(true);
+    const res  = await fetch(`/api/auth/users/${id}/approve`, {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload),
+    });
+    const json = await res.json().catch(() => ({}));
+    setBusy(false);
+
+    if (!json.success) {
+      setApproveError(json.error || 'Could not approve that account');
+      return;
+    }
+    setApproveId(null);
     load();
   }
 
@@ -628,7 +921,8 @@ export default function UsersView({ currentUser }) {
     });
   }, [users, columns, filters, sort]);
 
-  const openUser    = users.find(u => u.id === openId) || null;
+  const openUser     = users.find(u => u.id === openId) || null;
+  const approveUser  = users.find(u => u.id === approveId) || null;
   const pendingCount = users.filter(u => u.role === 'pending').length;
 
   if (loading) {
@@ -668,7 +962,8 @@ export default function UsersView({ currentUser }) {
           className="w-full text-left card border border-orange-200 bg-orange-50 text-sm text-orange-800 hover:bg-orange-100 transition-colors"
         >
           <strong>{pendingCount}</strong> {pendingCount === 1 ? 'person is' : 'people are'} waiting to be
-          confirmed. They can look around the portal but cannot change anything — click to show just them.
+          confirmed. Approving is also where you say who they are in the member directory — click to
+          show just them.
         </button>
       )}
 
@@ -700,7 +995,7 @@ export default function UsersView({ currentUser }) {
           onFilter={handleFilter}
           currentUserId={currentUser.id}
           onOpen={setOpenId}
-          onApprove={id => setRole(id, 'approved')}
+          onApprove={openApproval}
         />
       </div>
 
@@ -728,7 +1023,19 @@ export default function UsersView({ currentUser }) {
           onSetRole={setRole}
           onLink={link}
           onRemove={remove}
+          onApproveRequest={openApproval}
           onClose={() => setOpenId(null)}
+        />
+      )}
+
+      {approveUser && (
+        <ApproveDialog
+          user={approveUser}
+          people={people}
+          busy={busy}
+          error={approveError}
+          onApprove={approve}
+          onClose={() => setApproveId(null)}
         />
       )}
     </div>
