@@ -529,14 +529,44 @@ in (whose query is already *street, city, state zip*), an email from its
 `mailto:`, a phone number by its digits, counting only text and never the path
 data inside an icon.
 
+The site's own navigation is ruled out twice over, by where it sits (`<nav>`,
+`<footer>`, `<aside>`) and by what it says — a link like "About Us" reads
+exactly like a person otherwise, two capitalised words, and it only takes one
+of those outside a `<nav>` to be listed as a guest. The placeholder the site
+shows in place of a hidden address goes the same way.
+
 Comments written as paragraphs rather than tables are read either way. Guests
 that earlier readings invented are cleared up in two places: the ones named
 after a section label ("Visit History", "Comments") on start-up, and on the
-next scrape that reads guests properly, the ones named after a guest's own
-comment or after the summary line — no person's name carries a digit. A scrape
-that read nothing tidies nothing. Either way a guest somebody has since typed
-into is kept whatever they are named: a duplicate in the list can be fixed by
-hand, a deleted phone number cannot.
+next scrape that reads guests properly, any name this parser would never
+produce — a card's summary line, a menu link, the address placeholder. That
+test is the parser's own, so the two cannot drift apart. A scrape that read
+nothing tidies nothing, and a guest somebody has since typed into is kept
+whatever they are named: a duplicate in the list can be fixed by hand, a
+deleted phone number cannot.
+
+### The tracker shows a slice, so the scrape works its controls
+
+The page defaults to a date span and runs what is left onto further pages, so
+fetching it as it arrives collects whichever guests the site felt like showing.
+Both controls are read off the page rather than hard-coded, because a query
+this site is not obliged to keep is not worth depending on:
+
+- **The date span.** The dropdown's options are weighed — "All Time" beats
+  "Last 5 Years" beats "Last 30 Days" — and the page is asked for again with
+  the widest one, carrying the rest of the form with it. A dropdown that is not
+  about dates is left alone, as is a filter submitted by POST, which cannot be
+  asked for as a link and is not worth guessing at.
+- **The pager.** Numbered links, a `rel="next"`, a "»". Each page's own pager
+  is re-read as it arrives, so a pager that only ever shows a few numbers at a
+  time is still followed to the end, and a link back to a page already fetched
+  is not followed twice. A guest whose visits run across a page break is joined
+  into one guest rather than replaced.
+
+A page that will not load is a warning naming it, not a failed scrape: the
+guests already read are kept, and saying some may be missing beats quietly
+returning fewer than there are. `/api/members/debug/visitors` reports what the
+controls resolved to, since neither is visible in a dump of the markup.
 
 A guest's `comments`, and the address, phone and email on their card, are the
 tracker's: they are replaced on every scrape that reads them, and a field the

@@ -339,6 +339,92 @@ describe('POST /api/members/update', () => {
     });
   });
 
+  test('the tracker is widened to every date and read to its last page', async () => {
+    // The page shows a slice: a dropdown picks the span, the rest runs onto
+    // further pages. Fetching it as it arrives collects whichever guests the
+    // site felt like showing.
+    const filter = span => `
+      <form method="get" action="/members/visitor-tracker">
+        <select name="range">
+          <option value="90">Last 90 Days</option>
+          <option value="all"${span === 'all' ? ' selected' : ''}>All Time</option>
+        </select>
+      </form>`;
+    const guest = name => `
+      <span class="vt-name">${name}</span><span class="vt-meta">Last on 09/13/26</span>
+      <h4 class="vt-sub">Visit History</h4>${table([['Date', 'Service'], ['09/13/26', 'Sun AM']])}`;
+
+    serveSite({
+      // As it arrives: 90 days, one guest, and no pager at all.
+      '/members/visitor-tracker': page(`${filter('90')}${guest('Only Recent')}`),
+      // Widened: everybody, across three pages.
+      '/members/visitor-tracker?range=all': page(
+        `${filter('all')}${guest('Dana Whitfield')}<a href="?range=all&page=2">2</a>`),
+      '/members/visitor-tracker?range=all&page=2': page(
+        `${filter('all')}${guest('Sam Ford')}<a href="?range=all&page=3">3</a>`),
+      '/members/visitor-tracker?range=all&page=3': page(`${filter('all')}${guest('Marcus Reed')}`),
+    });
+
+    const res = await request(buildApp(MEMBER)).post('/api/members/update');
+    expect(res.status).toBe(200);
+
+    expect(db.prepare('SELECT name FROM visitors ORDER BY name').all().map(v => v.name))
+      .toEqual(['Dana Whitfield', 'Marcus Reed', 'Sam Ford']);
+    // The unwidened page's guest was never the whole story, and is not kept.
+    expect(res.body.warnings.filter(w => w.startsWith('visitors:'))).toEqual([]);
+  });
+
+  test('a page of the tracker that will not load is a warning, and the rest is kept', async () => {
+    const guest = name => `
+      <span class="vt-name">${name}</span>
+      <h4 class="vt-sub">Visit History</h4>${table([['Date', 'Service'], ['09/13/26', 'Sun AM']])}`;
+
+    serveSite({
+      '/members/visitor-tracker': page(`${guest('Dana Whitfield')}<a href="?page=2">2</a>`),
+      '/members/visitor-tracker?page=2': page('', { status: 500 }),
+    });
+
+    const { body } = await request(buildApp(MEMBER)).post('/api/members/update');
+
+    expect(db.prepare('SELECT name FROM visitors').all().map(v => v.name)).toEqual(['Dana Whitfield']);
+    expect(body.warnings.some(w => w.includes('page=2') && w.includes('some guests may be missing'))).toBe(true);
+  });
+
+  test('a pager that loops back on itself is followed once', async () => {
+    const guest = name => `
+      <span class="vt-name">${name}</span>
+      <h4 class="vt-sub">Visit History</h4>${table([['Date', 'Service'], ['09/13/26', 'Sun AM']])}`;
+    const bothWays = '<a href="/members/visitor-tracker?page=1">1</a><a href="/members/visitor-tracker?page=2">2</a>';
+
+    serveSite({
+      '/members/visitor-tracker':        page(`${guest('Dana Whitfield')}${bothWays}`),
+      '/members/visitor-tracker?page=1': page(`${guest('Dana Whitfield')}${bothWays}`),
+      '/members/visitor-tracker?page=2': page(`${guest('Sam Ford')}${bothWays}`),
+    });
+
+    const { body } = await request(buildApp(MEMBER)).post('/api/members/update');
+
+    expect(body.warnings.filter(w => w.startsWith('visitors:'))).toEqual([]);
+    expect(db.prepare('SELECT name FROM visitors ORDER BY name').all().map(v => v.name))
+      .toEqual(['Dana Whitfield', 'Sam Ford']);
+  });
+
+  test("a guest named after the site's own menu is cleared", async () => {
+    const tracker = `
+      <span class="vt-name">Ray Ann Boyd</span>
+      <h4 class="vt-sub">Visit History</h4>${table([['Date', 'Service'], ['09/13/26', 'Sun AM']])}`;
+
+    db.prepare('INSERT INTO visitors (name) VALUES (?)').run('About Us');
+    db.prepare('INSERT INTO visitors (name) VALUES (?)').run('Protected Email');
+    db.prepare('INSERT INTO visitors (name, phone) VALUES (?, ?)').run('About Us Jr', '256-555-0134');
+
+    serveSite({ '/members/visitor-tracker': page(tracker) });
+    await request(buildApp(MEMBER)).post('/api/members/update');
+
+    expect(db.prepare('SELECT name FROM visitors ORDER BY name').all().map(v => v.name))
+      .toEqual(['About Us Jr', 'Ray Ann Boyd']);
+  });
+
   test('a guest the old parser named after their comment is cleared by the re-scrape', async () => {
     // Before the parser could tell a name from a comment, this page produced a
     // guest called "Just moved from Foley, AL". Guests are matched by name, so
