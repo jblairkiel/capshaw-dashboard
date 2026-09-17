@@ -294,11 +294,21 @@ function dutyRoster(sunday) {
   const wednesdays = sundays.map(d => addDays(d, 3));
 
   const slots = rosterSlots([...sundays, ...wednesdays]);
-  const isWed = s => /wednesday/i.test(String(s.service || '')) || wednesdays.includes(s.isoDate);
+
+  // The schedule names its services 'AM' and 'PM' rather than by weekday, so
+  // which block a slot belongs to is decided by its date first and its name
+  // only as a fallback.
+  const isWed = s => wednesdays.includes(s.isoDate) || /wednesday/i.test(String(s.service || ''));
+
+  // The printed roster has a morning block and a Wednesday block and no
+  // evening one. Without this an evening slot would land in the morning cell
+  // and be joined onto the name already there — two different people reading
+  // as one pair, which is worse than not printing the evening at all.
+  const isEvening = s => /\bPM\b|evening/i.test(String(s.service || ''));
 
   return {
-    sunday:    rosterSection(slots.filter(s => !isWed(s)), sundays,    config.dutyJobs.sunday),
-    wednesday: rosterSection(slots.filter(s =>  isWed(s)), wednesdays, config.dutyJobs.wednesday),
+    sunday:    rosterSection(slots.filter(s => !isWed(s) && !isEvening(s)), sundays,    config.dutyJobs.sunday),
+    wednesday: rosterSection(slots.filter(isWed), wednesdays, config.dutyJobs.wednesday),
   };
 }
 

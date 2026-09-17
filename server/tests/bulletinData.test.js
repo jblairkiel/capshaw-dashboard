@@ -180,6 +180,28 @@ describe('gathering a week', () => {
     expect(dutyRoster.wednesday.jobs.find(j => j.job === 'Speaker').names).toEqual(['Mid Week', '']);
   });
 
+  test('the schedule\'s own AM and PM names are sorted by date, not by wording', () => {
+    const ins = db.prepare('INSERT INTO job_assignments (month,date,service,job,name) VALUES (?,?,?,?,?)');
+    // June 8 2025 is a Sunday and June 11 a Wednesday. The serving schedule
+    // calls its services 'AM' and 'PM', never naming the weekday.
+    ins.run('June 2025', 'June 8',  'AM', 'Song Leader', 'Morning');
+    ins.run('June 2025', 'June 11', 'PM', 'Song Leader', 'Midweek');
+
+    const { dutyRoster } = bulletin.gather({ sunday: SUNDAY });
+    expect(dutyRoster.sunday.jobs.find(j => j.job === 'Song Leader').names[0]).toBe('Morning');
+    expect(dutyRoster.wednesday.jobs.find(j => j.job === 'Song Leader').names[0]).toBe('Midweek');
+  });
+
+  test('a Sunday evening slot is left out rather than joined onto the morning', () => {
+    const ins = db.prepare('INSERT INTO job_assignments (month,date,service,job,name) VALUES (?,?,?,?,?)');
+    ins.run('June 2025', 'June 8', 'AM', 'Song Leader', 'Morning');
+    ins.run('June 2025', 'June 8', 'PM', 'Song Leader', 'Evening');
+
+    const { dutyRoster } = bulletin.gather({ sunday: SUNDAY });
+    // Two different people would otherwise read as one pair.
+    expect(dutyRoster.sunday.jobs.find(j => j.job === 'Song Leader').names[0]).toBe('Morning');
+  });
+
   test('several people against one job in a week are listed together', () => {
     const ins = db.prepare('INSERT INTO job_assignments (month,date,service,job,name) VALUES (?,?,?,?,?)');
     ins.run('June 2025', 'June 8', 'Sunday Worship', 'Ushers', 'Chris Black');
