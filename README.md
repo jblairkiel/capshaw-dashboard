@@ -1180,8 +1180,107 @@ unauthenticated API call (which must be refused), and checks the database
 landed on the volume and the process is not root. A Dockerfile nothing builds
 is one that has quietly stopped working.
 
-The deploy job still deploys over SSH. Switching the droplet to the image is a
-separate decision, and this PR does not make it.
+### And deploys what it built
+
+The image the deploy runs is the one CI exercised — published to
+`ghcr.io/jblairkiel/capshaw-dashboard` only **after** it has started, reported
+healthy, served a request and been checked for writing to its volume. The
+droplet pulls that exact commit tag rather than rebuilding it:
+
+```
+CAPSHAW_IMAGE=ghcr.io/jblairkiel/capshaw-dashboard:<sha>
+docker compose pull app && docker compose up -d --no-build app
+```
+
+Nothing is built on the droplet any more. A deploy is a pull and a restart, so
+it takes seconds instead of minutes and cannot fail halfway through an `npm ci`
+on a box with less memory than the runner.
+
+**A deploy that does not come up healthy rolls itself back.** The job records
+the image that was serving before it started, waits for Docker's own health
+check on the new container, and on failure prints the logs, brings the previous
+image back up and fails the job. A rolled-back deploy is a red build, not a
+quiet one.
+
+### Moving an existing droplet from PM2 to the container
+
+The application is already containerised; what has to move is the data. It
+lives under `server/` on the droplet and belongs in the volume.
+
+**This is the one step that touches the congregation's records, so it stops the
+app first.** Copying a SQLite database while something is writing to it is how
+you get a file that opens fine and is subtly wrong.
+
+```bash
+cd /var/www/capshaw-dashboard
+git pull origin main
+
+# 1. Back up first. This is the only copy of the action history.
+tar czf ~/capshaw-backup-$(date +%F).tar.gz server/data server/uploads .env
+
+# 2. Stop the old app, so nothing is mid-write.
+pm2 stop capshaw-dashboard
+
+# 3. Let the droplet pull from the registry (read:packages is enough).
+echo "$GHCR_TOKEN" | docker login ghcr.io -u jblairkiel --password-stdin
+
+# 4. Create the volume and copy the four things that outlive a request into it:
+#    the database, the photos, the cached scrape, and the uploaded orders of
+#    service. Uploads move under /data/uploads — see server/lib/paths.js.
+docker volume create capshaw-data
+docker run --rm \
+  -v capshaw-data:/data \
+  -v /var/www/capshaw-dashboard/server:/src:ro \
+  node:22-bookworm-slim sh -c '
+    cp -a /src/data/. /data/ &&
+    mkdir -p /data/uploads &&
+    if [ -d /src/uploads ]; then cp -a /src/uploads/. /data/uploads/; fi &&
+    chown -R 1000:1000 /data &&
+    ls -la /data'
+
+# 5. Start the container on the last image CI published.
+export CAPSHAW_IMAGE=ghcr.io/jblairkiel/capshaw-dashboard:main
+docker compose pull app
+docker compose up -d --no-build app
+
+# 6. Check it came up, and that it is your data and not an empty database.
+docker compose ps
+curl -fsS http://127.0.0.1:3001/api/health
+```
+
+Sign in and confirm the directory, the guests and the action history are all
+there. nginx needs no change: the container publishes the same
+`127.0.0.1:3001` the PM2 process did.
+
+Once you are satisfied, stop PM2 from coming back on reboot:
+
+```bash
+pm2 delete capshaw-dashboard && pm2 save
+```
+
+**Going back**, if something about the droplet surprises you:
+
+```bash
+docker compose down
+pm2 start ecosystem.config.js --env production
+```
+
+`ecosystem.config.js` and the PM2 setup are deliberately still in the
+repository, and the old data under `server/` is left where it was by the copy
+above — the migration reads it, it does not move it. So the way back is two
+commands and a revert of the deploy job, for as long as you want to keep that
+option.
+
+### What the deploy needs from you
+
+| Secret | What it is |
+|---|---|
+| `DO_HOST` / `DO_USER` / `DO_SSH_KEY` | The droplet, as before |
+| `GHCR_USER` | Your GitHub username, for the droplet's `docker login` |
+| `GHCR_TOKEN` | A classic personal access token with **`read:packages`** only. The droplet pulls with it; it never pushes |
+
+The publishing side needs nothing set up: the image job signs in with the
+`GITHUB_TOKEN` that Actions already provides.
 
 ---
 
@@ -1242,6 +1341,11 @@ sudo certbot --nginx -d capshaw.jblairkiel.com
 ```
 
 ### CI/CD (automatic deploys)
+
+> **The deploy now ships a container.** A push to `main` builds the image,
+> exercises it, publishes it and tells the droplet to pull it — see
+> [Running in Docker](#running-in-docker). The PM2 setup below is what the
+> droplet ran before, and is kept as the way back.
 
 Every push to `main` triggers the GitHub Actions pipeline:
 
