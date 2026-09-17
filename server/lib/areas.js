@@ -72,6 +72,12 @@ const AREAS = [
     page:  'Email Groups',
     description: 'Decide who is in each distribution group, and send to them.',
   },
+  {
+    id:    'bulletin',
+    label: 'Weekly Newsletter',
+    page:  'Weekly Newsletter',
+    description: 'Write each week\'s prayer lists and offering, and export the newsletter as Word or PDF.',
+  },
 ];
 
 const AREA_IDS = AREAS.map(a => a.id);
