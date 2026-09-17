@@ -46,6 +46,7 @@ function seedAccounts() {
 
 beforeEach(() => {
   for (const table of ['action_log', 'attendance', 'visitor_visits', 'visitors',
+                       'workflow_events', 'workflow_tasks', 'workflow_participants', 'workflow_instances',
                        'elder_duties', 'elders', 'deacon_duties', 'deacons', 'user_areas', 'users']) {
     db.prepare(`DELETE FROM ${table}`).run();
   }
@@ -163,6 +164,72 @@ describe('/api/visitors', () => {
     expect(listed.body.visitors[0].name).toBe('Sam Rivers');
     expect(listed.body.visitors[0].notes).toBe('Asked about the Wednesday class');
     expect(listed.body.canManage).toBe(false);
+  });
+
+  test('a guest carries every follow-up they have had, and who made contact', async () => {
+    // The page answers "who has been followed up, and by whom", which means
+    // the workflow's own record read back rather than a second copy of it.
+    const created = await request(buildApp(GUESTS)).post('/api/visitors').send({ name: 'Sam Rivers' });
+    const { id } = created.body.visitor;
+
+    const instance = db.prepare(`
+      INSERT INTO workflow_instances (definition_id, title, status, outcome, data, created_by, created_at, completed_at)
+      VALUES ('visitor-follow-up', 'Follow up with Sam Rivers', 'completed', 'contacted', ?, ?, '2026-09-10 09:00:00', '2026-09-13 14:02:11')
+    `).run(JSON.stringify({
+      visitorId: String(id), visitorName: 'Sam Rivers', assigneeName: 'Ray Harris',
+      contactedBy: 'Ray Harris', contactMethod: 'phone',
+    }), ADMIN.id).lastInsertRowid;
+
+    const task = db.prepare(`
+      INSERT INTO workflow_tasks (instance_id, step_id, status, action, note, completed_at, completed_by)
+      VALUES (?, 'reach-out', 'done', 'phoned', 'Lovely chat', '2026-09-13 14:02:11', ?)
+    `);
+    task.run(instance, GUESTS.id);
+
+    const listed = await request(buildApp(MEMBER)).get('/api/visitors');
+    const [guest] = listed.body.visitors;
+
+    expect(guest.followUp.history).toHaveLength(1);
+    expect(guest.followUp.history[0]).toMatchObject({
+      status: 'completed', outcome: 'contacted',
+      startedBy: ADMIN.name, assignedTo: 'Ray Harris', contactedBy: 'Ray Harris', method: 'phone',
+    });
+    expect(guest.followUp.history[0].rounds).toEqual([
+      { action: 'phoned', by: GUESTS.name, at: '2026-09-13 14:02:11', note: 'Lovely chat' },
+    ]);
+    expect(guest.followUp.lastDone).toMatchObject({ outcome: 'contacted', by: 'Ray Harris', method: 'phone' });
+  });
+
+  test('a follow-up still open says who is being waited on', async () => {
+    const created = await request(buildApp(GUESTS)).post('/api/visitors').send({ name: 'Sam Rivers' });
+    const { id } = created.body.visitor;
+
+    db.prepare(`
+      INSERT INTO workflow_instances (definition_id, title, status, step_id, data, created_by, created_at)
+      VALUES ('visitor-follow-up', 'Follow up', 'active', 'reach-out', ?, ?, '2026-09-15 10:00:00')
+    `).run(JSON.stringify({ visitorId: String(id), assigneeName: 'Tom Nelson' }), ADMIN.id);
+
+    const listed = await request(buildApp(MEMBER)).get('/api/visitors');
+    expect(listed.body.visitors[0].followUp.active).toMatchObject({
+      step: 'reach-out', assignedTo: 'Tom Nelson', since: '2026-09-15 10:00:00',
+    });
+  });
+
+  test("one guest's follow-ups never land on another", async () => {
+    const one = (await request(buildApp(GUESTS)).post('/api/visitors').send({ name: 'Aaa Guest' })).body.visitor;
+    const two = (await request(buildApp(GUESTS)).post('/api/visitors').send({ name: 'Bbb Guest' })).body.visitor;
+
+    db.prepare(`
+      INSERT INTO workflow_instances (definition_id, title, status, step_id, data, created_by)
+      VALUES ('visitor-follow-up', 'Follow up', 'active', 'reach-out', ?, ?)
+    `).run(JSON.stringify({ visitorId: String(two.id), assigneeName: 'Tom Nelson' }), ADMIN.id);
+
+    const listed = await request(buildApp(MEMBER)).get('/api/visitors');
+    const byId = Object.fromEntries(listed.body.visitors.map(v => [v.id, v]));
+
+    expect(byId[one.id].followUp.active).toBeNull();
+    expect(byId[one.id].followUp.history).toEqual([]);
+    expect(byId[two.id].followUp.active).not.toBeNull();
   });
 
   test('only the guest area may add, edit or remove one', async () => {

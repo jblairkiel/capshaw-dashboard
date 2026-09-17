@@ -29,35 +29,94 @@ function visitsOf(id) {
   return db.prepare('SELECT id, date, service FROM visitor_visits WHERE visitor_id = ? ORDER BY id ASC').all(id);
 }
 
-// Whether a follow-up is already under way for this guest, so the page can
-// offer to start one — or point at the one in flight — rather than quietly
-// letting three people start three.
+// Every follow-up a guest has had: who was asked, who actually reached them,
+// how, and when. The workflow keeps which guest it is about in its own data, so
+// that is where this reads it from, and the workflow's own history stays the
+// record of what happened — this is a reading of it, not a second copy.
 //
-// The workflow keeps which guest it is about in its own data, so that is where
-// this reads it from; the workflow's history stays the record of what happened.
-function followUpFor(id) {
-  const active = db.prepare(`
-    SELECT i.id, i.title, i.step_id, i.created_at
-      FROM workflow_instances i
-     WHERE i.definition_id = 'visitor-follow-up'
-       AND i.status = 'active'
-       AND json_extract(i.data, '$.visitorId') = ?
-     ORDER BY i.id DESC LIMIT 1
-  `).get(String(id));
+// Read for every guest at once rather than per guest: the page shows the whole
+// list, and one query beats one per name.
+const FOLLOW_UP = 'visitor-follow-up';
 
-  const finished = db.prepare(`
-    SELECT i.id, i.outcome, i.completed_at
+function followUpIndex() {
+  const instances = db.prepare(`
+    SELECT i.id, i.status, i.outcome, i.step_id, i.created_at, i.completed_at, i.data,
+           starter.name AS started_by,
+           json_extract(i.data, '$.visitorId') AS visitor_id
       FROM workflow_instances i
-     WHERE i.definition_id = 'visitor-follow-up'
-       AND i.status = 'completed'
-       AND json_extract(i.data, '$.visitorId') = ?
-     ORDER BY i.id DESC LIMIT 1
-  `).get(String(id));
+      LEFT JOIN users starter ON starter.id = i.created_by
+     WHERE i.definition_id = ?
+     ORDER BY i.id ASC
+  `).all(FOLLOW_UP);
+
+  // What was actually done on each round, and by whom. A follow-up can go
+  // round more than once — no answer, try again — and each attempt is somebody
+  // taking the trouble, so each is kept rather than only the one that landed.
+  const rounds = new Map();
+  for (const task of db.prepare(`
+    SELECT t.instance_id, t.action, t.note, t.completed_at, doer.name AS done_by
+      FROM workflow_tasks t
+      JOIN workflow_instances i ON i.id = t.instance_id
+      LEFT JOIN users doer ON doer.id = t.completed_by
+     WHERE i.definition_id = ? AND t.status = 'done'
+     ORDER BY t.id ASC
+  `).all(FOLLOW_UP)) {
+    if (!rounds.has(task.instance_id)) rounds.set(task.instance_id, []);
+    rounds.get(task.instance_id).push({
+      action: task.action || '',
+      by:     task.done_by || '',
+      at:     task.completed_at || '',
+      note:   task.note || '',
+    });
+  }
+
+  const byVisitor = new Map();
+  for (const row of instances) {
+    let data = {};
+    try { data = JSON.parse(row.data || '{}'); } catch { data = {}; }
+
+    const key = String(row.visitor_id ?? '');
+    if (!key) continue;
+    if (!byVisitor.has(key)) byVisitor.set(key, []);
+    byVisitor.get(key).push({
+      id:          row.id,
+      status:      row.status,
+      outcome:     row.outcome || '',
+      step:        row.step_id || '',
+      startedAt:   row.created_at,
+      completedAt: row.completed_at || '',
+      startedBy:   row.started_by || '',
+      // Who was asked to reach out, and who did — not always the same person,
+      // because a follow-up somebody cannot take is handed on.
+      assignedTo:  data.assigneeName || '',
+      contactedBy: data.contactedBy || '',
+      method:      data.contactMethod || '',
+      rounds:      rounds.get(row.id) || [],
+    });
+  }
+  return byVisitor;
+}
+
+// The shape the page reads: whether one is under way, how the last one ended,
+// and the whole run of them.
+function followUpFrom(history = []) {
+  const active   = [...history].reverse().find(h => h.status === 'active');
+  const finished = [...history].reverse().find(h => h.status === 'completed');
 
   return {
-    active:   active ? { id: active.id, step: active.step_id, since: active.created_at } : null,
-    lastDone: finished ? { id: finished.id, outcome: finished.outcome, at: finished.completed_at } : null,
+    active:   active ? { id: active.id, step: active.step, since: active.startedAt, assignedTo: active.assignedTo } : null,
+    lastDone: finished
+      ? {
+        id: finished.id, outcome: finished.outcome, at: finished.completedAt,
+        by: finished.contactedBy, method: finished.method,
+      }
+      : null,
+    history: [...history].reverse(),
   };
+}
+
+function followUpFor(id) {
+  return followUpFrom(followUpIndex().get(String(id)) || []);
 }
 
 function withVisits(row) {
@@ -81,7 +140,15 @@ router.get('/', (req, res) => {
     ? db.prepare('SELECT * FROM visitors WHERE name LIKE ? ORDER BY name ASC').all(`%${search}%`)
     : db.prepare('SELECT * FROM visitors ORDER BY name ASC').all();
 
-  res.json({ success: true, visitors: rows.map(withVisits), canManage: holdsArea(req.user, AREA) });
+  // One read of the follow-ups for the whole list rather than one per guest.
+  const follow = followUpIndex();
+  const visitors = rows.map(row => ({
+    ...row,
+    visits:   visitsOf(row.id),
+    followUp: followUpFrom(follow.get(String(row.id)) || []),
+  }));
+
+  res.json({ success: true, visitors, canManage: holdsArea(req.user, AREA) });
 });
 
 router.get('/:id', (req, res) => {

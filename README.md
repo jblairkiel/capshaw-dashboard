@@ -690,6 +690,26 @@ Reaching a guest writes back to their record — who, how and when — which is
 what the badge on the list reads. The workflow's own history stays the record of
 what happened, step by step, with who did what.
 
+**The Guests page reads that history two ways.** The *Guests* tab is the list,
+ordered by who was with us most recently — the question the page gets asked is
+"who was here on Sunday", not "is Pat on here" — with a guest who has no visits
+on record at the end rather than the top.
+
+The *Follow-ups* tab is the same guests arranged by where their follow-up has
+got to: **nobody has reached out**, **someone is on it**, **never reached**,
+**reached**. Each card names the person — who is being waited on, or who
+actually made contact and when — and opens its own follow-ups on record: every
+round, what was pressed, and by whom. A count per state sits above them, so the
+shape of the work is legible before any card is read, and the tab itself carries
+the number nobody has reached out to yet, because that is work waiting rather
+than work done.
+
+Neither view is a lesser one. A card carries the same contact details as a list
+row, the same **Follow up** button, and the same `tel:`/`mailto:` links, and
+clicking it opens the same guest — details, comments, notes, visit history and
+the follow-ups on record. A status colour never carries the meaning alone:
+every badge says in words what it is.
+
 A task aimed at an **area** (the guests, the serving schedule) emails the people
 who hold that area. Admins hold every area implicitly but are deliberately not
 mailed for each one, so an area task reaches the person who actually looks after

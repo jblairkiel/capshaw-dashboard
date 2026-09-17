@@ -194,6 +194,32 @@ describe('VisitorTracker', () => {
     });
   });
 
+  test('the most recently with us come first, and a guest with no visits last', async () => {
+    mockGuests([
+      { id: 1, name: 'Older Visit',  visits: [{ id: 1, date: '03/30/25', service: 'AM' }], followUp: {} },
+      { id: 2, name: 'Never Came',   visits: [], followUp: {} },
+      { id: 3, name: 'Latest Visit', visits: [{ id: 2, date: '04/13/25', service: 'AM' }], followUp: {} },
+    ]);
+    render(<VisitorTracker />);
+    await screen.findByRole('button', { name: 'Latest Visit' });
+
+    const names = screen.getAllByRole('row').slice(1).map(r => r.querySelector('button').textContent);
+    expect(names).toEqual(['Latest Visit', 'Older Visit', 'Never Came']);
+  });
+
+  test('December sorts after February of the following year, not before it', async () => {
+    // Sorting the dates as text would put 12/21/25 above 02/08/26.
+    mockGuests([
+      { id: 1, name: 'December',  visits: [{ id: 1, date: '12/21/25', service: 'AM' }], followUp: {} },
+      { id: 2, name: 'February',  visits: [{ id: 2, date: '02/08/26', service: 'AM' }], followUp: {} },
+    ]);
+    render(<VisitorTracker />);
+    await screen.findByRole('button', { name: 'February' });
+
+    const names = screen.getAllByRole('row').slice(1).map(r => r.querySelector('button').textContent);
+    expect(names).toEqual(['February', 'December']);
+  });
+
   test('the details and visit history are spelled out when the guest is clicked', async () => {
     mockGuests();
     render(<VisitorTracker />);
@@ -534,5 +560,128 @@ describe('PersonPhoto', () => {
   test('honours the requested size', () => {
     render(<PersonPhoto person={{ id: 1, name: 'Ray Harris', has_photo: 1 }} size={96} />);
     expect(screen.getByRole('img')).toHaveAttribute('width', '96');
+  });
+});
+
+// ─── The follow-ups board ─────────────────────────────────────────────────────
+//
+// The same guests as the list, read by where their follow-up has got to: who
+// still needs somebody, who is on it, and who actually made contact.
+
+describe('VisitorTracker — the follow-ups tab', () => {
+  const REACHED = {
+    id: 1, name: 'Pat Lane', phone: '256-555-0143', email: 'pat@example.com',
+    visits: [{ id: 1, date: '04/13/25', service: 'AM' }],
+    last_contacted_at: '2026-09-13 14:02:11',
+    last_contact_method: 'phone',
+    last_contacted_by: 'Ray Harris',
+    followUp: {
+      active: null,
+      lastDone: { id: 7, outcome: 'contacted', at: '2026-09-13 14:02:11', by: 'Ray Harris', method: 'phone' },
+      history: [{
+        id: 7, status: 'completed', outcome: 'contacted',
+        startedAt: '2026-09-10 09:00:00', completedAt: '2026-09-13 14:02:11',
+        startedBy: 'Blair Kiel', assignedTo: 'Ray Harris', contactedBy: 'Ray Harris', method: 'phone',
+        rounds: [
+          { action: 'no-answer', by: 'Ray Harris', at: '2026-09-11 18:00:00', note: '' },
+          { action: 'phoned',    by: 'Ray Harris', at: '2026-09-13 14:02:11', note: 'Lovely chat' },
+        ],
+      }],
+    },
+  };
+
+  const IN_PROGRESS = {
+    id: 2, name: 'Sam Ford', visits: [{ id: 2, date: '04/06/25', service: 'AM' }],
+    followUp: {
+      active: { id: 8, step: 'reach-out', since: '2026-09-15 10:00:00', assignedTo: 'Tom Nelson' },
+      lastDone: null,
+      history: [{
+        id: 8, status: 'active', outcome: '', startedAt: '2026-09-15 10:00:00', completedAt: '',
+        startedBy: 'Blair Kiel', assignedTo: 'Tom Nelson', contactedBy: '', method: '', rounds: [],
+      }],
+    },
+  };
+
+  const NOBODY = {
+    id: 3, name: 'Jo Reed', visits: [{ id: 3, date: '04/05/25', service: 'AM' }],
+    followUp: { active: null, lastDone: null, history: [] },
+  };
+
+  function mockGuests(visitors, canManage = false) {
+    const fetchMock = vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ success: true, visitors, canManage }) }));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  async function openBoard(visitors = [REACHED, IN_PROGRESS, NOBODY]) {
+    mockGuests(visitors);
+    render(<VisitorTracker />);
+    await screen.findByRole('tab', { name: /Guests/ });
+    fireEvent.click(screen.getByRole('tab', { name: /Follow-ups/ }));
+  }
+
+  test('the tab says how many guests nobody has reached out to', async () => {
+    mockGuests([REACHED, IN_PROGRESS, NOBODY]);
+    render(<VisitorTracker />);
+    const tab = await screen.findByRole('tab', { name: /Follow-ups/ });
+    expect(tab).toHaveTextContent('1');
+  });
+
+  test('each guest is grouped by where their follow-up has got to', async () => {
+    await openBoard();
+    const panel = screen.getByRole('tabpanel');
+
+    expect(within(panel).getByRole('heading', { name: 'Reached' })).toBeInTheDocument();
+    expect(within(panel).getByRole('heading', { name: 'Someone is on it' })).toBeInTheDocument();
+    expect(within(panel).getByRole('heading', { name: 'Nobody has reached out' })).toBeInTheDocument();
+  });
+
+  test('who reached them, and who is still being waited on, are named', async () => {
+    await openBoard();
+    const panel = screen.getByRole('tabpanel');
+
+    expect(within(panel).getByText(/Reached by/)).toHaveTextContent('Ray Harris');
+    expect(within(panel).getByText(/Waiting on/)).toHaveTextContent('Tom Nelson');
+    expect(within(panel).getByText('Nobody has been asked to reach out yet')).toBeInTheDocument();
+  });
+
+  test('the rounds of a follow-up are on the card, with who did each', async () => {
+    await openBoard([REACHED]);
+    fireEvent.click(screen.getByText(/1 follow-up on record/));
+
+    const panel = screen.getByRole('tabpanel');
+    expect(within(panel).getByText(/Ray Harris asked to reach out/)).toBeInTheDocument();
+    expect(within(panel).getByText(/No answer/)).toBeInTheDocument();
+    expect(within(panel).getByText(/Phoned them/)).toBeInTheDocument();
+    expect(within(panel).getByText(/Lovely chat/)).toBeInTheDocument();
+  });
+
+  test('a card opens the same guest, with the same details and actions', async () => {
+    await openBoard([REACHED]);
+    fireEvent.click(within(screen.getByRole('tabpanel')).getByRole('button', { name: 'Pat Lane' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('1 visit on record')).toBeInTheDocument();
+    expect(within(dialog).getByText('pat@example.com')).toBeInTheDocument();
+    expect(within(dialog).getByText('Follow-ups on record')).toBeInTheDocument();
+    expect(within(dialog).getByText(/Ray Harris asked to reach out/)).toBeInTheDocument();
+  });
+
+  test('a status is never colour alone — every badge says what it is', async () => {
+    await openBoard();
+    const panel = screen.getByRole('tabpanel');
+    expect(within(panel).getByText('Phoned by Ray Harris')).toBeInTheDocument();
+    expect(within(panel).getByText('Tom Nelson is on it')).toBeInTheDocument();
+  });
+
+  test('the search box filters the board as well as the list', async () => {
+    await openBoard();
+    type(screen.getByPlaceholderText(/Search guests/i), 'Pat');
+
+    const panel = screen.getByRole('tabpanel');
+    expect(within(panel).getByRole('button', { name: 'Pat Lane' })).toBeInTheDocument();
+    expect(within(panel).queryByRole('button', { name: 'Sam Ford' })).not.toBeInTheDocument();
   });
 });
