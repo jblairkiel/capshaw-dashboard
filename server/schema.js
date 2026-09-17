@@ -350,6 +350,34 @@ function initSchema(db) {
 
   CREATE INDEX IF NOT EXISTS idx_user_areas_area ON user_areas(area);
 
+  -- ── Sample data ─────────────────────────────────────────────────────────────
+  -- Filling the site up to look at it is easy; getting the filling back out
+  -- afterwards is the hard part, and guessing at which rows were made up is how
+  -- somebody's real record gets deleted. So every row sample data creates is
+  -- written down here as it is made: which table, which id, and what it was.
+  -- Removing a batch is then reading this back, not recognising anything.
+
+  CREATE TABLE IF NOT EXISTS seed_batches (
+    id          TEXT    PRIMARY KEY,           -- 'sample-2026-09-17-4f21'
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    created_by  TEXT    NOT NULL DEFAULT '',   -- the admin who asked for it
+    note        TEXT    NOT NULL DEFAULT '',   -- what it was made for
+    generators  TEXT    NOT NULL DEFAULT '[]', -- which parts of the site it filled
+    scale       INTEGER NOT NULL DEFAULT 1
+  );
+
+  CREATE TABLE IF NOT EXISTS seed_records (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch      TEXT    NOT NULL REFERENCES seed_batches(id) ON DELETE CASCADE,
+    table_name TEXT    NOT NULL,
+    row_id     INTEGER NOT NULL,
+    label      TEXT    NOT NULL DEFAULT '',    -- how the row read when it was made
+    created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_seed_records_batch ON seed_records(batch);
+  CREATE INDEX IF NOT EXISTS idx_seed_records_row   ON seed_records(table_name, row_id);
+
   -- ── Action history ──────────────────────────────────────────────────────────
   -- Append-only: every create, edit and delete anybody makes through the
   -- portal, so an admin can answer "who changed this, and when?" without

@@ -108,35 +108,55 @@ describe('AnnouncementsDisplay', () => {
       announcement({ id: 3, title: 'Third' }),
     ];
 
+    // The slideshow listens on the window, and the listener it registers knows
+    // how many slides there are — so until the effect that registers it has run
+    // against the loaded slides, an arrow key moves nothing. Seeing the first
+    // slide on screen is not that moment: the render happens first and the
+    // effect follows it. Settling the effects here makes the difference, which
+    // otherwise shows up as a key press that does nothing on a loaded machine.
+    async function showing(title) {
+      await screen.findByText(title);
+      await act(async () => {});
+    }
+
+    // A slide arriving is a state change away, not a network call away, so a
+    // second is normally an age. On a build machine running two dozen test
+    // files at once it is not, and the difference between "the key did
+    // nothing" and "the machine was busy" is invisible from the failure. This
+    // waits long enough that only the first of those can fail it.
+    const SOON = { timeout: 5000 };
+
+    const slide = title => screen.findByText(title, {}, SOON);
+
     test('the arrow keys move between them', async () => {
       mockApi(ITEMS);
       render(<AnnouncementsDisplay />);
-      await screen.findByText('First');
+      await showing('First');
 
       fireEvent.keyDown(window, { key: 'ArrowRight' });
-      expect(await screen.findByText('Second')).toBeInTheDocument();
+      expect(await slide('Second')).toBeInTheDocument();
       expect(screen.getByText('2 / 3')).toBeInTheDocument();
 
       fireEvent.keyDown(window, { key: 'ArrowLeft' });
-      expect(await screen.findByText('First')).toBeInTheDocument();
+      expect(await slide('First')).toBeInTheDocument();
     });
 
     test('the arrows wrap around at either end', async () => {
       mockApi(ITEMS);
       render(<AnnouncementsDisplay />);
-      await screen.findByText('First');
+      await showing('First');
 
       fireEvent.keyDown(window, { key: 'ArrowLeft' });
-      expect(await screen.findByText('Third')).toBeInTheDocument();
+      expect(await slide('Third')).toBeInTheDocument();
 
       fireEvent.keyDown(window, { key: 'ArrowRight' });
-      expect(await screen.findByText('First')).toBeInTheDocument();
+      expect(await slide('First')).toBeInTheDocument();
     });
 
     test('a key it does not use is ignored', async () => {
       mockApi(ITEMS);
       render(<AnnouncementsDisplay />);
-      await screen.findByText('First');
+      await showing('First');
 
       fireEvent.keyDown(window, { key: 'Enter' });
       expect(screen.getByText('First')).toBeInTheDocument();
@@ -145,12 +165,12 @@ describe('AnnouncementsDisplay', () => {
     test('a dot jumps straight to its slide', async () => {
       mockApi(ITEMS);
       const { container } = render(<AnnouncementsDisplay />);
-      await screen.findByText('First');
+      await showing('First');
 
       const dots = [...container.querySelectorAll('button.rounded-full')];
       expect(dots).toHaveLength(3);
       fireEvent.click(dots[2]);
-      expect(await screen.findByText('Third')).toBeInTheDocument();
+      expect(await slide('Third')).toBeInTheDocument();
     });
 
     test('it advances on its own, and stops once paused', async () => {
@@ -172,7 +192,7 @@ describe('AnnouncementsDisplay', () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
       mockApi(ITEMS);
       render(<AnnouncementsDisplay />);
-      await screen.findByText('First');
+      await showing('First');
 
       fireEvent.keyDown(window, { key: ' ' });
       await act(async () => { vi.advanceTimersByTime(20000); });
