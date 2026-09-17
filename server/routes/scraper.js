@@ -119,9 +119,6 @@ const _saveScraped = db.transaction((data) => {
   const removeMisread = db.prepare(`
     DELETE FROM visitors
      WHERE lower(trim(name)) = lower(trim(?))
-       AND trim(coalesce(phone, ''))             = ''
-       AND trim(coalesce(email, ''))             = ''
-       AND trim(coalesce(address, ''))           = ''
        AND trim(coalesce(invited_by, ''))        = ''
        AND trim(coalesce(status, ''))            = ''
        AND trim(coalesce(notes, ''))             = ''
@@ -132,12 +129,16 @@ const _saveScraped = db.transaction((data) => {
   // ("About Us"), the placeholder standing in for a hidden address. The test
   // is the same one the parser applies when it picks a name, so the two cannot
   // drift apart and start disagreeing about what a guest is called.
+  // "Untouched" means nobody has typed anything in about them. The address,
+  // phone and email are no longer part of that test: since the card's details
+  // started being read from the tracker, a row can carry an address nobody
+  // ever typed — and a misread row that picked one up was protected by it,
+  // which is why "About Us" kept its place in the list. What is ours, and
+  // still guards a row from being cleared, is the notes, who invited them,
+  // their status, and a follow-up having reached them.
   const untouchedNames = db.prepare(`
     SELECT id, name FROM visitors
-     WHERE trim(coalesce(phone, ''))             = ''
-       AND trim(coalesce(email, ''))             = ''
-       AND trim(coalesce(address, ''))           = ''
-       AND trim(coalesce(invited_by, ''))        = ''
+     WHERE trim(coalesce(invited_by, ''))        = ''
        AND trim(coalesce(status, ''))            = ''
        AND trim(coalesce(notes, ''))             = ''
        AND trim(coalesce(last_contacted_at, '')) = ''

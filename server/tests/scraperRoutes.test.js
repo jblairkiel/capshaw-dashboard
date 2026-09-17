@@ -414,15 +414,24 @@ describe('POST /api/members/update', () => {
       <span class="vt-name">Ray Ann Boyd</span>
       <h4 class="vt-sub">Visit History</h4>${table([['Date', 'Service'], ['09/13/26', 'Sun AM']])}`;
 
+    // A phone number no longer means somebody typed one in: the tracker's own
+    // cards carry them. What guards a row is what is ours — a note, who
+    // invited them, a follow-up that reached them.
     db.prepare('INSERT INTO visitors (name) VALUES (?)').run('About Us');
     db.prepare('INSERT INTO visitors (name) VALUES (?)').run('Protected Email');
-    db.prepare('INSERT INTO visitors (name, phone) VALUES (?, ?)').run('About Us Jr', '256-555-0134');
+    db.prepare('INSERT INTO visitors (name, phone, address) VALUES (?, ?, ?)')
+      .run('Our Elders', '256-555-0134', '6617 Camilla Drive');
+    db.prepare('INSERT INTO visitors (name, notes) VALUES (?, ?)')
+      .run('Visitor Notes', 'Kept because somebody wrote this');
 
     serveSite({ '/members/visitor-tracker': page(tracker) });
     await request(buildApp(MEMBER)).post('/api/members/update');
 
+    // The three the parser would never produce go, address and phone and all,
+    // because the tracker put those there rather than a person. The one
+    // somebody wrote a note on stays, however it is named.
     expect(db.prepare('SELECT name FROM visitors ORDER BY name').all().map(v => v.name))
-      .toEqual(['About Us Jr', 'Ray Ann Boyd']);
+      .toEqual(['Ray Ann Boyd', 'Visitor Notes']);
   });
 
   test('a guest the old parser named after their comment is cleared by the re-scrape', async () => {
@@ -482,13 +491,14 @@ describe('POST /api/members/update', () => {
 
   test('a misread guest somebody has since typed into is left alone', async () => {
     // Removing it would throw away the only copy of what was typed. A duplicate
-    // in the list is recoverable by hand; a deleted phone number is not.
+    // in the list is recoverable by hand; a deleted note is not.
     const tracker = `
       <p class="visitor-name">Pat Lane</p>
       <h4>Comments</h4><p>Just moved from Foley, AL</p>
       <h4>Visit History</h4>${table([['Date', 'Service'], ['09/13/26', 'Sun AM']])}`;
 
-    db.prepare('INSERT INTO visitors (name, phone) VALUES (?, ?)').run('Just moved from Foley, AL', '256-555-0134');
+    db.prepare('INSERT INTO visitors (name, notes) VALUES (?, ?)')
+      .run('Just moved from Foley, AL', 'Rang them on Tuesday');
 
     serveSite({ '/members/visitor-tracker': page(tracker) });
     await request(buildApp(MEMBER)).post('/api/members/update');

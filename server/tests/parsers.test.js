@@ -536,6 +536,46 @@ describe('parseVisitors — the name above the table', () => {
     expect(looseInThePage.map(g => g.name)).toEqual(['Pat Lane']);
   });
 
+  test("a section of the site is not a guest, however much it reads like one", () => {
+    // "Our Elders" and "Visitor Notes" are two capitalised words, the same
+    // shape as "Pat Lane", and each was listed as a guest with somebody else's
+    // visits under it. A title is ruled out by how it is built — nobody is
+    // called "Our" anything, and no surname is "Notes" — rather than by
+    // listing the ones this site happens to have.
+    const guests = parseVisitors(`
+      <div class="site-menu">
+        <a href="/about-us">About Us</a>
+        <a href="/our-elders">Our Elders</a>
+        <a href="/visitor-notes">Visitor Notes</a>
+        <a href="/our-church-family">Our Church Family</a>
+      </div>
+      <span class="vt-name">Ray Ann Boyd</span><span class="vt-meta">Last on 09/13/26</span>
+      <h4 class="vt-sub">Visit History</h4>${VISITS}
+    `);
+
+    expect(guests.map(g => g.name)).toEqual(['Ray Ann Boyd']);
+  });
+
+  test("a link is a weaker candidate than the name written in the card", () => {
+    // The menu sits above the first guest's card, so the two compete in the
+    // same run. Even where a menu item is not a title at all, a guest's name
+    // is written in their card rather than as a link off to another page.
+    const guests = parseVisitors(`
+      <div class="site-menu"><a href="/giving">Support Capshaw</a><a href="/staff">Ministry Team</a></div>
+      <span class="vt-name">Ray Ann Boyd</span>
+      <h4 class="vt-sub">Visit History</h4>${VISITS}
+    `);
+
+    expect(guests.map(g => g.name)).toEqual(['Ray Ann Boyd']);
+  });
+
+  test("a guest whose name is the only candidate still reads, link or not", () => {
+    // The demotion must not become a refusal: a page that links a guest to
+    // their own record has nothing else to offer.
+    expect(parseVisitors(`<a href="/members/visitor/12">Pat Lane</a>${VISITS}`).map(g => g.name))
+      .toEqual(['Pat Lane']);
+  });
+
   test("the placeholder standing in for a hidden address is not a guest", () => {
     const guests = parseVisitors(`
       <a href="/cdn-cgi/l/email-protection"><span class="__cf_email__">Protected Email</span></a>

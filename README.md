@@ -529,21 +529,36 @@ in (whose query is already *street, city, state zip*), an email from its
 `mailto:`, a phone number by its digits, counting only text and never the path
 data inside an icon.
 
-The site's own navigation is ruled out twice over, by where it sits (`<nav>`,
-`<footer>`, `<aside>`) and by what it says — a link like "About Us" reads
-exactly like a person otherwise, two capitalised words, and it only takes one
-of those outside a `<nav>` to be listed as a guest. The placeholder the site
-shows in place of a hidden address goes the same way.
+The site's own furniture is ruled out four ways over, because each defence
+alone lets another shape through and a menu item reads exactly like a person —
+"Our Elders" is two capitalised words, the same shape as "Pat Lane":
+
+- **Where it sits** — `<nav>`, `<footer>`, `<aside>`.
+- **What it says** — a named list of the pages a church site has, plus the
+  placeholder shown in place of a hidden address.
+- **How a title is built** — nobody is called "Our" anything, and no surname is
+  "Notes", "History" or "Directory". That rules out a site's sections without
+  listing the ones this site happens to have.
+- **Whether it is a link** — the menu sits above the first guest's card, so the
+  two compete, and a guest's name is written in their card rather than as a
+  link off to another page. A demotion rather than a refusal, so a page that
+  does link a guest to their own record still reads.
 
 Comments written as paragraphs rather than tables are read either way. Guests
 that earlier readings invented are cleared up in two places: the ones named
 after a section label ("Visit History", "Comments") on start-up, and on the
 next scrape that reads guests properly, any name this parser would never
-produce — a card's summary line, a menu link, the address placeholder. That
-test is the parser's own, so the two cannot drift apart. A scrape that read
-nothing tidies nothing, and a guest somebody has since typed into is kept
-whatever they are named: a duplicate in the list can be fixed by hand, a
-deleted phone number cannot.
+produce — a card's summary line, a menu link, a section of the site, the
+address placeholder. That test is the parser's own, so the two cannot drift
+apart.
+
+**Kept means somebody typed something in**, which is the notes, who invited
+them, their status, or a follow-up having reached them. The address, phone and
+email are no longer part of that test: since the card's details started being
+read from the tracker, a row can carry an address nobody ever typed, and a
+misread row that picked one up was protected by it — which is how "About Us"
+kept its place in the list after the parser had already stopped producing it.
+A scrape that read nothing still tidies nothing.
 
 ### The tracker shows a slice, so the scrape works its controls
 
