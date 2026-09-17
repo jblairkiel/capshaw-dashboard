@@ -107,9 +107,34 @@ describe('composing the two halves', () => {
     expect(b.reminders).toContain('Potluck May 10');
     expect(b.prayer.ongoing).toEqual(['Dean Coffield']);
     expect(b.lastWeek).toMatchObject({ sunday: 250, offering: '$7,125' });
-    expect(b.elders).toEqual([{ name: 'Barry Britnell', duties: [] }]);
+    // The leadership reads as a running paragraph with the names in bold.
+    expect(b.leadership.elders).toEqual([{ text: 'Barry Britnell', bold: true }]);
     expect(b.groups[0]).toMatchObject({ name: 'Group 1', leader: 'Hunter Reece', note: 'Meeting May 17' });
     expect(b.serviceTimes).toMatch(/Sunday AM Worship/);
+    expect(b.dutyRoster.sunday.dates).toEqual(['2026-05-03', '2026-05-10']);
+    expect(b.contacts.groups.map(c => c.label)).toEqual(['Announcements', 'Elder correspondence']);
+    expect(b.contacts.admins.length).toBeGreaterThan(0);
+  });
+
+  test('a name and what follows it are separate runs, so one can be bold', () => {
+    issues.save(SUNDAY, { evangelists: 'Samuel Lopez – Ocosingo, Mexico\nWes Webb – High Springs, Florida' });
+    const { prayer } = issues.compose(SUNDAY);
+    expect(prayer.evangelists).toEqual([
+      { text: 'Samuel Lopez', bold: true },
+      { text: ' – Ocosingo, Mexico', bold: false },
+      { text: '; ', bold: false },
+      { text: 'Wes Webb', bold: true },
+      { text: ' – High Springs, Florida', bold: false },
+    ]);
+  });
+
+  test('a deacon\'s responsibilities are bracketed after the name', () => {
+    db.prepare('INSERT INTO deacons (id,name) VALUES (1,?)').run('Michael Bacci');
+    db.prepare('INSERT INTO deacon_duties (deacon_id,duty,position) VALUES (1,?,0)').run('Treasurer & Finance');
+    expect(issues.compose(SUNDAY).leadership.deacons).toEqual([
+      { text: 'Michael Bacci', bold: true },
+      { text: ' (Treasurer & Finance)', bold: false },
+    ]);
   });
 
   test('any day of the week composes that week', async () => {
@@ -194,8 +219,12 @@ describe('the exports', () => {
     // reads it, Word will too.
     const zip = await JSZip.loadAsync(res.body);
     expect(Object.keys(zip.files)).toEqual(expect.arrayContaining([
-      '[Content_Types].xml', 'word/document.xml', 'word/styles.xml', 'word/numbering.xml',
+      '[Content_Types].xml', 'word/document.xml', 'word/styles.xml',
+      'word/numbering.xml', 'word/media/masthead.jpg',
     ]));
+    // A picture is only shown if something points at it.
+    const rels = await zip.file('word/_rels/document.xml.rels').async('string');
+    expect(rels).toContain('media/masthead.jpg');
 
     const { value: html, messages } = await mammoth.convertToHtml({ buffer: res.body });
     expect(messages).toEqual([]);
@@ -204,6 +233,8 @@ describe('the exports', () => {
     expect(html).toContain('Gal. 6:9');
     expect(html).toContain('Sunday attendance: 250');
     expect(html).toContain('Barry Britnell');
+    expect(html).toContain('Duty Roster');
+    expect(html).toContain('FIND US:');
     // An ampersand in a name is the thing that makes invalid XML if unescaped.
     expect(html).toContain('Dean Coffield &amp; Ruby Rundt');
   });

@@ -11,7 +11,7 @@ const SUNDAY = '2025-06-08';
 
 beforeEach(() => {
   for (const t of [
-    'announcements', 'anniversaries', 'attendance',
+    'announcements', 'anniversaries', 'attendance', 'job_assignments',
     'elder_duties', 'elders', 'deacon_duties', 'deacons',
   ]) db.prepare(`DELETE FROM "${t}"`).run();
 });
@@ -133,8 +133,16 @@ describe('gathering a week', () => {
     db.prepare('INSERT INTO deacon_duties (deacon_id,duty,position) VALUES (1,?,0)').run('Grounds');
 
     const week = bulletin.gather({ sunday: SUNDAY });
-    expect(week.elders).toEqual([{ name: 'An Elder', duties: ['Education', 'Benevolence'] }]);
-    expect(week.deacons).toEqual([{ name: 'A Deacon', duties: ['Grounds'] }]);
+    // The newsletter prints an elder's telephone number and a deacon's
+    // responsibilities, which is the difference between the two tables.
+    expect(week.elders).toEqual([{ name: 'An Elder', phone: '', duties: ['Education', 'Benevolence'] }]);
+    expect(week.deacons).toEqual([{ name: 'A Deacon', phone: '', duties: ['Grounds'] }]);
+  });
+
+  test('an elder\'s telephone number comes through for the newsletter to print', () => {
+    db.prepare('INSERT INTO elders (id,name,phone) VALUES (1,?,?)').run('Barry Britnell', '(256) 541-3405');
+    expect(bulletin.gather({ sunday: SUNDAY }).elders[0])
+      .toEqual({ name: 'Barry Britnell', phone: '(256) 541-3405', duties: [] });
   });
 
   test('the fellowship groups and their addresses come from the distribution lists', () => {
@@ -143,11 +151,53 @@ describe('gathering a week', () => {
     expect(groups).toHaveLength(6);
     expect(groups[0]).toEqual({ key: 'group-1', name: 'Group 1', email: 'group1@capshawchurch.org' });
 
-    // The contacts table advertises the announcement list and the eldership
-    // ahead of the groups, and renames the eldership as the draft prints it.
-    expect(emailContacts[0]).toEqual({ key: 'announcements', label: 'Announcements', email: 'announcements@capshawchurch.org' });
-    expect(emailContacts[1]).toEqual({ key: 'elders', label: 'Elder Correspondence', email: 'elders@capshawchurch.org' });
-    expect(emailContacts).toHaveLength(8);
+    // The contacts panel advertises the two addresses a member actually writes
+    // to. The fellowship groups are reachable by mail but are not listed there.
+    expect(emailContacts).toEqual([
+      { key: 'announcements', label: 'Announcements',        email: 'announcements@capshawchurch.org' },
+      { key: 'elders',        label: 'Elder correspondence', email: 'elders@capshawchurch.org' },
+    ]);
+  });
+
+  test('the duty roster prints this week and next, a row per job', () => {
+    const ins = db.prepare('INSERT INTO job_assignments (month,date,service,job,name) VALUES (?,?,?,?,?)');
+    ins.run('June 2025', 'June 8',  'Sunday Worship', 'Song Leader', 'Blair Kiel');
+    ins.run('June 2025', 'June 15', 'Sunday Worship', 'Song Leader', 'Next Week');
+    ins.run('June 2025', 'June 11', 'Wednesday',      'Speaker',     'Mid Week');
+
+    const { dutyRoster } = bulletin.gather({ sunday: SUNDAY });
+    expect(dutyRoster.sunday.dates).toEqual(['2025-06-08', '2025-06-15']);
+    expect(dutyRoster.wednesday.dates).toEqual(['2025-06-11', '2025-06-18']);
+
+    const songLeader = dutyRoster.sunday.jobs.find(j => j.job === 'Song Leader');
+    expect(songLeader.names).toEqual(['Blair Kiel', 'Next Week']);
+
+    // Every configured job gets a row whether or not anybody is against it —
+    // a blank is how a gap gets noticed.
+    const sermon = dutyRoster.sunday.jobs.find(j => j.job === 'Sermon');
+    expect(sermon.names).toEqual(['', '']);
+
+    expect(dutyRoster.wednesday.jobs.find(j => j.job === 'Speaker').names).toEqual(['Mid Week', '']);
+  });
+
+  test('several people against one job in a week are listed together', () => {
+    const ins = db.prepare('INSERT INTO job_assignments (month,date,service,job,name) VALUES (?,?,?,?,?)');
+    ins.run('June 2025', 'June 8', 'Sunday Worship', 'Ushers', 'Chris Black');
+    ins.run('June 2025', 'June 8', 'Sunday Worship', 'Ushers', 'David Chumbley');
+
+    const { dutyRoster } = bulletin.gather({ sunday: SUNDAY });
+    expect(dutyRoster.sunday.jobs.find(j => j.job === 'Ushers').names[0])
+      .toBe('Chris Black, David Chumbley');
+  });
+
+  test('a job the schedule carries but the roster does not name is still printed', () => {
+    db.prepare('INSERT INTO job_assignments (month,date,service,job,name) VALUES (?,?,?,?,?)')
+      .run('June 2025', 'June 8', 'Sunday Worship', 'Greeter', 'Jo Harris');
+
+    const { dutyRoster } = bulletin.gather({ sunday: SUNDAY });
+    const jobs = dutyRoster.sunday.jobs.map(j => j.job);
+    // After the configured ones, rather than dropped.
+    expect(jobs[jobs.length - 1]).toBe('Greeter');
   });
 
   test('an empty week still returns every section', () => {

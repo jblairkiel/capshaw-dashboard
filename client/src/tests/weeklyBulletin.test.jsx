@@ -16,16 +16,34 @@ function bulletinFor(overrides = {}) {
     prayer: {
       updates: ['Elise Mowrer home from hospital'],
       ongoing: ['Dean Coffield', 'Ruby Rundt'],
-      shutIns: [], pregnancies: [], evangelists: [],
+      shutIns: [], pregnancies: [],
+      // The exports set this one as a paragraph, so it arrives as bold/plain runs.
+      evangelists: [{ text: 'Samuel Lopez', bold: true }, { text: ' – Ocosingo, Mexico', bold: false }],
     },
     lastWeek: { sunday: 250, wednesday: 190, offering: '$7,125', building: '$87,450 (35%)' },
     anniversaries: ['John & Sarah Miller – 15 yrs'],
     birthdays: ['John Smith – May 3'],
     groups: [{ key: 'group-1', name: 'Group 1', email: 'group1@capshawchurch.org', leader: 'Hunter Reece', note: '' }],
     serviceTimes: 'Sunday AM Classes – 9:00',
-    elders: [{ name: 'Barry Britnell', duties: [] }],
-    deacons: [{ name: 'Blair Kiel', duties: ['Grounds'] }],
-    emailContacts: [{ key: 'elders', label: 'Elder Correspondence', email: 'elders@capshawchurch.org' }],
+    dutyRoster: {
+      sunday: {
+        dates: ['2026-05-03', '2026-05-10'],
+        jobs: [
+          { job: 'Song Leader', names: ['Blair Kiel', ''] },
+          { job: 'Sermon',      names: ['', ''] },
+        ],
+      },
+      wednesday: { dates: ['2026-05-06', '2026-05-13'], jobs: [{ job: 'Speaker', names: ['', ''] }] },
+    },
+    leadership: {
+      elders:  [{ text: 'Barry Britnell', bold: true }, { text: ' (256) 541-3405', bold: false }],
+      evangelist: { name: 'Buc Chumbley', phone: '(256) 777-1065' },
+      deacons: [{ text: 'Blair Kiel', bold: true }, { text: ' (Grounds)', bold: false }],
+    },
+    contacts: {
+      groups: [{ key: 'elders', label: 'Elder correspondence', email: 'elders@capshawchurch.org' }],
+      admins: [{ name: 'Blair Kiel', email: 'jblairkiel@gmail.com' }],
+    },
     footer: { address: [], phone: '', website: '', social: [] },
     ...overrides,
   };
@@ -62,7 +80,10 @@ describe('the weekly newsletter screen', () => {
     // comes from so nobody retypes it here.
     expect(screen.getByText('• Potluck May 10 at 6:00 PM')).toBeInTheDocument();
     expect(screen.getByText('• Sunday attendance: 250')).toBeInTheDocument();
-    expect(screen.getByText('• Blair Kiel — Grounds')).toBeInTheDocument();
+    expect(screen.getByText('• Blair Kiel (Grounds)')).toBeInTheDocument();
+    // Only the filled roster slots are previewed; the exports print the blanks.
+    expect(screen.getByText('• Song Leader, May 3: Blair Kiel')).toBeInTheDocument();
+    expect(screen.queryByText(/Sermon/)).toBeNull();
     expect(screen.getAllByText(/^from /).length).toBeGreaterThan(3);
   });
 

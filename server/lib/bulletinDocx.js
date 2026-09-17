@@ -2,28 +2,52 @@
 //
 // Built as OOXML by hand and zipped, the same way server/tests/helpers builds
 // its fixtures and routes/documents.js reads one back. That keeps the feature
-// on the two dependencies the project already had (jszip) rather than adding a
-// document library for one screen.
+// on a dependency the project already had (jszip) rather than adding a document
+// library for one screen.
 //
-// The draft this reproduces lays its content out in 22 floating text boxes at
-// fixed sizes — the prayer column is pinned to 3.13 by 8.65 inches. That is
-// fine for a document a person types once, and wrong for one a program fills:
-// Word does not reflow between floating boxes, so a week with a longer prayer
-// list would silently clip off the page. The side-by-side regions are therefore
-// borderless tables, which look the same and grow instead of clipping.
+// This walks the same composed object as server/lib/bulletinPdf.js and lays the
+// same sections out in the same order, so the two files say the same thing.
+//
+// The printed newsletter positions its content in floating text boxes at fixed
+// sizes. Word does not reflow between those, so a week with a longer prayer
+// list would silently clip off the page; every panel here is a table cell
+// instead, which looks the same and grows. The one thing still floated is the
+// banner artwork, because a masthead is a fixed-size decoration rather than
+// content — it is anchored behind the text so the title can sit on top of it.
 const JSZip  = require('jszip');
+const fs     = require('fs');
 const config = require('./bulletinConfig');
 
-// Twips. US Letter with the draft's one-inch margins leaves this much room.
-const CONTENT_WIDTH = 9360;
+// OOXML measures in twentieths of a point, and drawings in EMU.
+const tw  = pt => Math.round(pt * 20);
+const emu = pt => Math.round(pt * 12700);
 
-const NAVY  = '1F3864';
-const RULE  = 'C9C9C9';
+const PAGE_W  = 612, PAGE_H = 792;
+const MARGIN  = 9;                       // the printed newsletter's own margin
+const CONTENT = PAGE_W - MARGIN * 2;     // 594pt
+
+// Page one's grid: the navy spine, a gap, the narrow column, a gap, the wide
+// one. The gaps are columns of their own so the cards do not touch.
+const GRID = {
+  spine: 16,
+  gap1:  3,
+  left:  204,
+  gap2:  11,
+  right: 360,
+};
+
+const C     = config.colors;
+const NAVY  = C.navy;
+const CARD  = C.card;
+const RULE  = C.rule;
+const PEACH = C.peach;
+const LINK  = C.link;
+const WHITE = C.white;
 
 // ─── XML plumbing ─────────────────────────────────────────────────────────────
 
-// Word will refuse to open a document containing a raw & or <, and the content
-// is congregation names and email addresses, so this is not optional.
+// Word refuses to open a document containing a raw & or <, and the content is
+// congregation names and email addresses, so this is not optional.
 function esc(text) {
   return String(text ?? '')
     .replace(/&/g, '&amp;')
@@ -35,177 +59,403 @@ function esc(text) {
 // One run. Size is in points here and doubled on the way out, because OOXML
 // measures half-points and doing that conversion at every call site is how a
 // document ends up with one heading at the wrong size.
-function run(text, { bold, italic, size = 11, color, font } = {}) {
+function run(text, { bold, italic, size = 10, color, underline } = {}) {
   const props = [
-    font   ? `<w:rFonts w:ascii="${font}" w:hAnsi="${font}"/>` : '',
-    bold   ? '<w:b/>'   : '',
-    italic ? '<w:i/>'   : '',
-    color  ? `<w:color w:val="${color}"/>` : '',
-    `<w:sz w:val="${size * 2}"/><w:szCs w:val="${size * 2}"/>`,
+    bold      ? '<w:b/>' : '',
+    italic    ? '<w:i/>' : '',
+    color     ? `<w:color w:val="${color}"/>` : '',
+    underline ? '<w:u w:val="single"/>' : '',
+    `<w:sz w:val="${Math.round(size * 2)}"/><w:szCs w:val="${Math.round(size * 2)}"/>`,
   ].join('');
   return `<w:r><w:rPr>${props}</w:rPr><w:t xml:space="preserve">${esc(text)}</w:t></w:r>`;
 }
 
-function para(runs, { align, shade, spaceBefore = 0, spaceAfter = 60, bullet, indent, border } = {}) {
+function para(runs, {
+  align, shade, before = 0, after = 40, bullet, indent, hanging, rightIndent, keepNext, border,
+} = {}) {
   const props = [
     bullet !== undefined ? `<w:numPr><w:ilvl w:val="${bullet}"/><w:numId w:val="1"/></w:numPr>` : '',
-    indent ? `<w:ind w:left="${indent}"/>` : '',
-    align ? `<w:jc w:val="${align}"/>` : '',
-    shade ? `<w:shd w:val="clear" w:color="auto" w:fill="${shade}"/>` : '',
-    border ? `<w:pBdr><w:bottom w:val="single" w:sz="6" w:space="2" w:color="${border}"/></w:pBdr>` : '',
-    `<w:spacing w:before="${spaceBefore}" w:after="${spaceAfter}"/>`,
+    indent || rightIndent
+      ? `<w:ind${indent ? ` w:left="${indent}"` : ''}${rightIndent ? ` w:right="${rightIndent}"` : ''}` +
+        `${hanging ? ` w:hanging="${hanging}"` : ''}/>`
+      : '',
+    align  ? `<w:jc w:val="${align}"/>` : '',
+    shade  ? `<w:shd w:val="clear" w:color="auto" w:fill="${shade}"/>` : '',
+    border ? `<w:pBdr>${['top', 'left', 'bottom', 'right']
+      .map(s => `<w:${s} w:val="single" w:sz="6" w:space="6" w:color="${border}"/>`).join('')}</w:pBdr>` : '',
+    keepNext ? '<w:keepNext/>' : '',
+    `<w:spacing w:before="${before}" w:after="${after}"/>`,
   ].join('');
   return `<w:p><w:pPr>${props}</w:pPr>${Array.isArray(runs) ? runs.join('') : runs}</w:p>`;
 }
 
-const EMPTY = '<w:p/>';
+const EMPTY = '<w:p><w:pPr><w:spacing w:after="0"/></w:pPr></w:p>';
 
-function pageBreak() {
-  return '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
+// ─── Cards without nesting ────────────────────────────────────────────────────
+//
+// A panel used to be a one-cell table inside the layout table. Word and its
+// converters size a nested table from its own width rather than the cell's, so
+// the grid blew out and the columns landed anywhere.
+//
+// Consecutive paragraphs carrying identical borders are drawn as one box
+// instead, which is the same picture with no nesting at all. Sections are
+// therefore built as paragraph descriptors and only turned into XML once the
+// card's fill and border are known — a blank, unbordered paragraph between two
+// cards is what stops them merging into one.
+const P = (runs, opts = {}) => ({ runs, opts });
+
+const renderParas = (items, style = {}) =>
+  items.map(({ runs, opts }) => para(runs, { ...opts, ...style })).join('');
+
+// A card's contents. The box around it belongs to the table cell holding this,
+// not to the paragraphs: Word will draw a border on a run of identical
+// paragraphs, but a paragraph border inside a table cell is clipped at the cell
+// edge by some readers, which left cards with a rule above and below and no
+// sides. A cell border is drawn by everything.
+const card = items => renderParas([...items, P('', { after: 0 })]);
+
+const pageBreak = () => '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
+
+// ─── Tables ───────────────────────────────────────────────────────────────────
+
+function borders(kind, color = NAVY, sz = 8) {
+  const sides = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'];
+  return `<w:tblBorders>${sides
+    .map(s => `<w:${s} w:val="${kind}" w:sz="${kind === 'none' ? 0 : sz}" w:space="0" w:color="${kind === 'none' ? 'auto' : color}"/>`)
+    .join('')}</w:tblBorders>`;
 }
 
-// A borderless two-column grid. This is what replaces the draft's floating
-// boxes: the same side-by-side look, but a cell grows downward instead of
-// hiding what does not fit.
-function twoColumn(leftXml, rightXml, leftWidth) {
-  const rightWidth = CONTENT_WIDTH - leftWidth;
-  const cell = (xml, w) =>
-    `<w:tc><w:tcPr><w:tcW w:w="${w}" w:type="dxa"/>` +
-    `<w:tcMar><w:left w:w="0" w:type="dxa"/><w:right w:w="170" w:type="dxa"/></w:tcMar>` +
-    `</w:tcPr>${xml || EMPTY}</w:tc>`;
+// A cell's own borders, which is how a card gets a box: the layout table draws
+// none, and the cards that want one ask for it here.
+function cellBorder(color = NAVY, sz = 8) {
+  return `<w:tcBorders>${['top', 'left', 'bottom', 'right']
+    .map(side => `<w:${side} w:val="single" w:sz="${sz}" w:space="0" w:color="${color}"/>`).join('')}</w:tcBorders>`;
+}
+
+function cell(xml, widthPt, { shade, span, valign, margin = 60, bordered, vMerge } = {}) {
+  const props = [
+    `<w:tcW w:w="${tw(widthPt)}" w:type="dxa"/>`,
+    span ? `<w:gridSpan w:val="${span}"/>` : '',
+    vMerge ? `<w:vMerge${vMerge === 'restart' ? ' w:val="restart"' : ''}/>` : '',
+    bordered ? cellBorder() : '',
+    shade ? `<w:shd w:val="clear" w:color="auto" w:fill="${shade}"/>` : '',
+    valign ? `<w:vAlign w:val="${valign}"/>` : '',
+    `<w:tcMar><w:top w:w="${margin}" w:type="dxa"/><w:left w:w="${margin}" w:type="dxa"/>` +
+      `<w:bottom w:w="${margin}" w:type="dxa"/><w:right w:w="${margin}" w:type="dxa"/></w:tcMar>`,
+  ].join('');
+  // Word requires every cell to end with a paragraph.
+  return `<w:tc><w:tcPr>${props}</w:tcPr>${xml || EMPTY}</w:tc>`;
+}
+
+function table(rows, widths, { kind = 'none', color = NAVY, sz = 8, indent = 0 } = {}) {
+  const total = widths.reduce((a, b) => a + b, 0);
   return (
-    '<w:tbl><w:tblPr><w:tblW w:w="' + CONTENT_WIDTH + '" w:type="dxa"/>' +
-    '<w:tblBorders>' +
-    ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']
-      .map(s => `<w:${s} w:val="none" w:sz="0" w:space="0" w:color="auto"/>`).join('') +
-    '</w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr>' +
-    `<w:tblGrid><w:gridCol w:w="${leftWidth}"/><w:gridCol w:w="${rightWidth}"/></w:tblGrid>` +
-    `<w:tr>${cell(leftXml, leftWidth)}${cell(rightXml, rightWidth)}</w:tr></w:tbl>`
+    '<w:tbl><w:tblPr>' +
+    `<w:tblW w:w="${tw(total)}" w:type="dxa"/>` +
+    (indent ? `<w:tblInd w:w="${tw(indent)}" w:type="dxa"/>` : '') +
+    borders(kind, color, sz) +
+    '<w:tblLayout w:type="fixed"/><w:tblCellMar><w:left w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar>' +
+    '</w:tblPr>' +
+    `<w:tblGrid>${widths.map(w => `<w:gridCol w:w="${tw(w)}"/>`).join('')}</w:tblGrid>` +
+    rows.join('') +
+    '</w:tbl>'
   );
 }
 
-// The email contacts grid, which is a real table in the draft too.
-function contactsTable(contacts) {
-  const rows = contacts.map(c =>
-    '<w:tr>' +
-    `<w:tc><w:tcPr><w:tcW w:w="3600" w:type="dxa"/></w:tcPr>${para(run(c.label, { size: 10 }), { spaceAfter: 20 })}</w:tc>` +
-    `<w:tc><w:tcPr><w:tcW w:w="5760" w:type="dxa"/></w:tcPr>${para(run(c.email, { size: 10 }), { spaceAfter: 20 })}</w:tc>` +
-    '</w:tr>'
-  ).join('');
-
-  return (
-    '<w:tbl><w:tblPr><w:tblW w:w="' + CONTENT_WIDTH + '" w:type="dxa"/>' +
-    '<w:tblBorders>' +
-    ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']
-      .map(s => `<w:${s} w:val="single" w:sz="4" w:space="0" w:color="${RULE}"/>`).join('') +
-    '</w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr>' +
-    '<w:tblGrid><w:gridCol w:w="3600"/><w:gridCol w:w="5760"/></w:tblGrid>' +
-    rows + '</w:tbl>'
-  );
-}
+const row = (cells, { header = false, height = 0 } = {}) =>
+  `<w:tr><w:trPr>${header ? '<w:tblHeader/>' : ''}${height ? `<w:trHeight w:val="${tw(height)}" w:hRule="atLeast"/>` : ''}</w:trPr>${cells.join('')}</w:tr>`;
 
 // ─── The newsletter's own pieces ──────────────────────────────────────────────
 
-// A section heading, as the draft sets them: bold italic, navy, ruled under.
-function heading(text) {
-  return para(run(text, { bold: true, italic: true, size: 12, color: NAVY }),
-    { spaceBefore: 160, spaceAfter: 60, border: RULE });
+// These three return paragraph descriptors rather than XML, because a card
+// decides its own fill and border and applies them to every paragraph it holds.
+const heading = (text, { size = 12, plain = false, after = 40 } = {}) =>
+  [P(run(text, { bold: true, italic: !plain, size, color: NAVY }), { before: 40, after, keepNext: true })];
+
+function bullets(items, { size = 8.5 } = {}) {
+  if (!items.length) return [P(run('—', { size, color: '888888' }), { indent: 220, after: 20 })];
+  return items.map(item => {
+    const sub  = typeof item === 'object' && item.level;
+    const text = typeof item === 'object' ? item.text : item;
+    return P(run(text, { size, italic: !!sub }), { bullet: sub ? 1 : 0, after: 20 });
+  });
 }
 
-function bullets(items, level = 0) {
-  if (!items.length) return para(run('—', { size: 10, color: '888888' }), { indent: 360, spaceAfter: 40 });
-  return items.map(i => para(run(i, { size: 10 }), { bullet: level, spaceAfter: 20 })).join('');
-}
+// A running paragraph whose names are bold and whose remainders are not.
+const segments = (segs, { size = 9 } = {}) =>
+  [P(segs.map(s => run(s.text, { size, bold: s.bold })), { after: 40 })];
 
-// A prayer block only appears when it has something in it: an empty "Shut-Ins"
-// heading in a printed newsletter reads as a mistake rather than as good news.
-function prayerBlock(title, items) {
-  if (!items.length) return '';
-  return heading(title) + bullets(items);
-}
-
-function body(b) {
-  const parts = [];
-
-  // ── Masthead ──
-  parts.push(para(run(b.masthead, { bold: true, italic: true, size: 20, color: 'FFFFFF' }),
-    { align: 'center', shade: NAVY, spaceBefore: 0, spaceAfter: 0 }));
-  parts.push(para(run(b.sundayLabel, { bold: true, size: 12, color: 'FFFFFF' }),
-    { align: 'center', shade: NAVY, spaceBefore: 0, spaceAfter: 120 }));
-
-  // ── Quote ──
-  if (b.quote) {
-    const text = b.quoteRef ? `“${b.quote}” – ${b.quoteRef}` : `“${b.quote}”`;
-    parts.push(para(run(text, { italic: true, size: 10 }), { align: 'center', spaceAfter: 160 }));
-  }
-
-  // ── Reminders beside the prayer list ──
-  const left = heading('Reminders:') + bullets(b.reminders);
-
-  const right = [
-    para(run('Prayer Requests', { bold: true, size: 14, color: NAVY }), { spaceAfter: 60 }),
-    prayerBlock('Updates',               b.prayer.updates),
-    prayerBlock('Ongoing',               b.prayer.ongoing),
-    prayerBlock('Shut-Ins',              b.prayer.shutIns),
-    prayerBlock('Pregnancies',           b.prayer.pregnancies),
-    prayerBlock('Evangelists We Support', b.prayer.evangelists),
-  ].join('');
-
-  parts.push(twoColumn(left, right, 3400));
-  parts.push(pageBreak());
-
-  // ── Service times ──
-  parts.push(para(run(b.serviceTimes, { bold: true, italic: true, size: 11, color: 'FFFFFF' }),
-    { align: 'center', shade: NAVY, spaceAfter: 160 }));
-
-  // ── Last week, dates and groups, beside the leadership ──
-  const dataLines = [
+function lastWeekLines(b) {
+  const lines = [
     b.lastWeek.sunday    != null ? `Sunday attendance: ${b.lastWeek.sunday}`       : null,
     b.lastWeek.wednesday != null ? `Wednesday attendance: ${b.lastWeek.wednesday}` : null,
     b.lastWeek.offering          ? `Offering: ${b.lastWeek.offering}`              : null,
     b.lastWeek.building          ? `Building progress: ${b.lastWeek.building}`     : null,
   ].filter(Boolean);
+  return lines.length ? lines : ['—'];
+}
 
-  const groupLines = b.groups.flatMap(g => {
-    const label = g.leader ? `${g.name} – Leader: ${g.leader}` : g.name;
-    const out = [para(run(label, { size: 10 }), { bullet: 0, spaceAfter: 20 })];
-    if (g.note) out.push(para(run(g.note, { size: 10, italic: true }), { bullet: 1, spaceAfter: 20 }));
-    return out;
+// The banner: the artwork anchored behind the text, then the title over it.
+// Fixed size, so floating it carries none of the risk that floating the content
+// would. rId3 is the image relationship declared in DOC_RELS below.
+function mastheadXml(b, hasImage) {
+  const drawing = hasImage ? `<w:r><w:drawing>
+<wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="1" behindDoc="1" locked="0" layoutInCell="1" allowOverlap="1">
+<wp:simplePos x="0" y="0"/>
+<wp:positionH relativeFrom="page"><wp:posOffset>${emu(MARGIN)}</wp:posOffset></wp:positionH>
+<wp:positionV relativeFrom="page"><wp:posOffset>${emu(6)}</wp:posOffset></wp:positionV>
+<wp:extent cx="${emu(CONTENT)}" cy="${emu(101)}"/>
+<wp:effectExtent l="0" t="0" r="0" b="0"/>
+<wp:wrapNone/>
+<wp:docPr id="1" name="Masthead"/>
+<wp:cNvGraphicFramePr/>
+<a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+<a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+<pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+<pic:nvPicPr><pic:cNvPr id="1" name="Masthead"/><pic:cNvPicPr/></pic:nvPicPr>
+<pic:blipFill><a:blip r:embed="rId3"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>
+<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${emu(CONTENT)}" cy="${emu(101)}"/></a:xfrm>
+<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>
+</pic:pic></a:graphicData></a:graphic>
+</wp:anchor></w:drawing></w:r>` : '';
+
+  return [
+    // The anchor rides on the title paragraph so the picture cannot be orphaned
+    // onto a page of its own.
+    `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="${tw(14)}" w:after="0"/></w:pPr>` +
+      drawing + run(b.masthead, { bold: true, size: 25, color: NAVY }) + '</w:p>',
+    para(run(b.sundayLabel, { bold: true, size: 12, color: NAVY }),
+      { align: 'center', before: tw(22), after: tw(14) }),
+  ].join('');
+}
+
+// ─── Page one ─────────────────────────────────────────────────────────────────
+
+function pageOne(b, hasImage) {
+  const parts = [mastheadXml(b, hasImage)];
+
+  if (b.quote) {
+    const text = b.quoteRef ? `“${b.quote}” – ${b.quoteRef}` : `“${b.quote}”`;
+    parts.push(para(run(text, { bold: true, italic: true, size: 9.5, color: NAVY }),
+      { align: 'center', after: 100 }));
+  }
+
+  // ── Left column: three grey cards ──
+  const groupItems = [];
+  for (const g of b.groups) {
+    groupItems.push(g.leader ? `${g.name} \u2013 Leader: ${g.leader}` : g.name);
+    if (g.note) groupItems.push({ text: g.note, level: 1 });
+  }
+
+  const leftCards = [
+    card([
+      ...heading('Reminders:', { size: 11, plain: true }),
+      ...bullets(b.reminders),
+    ]),
+    card([
+      ...heading('Last Week\u2019s Data:', { size: 11, plain: true }),
+      ...bullets(lastWeekLines(b)),
+      ...heading('Anniversaries:', { size: 11, plain: true }),
+      ...bullets(b.anniversaries),
+      ...heading('Birthdays:', { size: 11, plain: true }),
+      ...bullets(b.birthdays),
+    ]),
+    card([
+      ...heading('Groups:', { size: 11, plain: true }),
+      ...bullets(groupItems),
+    ]),
+  ];
+
+  // ── Right column: the prayer panel ──
+  const prayer = [];
+  const add = (title, items) => {
+    // An empty heading in a printed newsletter reads as a mistake rather than
+    // as good news, so a block with nothing in it is left out entirely.
+    if (!items.length) return;
+    prayer.push(...heading(title, { size: 13 }), ...bullets(items, { size: 10 }));
+  };
+  add('Updates',     b.prayer.updates);
+  add('Ongoing',     b.prayer.ongoing);
+  add('Shut-Ins',    b.prayer.shutIns);
+  add('Pregnancies', b.prayer.pregnancies);
+  if (b.prayer.evangelists.length) {
+    prayer.push(...heading('Evangelists We Support', { size: 13 }),
+                ...segments(b.prayer.evangelists, { size: 10 }));
+  }
+  if (!prayer.length) prayer.push(P(run('\u2014', { color: '888888' })));
+
+  // The heading band sits inside the panel rather than above it, because the
+  // right column is one merged cell: a second cell for it would have to share a
+  // row boundary with the left column, and the two columns do not divide at the
+  // same heights.
+  const rightColumn =
+    para(run('Prayer Requests', { bold: true, size: 20, color: WHITE }),
+      { shade: NAVY, before: 0, after: 80 }) +
+    card(prayer);
+
+  // ── The body ──
+  //
+  // One table, no nesting. Each grey card is a cell of its own so that its box
+  // is a cell border, which every reader draws; the spine and the prayer panel
+  // are merged down the whole height beside them. Nesting a table inside a cell
+  // was the alternative and it makes Word re-fit the outer grid, which threw
+  // the columns across the page.
+  const GAP_ROW = 6;
+  const widths  = [GRID.spine, GRID.gap1, GRID.left, GRID.gap2, GRID.right];
+
+  const bodyRows = [];
+  leftCards.forEach((xml, i) => {
+    const first = i === 0;
+    const merge = first ? 'restart' : 'continue';
+
+    if (!first) {
+      // A blank row between two cards, so their boxes do not touch.
+      bodyRows.push(row([
+        cell(EMPTY, GRID.spine, { shade: NAVY, margin: 0, vMerge: 'continue' }),
+        cell(EMPTY, GRID.gap1,  { margin: 0, vMerge: 'continue' }),
+        cell(EMPTY, GRID.left,  { margin: 0 }),
+        cell(EMPTY, GRID.gap2,  { margin: 0, vMerge: 'continue' }),
+        cell(EMPTY, GRID.right, { margin: 0, vMerge: 'continue' }),
+      ], { height: GAP_ROW }));
+    }
+
+    bodyRows.push(row([
+      cell(EMPTY, GRID.spine, { shade: NAVY, margin: 0, vMerge: merge }),
+      cell(EMPTY, GRID.gap1,  { margin: 0, vMerge: merge }),
+      cell(xml,   GRID.left,  { shade: CARD, bordered: true, margin: 90 }),
+      cell(EMPTY, GRID.gap2,  { margin: 0, vMerge: merge }),
+      first
+        ? cell(rightColumn, GRID.right, { bordered: true, margin: 90, vMerge: 'restart' })
+        : cell(EMPTY, GRID.right, { margin: 0, vMerge: 'continue' }),
+    ]));
   });
 
-  const leftTwo = [
-    heading('Last Week’s Data:'), bullets(dataLines),
-    heading('Anniversaries:'),    bullets(b.anniversaries),
-    heading('Birthdays:'),        bullets(b.birthdays),
-    heading('Groups:'),           groupLines.length ? groupLines.join('') : bullets([]),
-  ].join('');
+  parts.push(table(bodyRows, widths));
 
-  const person = p => para(
-    run(p.duties.length ? `${p.name} — ${p.duties.join(', ')}` : p.name, { size: 10 }),
-    { bullet: 0, spaceAfter: 20 }
-  );
+  parts.push(para(run(b.serviceTimes, { bold: true, italic: true, size: 9.5, color: NAVY }),
+    { align: 'center', shade: PEACH, border: NAVY, before: 120, after: 0 }));
 
-  const rightTwo = [
-    heading('Elders'),
-    b.elders.length  ? b.elders.map(person).join('')  : bullets([]),
-    heading('Deacons / Responsibilities'),
-    b.deacons.length ? b.deacons.map(person).join('') : bullets([]),
-  ].join('');
+  return parts.join('');
+}
 
-  parts.push(twoColumn(leftTwo, rightTwo, 4000));
+// ─── Page two ─────────────────────────────────────────────────────────────────
+
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December'];
+
+function longLabel(iso) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${MONTHS[Number(m[2]) - 1]} ${Number(m[3])}, ${m[1]}` : '';
+}
+
+function rosterTable(b) {
+  const labelW = 200;
+  const colW   = (CONTENT - labelW) / 2;
+  const widths = [labelW, colW, colW];
+
+  const rows = [
+    row([cell(
+      para(run('Duty Roster', { bold: true, italic: true, size: 10, color: NAVY }), { align: 'center', after: 0 }),
+      CONTENT, { shade: RULE, span: 3 },
+    )]),
+  ];
+
+  const section = (label, part) => {
+    rows.push(row([
+      cell(para(run(label, { bold: true, size: 9, color: NAVY }), { after: 0 }), labelW, { shade: CARD }),
+      ...part.dates.map(d => cell(
+        para(run(longLabel(d), { bold: true, size: 9, color: NAVY }), { align: 'center', after: 0 }),
+        colW, { shade: CARD },
+      )),
+    ], { header: true }));
+
+    for (const job of part.jobs) {
+      rows.push(row([
+        cell(para(run(job.job, { size: 9 }), { after: 0 }), labelW),
+        ...job.names.map(n => cell(
+          para(run(n || '', { size: 9 }), { align: 'center', after: 0 }), colW,
+        )),
+      ], { height: 13 }));
+    }
+  };
+
+  section('Sunday',    b.dutyRoster.sunday);
+  section('Wednesday', b.dutyRoster.wednesday);
+
+  return table(rows, widths, { kind: 'single', color: '000000', sz: 4 });
+}
+
+function pageTwo(b) {
+  const parts = [rosterTable(b), EMPTY];
+
+  const leftW  = 331;
+  const gap    = 8;
+  const rightW = CONTENT - leftW - gap;
+
+  // ── Leadership ──
+  const leadership = [...heading('Elders', { size: 12 })];
+  leadership.push(...(b.leadership.elders.length
+    ? segments(b.leadership.elders)
+    : [P(run('\u2014', { color: '888888' }))]));
+
+  if (b.leadership.evangelist?.name) {
+    leadership.push(...heading('Evangelist', { size: 12 }), ...segments([
+      { text: b.leadership.evangelist.name, bold: true },
+      { text: ` ${b.leadership.evangelist.phone}` },
+    ]));
+  }
+
+  leadership.push(...heading('Deacons', { size: 12 }));
+  leadership.push(...(b.leadership.deacons.length
+    ? segments(b.leadership.deacons)
+    : [P(run('\u2014', { color: '888888' }))]));
 
   // ── Contacts ──
-  parts.push(heading('Key Email Contacts:'));
-  parts.push(contactsTable(b.emailContacts));
-  parts.push(EMPTY);
-
-  // ── Footer ──
-  for (const line of b.footer.address) {
-    parts.push(para(run(line, { size: 9 }), { align: 'center', spaceAfter: 0 }));
+  const contacts = [...heading('Key Email Contacts', { size: 12 })];
+  for (const c of b.contacts.groups) {
+    contacts.push(
+      P(run(`${c.label}:`, { bold: true, size: 9 }), { after: 20 }),
+      P(run(c.email, { size: 9, color: LINK, underline: true }), { after: 60 }),
+    );
   }
-  parts.push(para(run(`${b.footer.phone}  ·  ${b.footer.website}`, { size: 9 }), { align: 'center', spaceAfter: 0 }));
-  parts.push(para(run(b.footer.social.map(([k, v]) => `${k}: ${v}`).join('  ·  '), { size: 9, color: '595959' }),
-    { align: 'center', spaceAfter: 0 }));
+  if (b.contacts.admins.length) {
+    contacts.push(P(run('Website Admins', { bold: true, size: 9 }), { after: 40 }));
+    for (const a of b.contacts.admins) {
+      contacts.push(P([
+        run(`${a.name} - `, { size: 9 }),
+        run(a.email, { size: 9, color: LINK, underline: true }),
+      ], { after: 20 }));
+    }
+  }
+
+  // ── Find us ──
+  const findUsLines = [
+    ...b.footer.address.map(l => P(run(l, { size: 9, color: WHITE }), { align: 'center', after: 40 })),
+    P(run(b.footer.phone,   { size: 9, color: WHITE }), { align: 'center', after: 40 }),
+    P(run(b.footer.website, { size: 9, color: WHITE }), { align: 'center', after: 60 }),
+    ...b.footer.social.map(([k, v]) =>
+      P(run(`${k}: ${v}`, { size: 8.5, color: WHITE }), { after: 20 })),
+  ];
+
+  // The same shape as page one's body: every box is a cell, and the leadership
+  // panel is merged down beside the three stacked on the right.
+  const rightStack = [
+    { xml: card(contacts),      shade: WHITE, bordered: true },
+    { xml: EMPTY,               spacer: true },
+    { xml: para(run('FIND US:', { bold: true, size: 11, color: NAVY }), { align: 'center', after: 0 }),
+      shade: CARD, bordered: true },
+    { xml: card(findUsLines),   shade: NAVY, bordered: true },
+  ];
+
+  parts.push(table(rightStack.map((entry, i) => row([
+    i === 0
+      ? cell(card(leadership), leftW, { bordered: true, margin: 90, vMerge: 'restart' })
+      : cell(EMPTY, leftW, { margin: 0, vMerge: 'continue' }),
+    cell(EMPTY, gap, { margin: 0, vMerge: i === 0 ? 'restart' : 'continue' }),
+    entry.spacer
+      ? cell(EMPTY, rightW, { margin: 0 })
+      : cell(entry.xml, rightW, { shade: entry.shade, bordered: entry.bordered, margin: 90 }),
+  ], entry.spacer ? { height: 6 } : {})), [leftW, gap, rightW]));
 
   return parts.join('');
 }
@@ -216,6 +466,8 @@ const CONTENT_TYPES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="jpeg" ContentType="image/jpeg"/>
+  <Default Extension="jpg" ContentType="image/jpeg"/>
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
   <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
   <Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>
@@ -226,10 +478,11 @@ const ROOT_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>`;
 
-const DOC_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+const docRels = hasImage => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
   <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>
+  ${hasImage ? '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/masthead.jpg"/>' : ''}
 </Relationships>`;
 
 const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -237,58 +490,78 @@ const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
   <w:docDefaults>
     <w:rPrDefault><w:rPr>
       <w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/>
-      <w:sz w:val="22"/><w:szCs w:val="22"/>
+      <w:sz w:val="20"/><w:szCs w:val="20"/>
     </w:rPr></w:rPrDefault>
-    <w:pPrDefault><w:pPr><w:spacing w:after="120" w:line="252" w:lineRule="auto"/></w:pPr></w:pPrDefault>
+    <w:pPrDefault><w:pPr><w:spacing w:after="80" w:line="240" w:lineRule="auto"/></w:pPr></w:pPrDefault>
   </w:docDefaults>
-  <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
-    <w:name w:val="Normal"/><w:qFormat/>
-  </w:style>
+  <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>
 </w:styles>`;
 
-// Two levels of bullet, which is all the draft uses (a group's meeting note
-// sits under the group).
+// Two levels of bullet, which is all the newsletter uses (a group's meeting
+// note sits under the group).
 const NUMBERING = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:abstractNum w:abstractNumId="0">
     <w:multiLevelType w:val="hybridMultilevel"/>
     <w:lvl w:ilvl="0">
-      <w:start w:val="1"/><w:numFmt w:val="bullet"/><w:lvlText w:val="•"/><w:lvlJc w:val="left"/>
-      <w:pPr><w:ind w:left="360" w:hanging="220"/></w:pPr>
-      <w:rPr><w:rFonts w:ascii="Symbol" w:hAnsi="Symbol" w:hint="default"/></w:rPr>
+      <w:start w:val="1"/><w:numFmt w:val="bullet"/><w:lvlText w:val="&#8226;"/><w:lvlJc w:val="left"/>
+      <w:pPr><w:ind w:left="260" w:hanging="200"/></w:pPr>
+      <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:hint="default"/></w:rPr>
     </w:lvl>
     <w:lvl w:ilvl="1">
-      <w:start w:val="1"/><w:numFmt w:val="bullet"/><w:lvlText w:val="o"/><w:lvlJc w:val="left"/>
-      <w:pPr><w:ind w:left="720" w:hanging="220"/></w:pPr>
-      <w:rPr><w:rFonts w:ascii="Courier New" w:hAnsi="Courier New" w:hint="default"/></w:rPr>
+      <w:start w:val="1"/><w:numFmt w:val="bullet"/><w:lvlText w:val="&#9702;"/><w:lvlJc w:val="left"/>
+      <w:pPr><w:ind w:left="260" w:hanging="200"/></w:pPr>
+      <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:hint="default"/></w:rPr>
     </w:lvl>
   </w:abstractNum>
   <w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>
 </w:numbering>`;
 
 const SECTION =
-  '<w:sectPr><w:pgSz w:w="12240" w:h="15840"/>' +
-  '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/>' +
-  '<w:cols w:space="720"/></w:sectPr>';
+  `<w:sectPr><w:pgSz w:w="${tw(PAGE_W)}" w:h="${tw(PAGE_H)}"/>` +
+  `<w:pgMar w:top="${tw(MARGIN)}" w:right="${tw(MARGIN)}" w:bottom="${tw(MARGIN)}" w:left="${tw(MARGIN)}" ` +
+  `w:header="0" w:footer="0" w:gutter="0"/><w:cols w:space="720"/></w:sectPr>`;
+
+const NS = [
+  'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"',
+  'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"',
+  'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"',
+  'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"',
+  'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"',
+].join(' ');
+
+function body(b, hasImage) {
+  return pageOne(b, hasImage) + pageBreak() + pageTwo(b);
+}
 
 // A .docx of the composed newsletter, as a Buffer.
 async function render(bulletin) {
+  let image = null;
+  try {
+    if (fs.existsSync(config.mastheadImage)) image = await fs.promises.readFile(config.mastheadImage);
+  } catch {
+    // A missing or unreadable banner is a plainer newsletter, not a failed one.
+    image = null;
+  }
+  const hasImage = !!image;
+
   const document = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body(bulletin)}${SECTION}</w:body></w:document>`;
+<w:document ${NS}><w:body>${body(bulletin, hasImage)}${SECTION}</w:body></w:document>`;
 
   const zip = new JSZip();
   zip.file('[Content_Types].xml', CONTENT_TYPES);
   zip.folder('_rels').file('.rels', ROOT_RELS);
+
   const word = zip.folder('word');
   word.file('document.xml', document);
   word.file('styles.xml', STYLES);
   word.file('numbering.xml', NUMBERING);
-  word.folder('_rels').file('document.xml.rels', DOC_RELS);
+  word.folder('_rels').file('document.xml.rels', docRels(hasImage));
+  if (hasImage) word.folder('media').file('masthead.jpg', image);
 
   return zip.generateAsync({ type: 'nodebuffer' });
 }
 
-// 'capshaw-newsletter-2026-05-03.docx'
 function filename(bulletin) {
   return `capshaw-newsletter-${bulletin.sunday}.docx`;
 }

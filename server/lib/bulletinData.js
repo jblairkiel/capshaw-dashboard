@@ -235,15 +235,71 @@ function anniversariesInWeek(start) {
   };
 }
 
-// Elders and deacons with what each looks after. Both tables have the same
-// shape, so one query shape serves both.
-function leadership(table, dutiesTable, key) {
-  const people = db.prepare(`SELECT id, name FROM "${table}" ORDER BY name ASC`).all();
-  const duties = db.prepare(`SELECT "${key}" AS person_id, duty FROM "${dutiesTable}" ORDER BY position ASC, id ASC`).all();
+// Elders and deacons with what each looks after. The newsletter prints an
+// elder's telephone number and a deacon's responsibilities, which is exactly
+// the difference between the two tables — only elders carry contact columns.
+function leadership(table, dutiesTable, key, withPhone = false) {
+  const columns = withPhone ? 'id, name, phone' : 'id, name';
+  const people  = db.prepare(`SELECT ${columns} FROM "${table}" ORDER BY name ASC`).all();
+  const duties  = db.prepare(`SELECT "${key}" AS person_id, duty FROM "${dutiesTable}" ORDER BY position ASC, id ASC`).all();
   return people.map(p => ({
     name:   p.name,
+    phone:  withPhone ? (p.phone || '') : '',
     duties: duties.filter(d => d.person_id === p.id).map(d => d.duty),
   }));
+}
+
+// ─── The duty roster ──────────────────────────────────────────────────────────
+//
+// Two weeks side by side, as the printed roster shows them: this Sunday and
+// next, and the Wednesday that follows each. Every configured job gets a row
+// whether or not anybody is against it — a blank is how a gap gets noticed —
+// and a job somebody added to the schedule without it being configured is
+// listed after the known ones rather than dropped.
+//
+// job_assignments is the scraped monthly sheet, so its dates need the heading
+// and the row read together; see isoFromMonthDay above.
+function rosterSlots(dates) {
+  const wanted = new Set(dates);
+  return db.prepare("SELECT month, date, service, job, name FROM job_assignments WHERE month <> '' ORDER BY id ASC")
+    .all()
+    .map(r => ({ ...r, isoDate: isoFromMonthDay(r.month, r.date) }))
+    .filter(r => r.isoDate && wanted.has(r.isoDate));
+}
+
+function rosterSection(slots, dates, configured) {
+  // Configured order first, then anything else the schedule happens to carry.
+  const extra = [...new Set(slots.map(s => s.job).filter(j => j && !configured.includes(j)))].sort();
+  const jobs  = [...configured, ...extra];
+
+  return {
+    dates,
+    jobs: jobs.map(job => ({
+      job,
+      // One cell per week. Several people can hold one job in a week (the
+      // communion assists are a list), so the names are joined rather than
+      // the first one winning.
+      names: dates.map(date =>
+        slots
+          .filter(s => s.job === job && s.isoDate === date && String(s.name || '').trim())
+          .map(s => s.name.trim())
+          .join(', ')
+      ),
+    })),
+  };
+}
+
+function dutyRoster(sunday) {
+  const sundays    = [sunday, addDays(sunday, 7)];
+  const wednesdays = sundays.map(d => addDays(d, 3));
+
+  const slots = rosterSlots([...sundays, ...wednesdays]);
+  const isWed = s => /wednesday/i.test(String(s.service || '')) || wednesdays.includes(s.isoDate);
+
+  return {
+    sunday:    rosterSection(slots.filter(s => !isWed(s)), sundays,    config.dutyJobs.sunday),
+    wednesday: rosterSection(slots.filter(s =>  isWed(s)), wednesdays, config.dutyJobs.wednesday),
+  };
 }
 
 // A distribution group's address: the key with its hyphen dropped, at the
@@ -300,7 +356,8 @@ function gather({ sunday } = {}) {
       attendance: attendanceFor(previous),
     },
 
-    elders:        leadership('elders',  'elder_duties',  'elder_id'),
+    dutyRoster:    dutyRoster(start),
+    elders:        leadership('elders',  'elder_duties',  'elder_id', true),
     deacons:       leadership('deacons', 'deacon_duties', 'deacon_id'),
     groups:        groups(),
     emailContacts: emailContacts(),
@@ -309,6 +366,7 @@ function gather({ sunday } = {}) {
 
 module.exports = {
   gather,
+  dutyRoster,
   // Exported for the tests, and because the date reading is the part most
   // likely to need adjusting when another table changes format.
   toIsoDate,

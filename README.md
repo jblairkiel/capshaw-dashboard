@@ -758,7 +758,9 @@ a different handle, or `YOUTUBE_CHANNEL_ID` to skip the lookup entirely.
 ## Weekly Newsletter
 
 **Church Office → Weekly Newsletter** builds the congregation's newsletter for
-one week and exports it as a `.docx` or a `.pdf`.
+one week and exports it as a `.docx` or a `.pdf`, laid out like the printed
+one: a banner, a verse, a column of grey cards beside the prayer panel, then a
+two-week duty roster with the leadership and contacts under it.
 
 The page is in two halves, and the split is the whole idea.
 
@@ -770,7 +772,8 @@ built, so a correction on the page that owns it is a correction in the export:
 | Reminders | Announcements — the dated events in the next 60 days, then the standing notices |
 | Last Week's Data | Attendance — last week's Sunday morning worship and Wednesday counts |
 | Anniversaries, Birthdays | Birthdays & Anniversaries |
-| Elders, Deacons | Elders & Deacons, with what each looks after |
+| Duty Roster | Serving Schedule — this Sunday and next, and the Wednesday after each |
+| Elders (with telephone numbers), Deacons (with responsibilities) | Elders & Deacons |
 | Groups, Key Email Contacts | Email Groups |
 
 **What nobody else keeps** is typed on the page and stored per week in
@@ -789,26 +792,45 @@ Reading a week is open to anybody signed in. Writing and exporting need the
 `bulletin` area: an export goes out to the congregation under the church's
 name, rather than being another view of records the portal already shows.
 
+### Changing the parts that are not records
+
+The masthead, its banner artwork, the service times, the congregation's
+evangelist, the website admins, the duty roster's job list, the reminder
+window and the newsletter's palette are facts rather than records — nothing in
+the portal edits them. They live in `server/lib/bulletinConfig.js`, which is
+where to change the phone number or add a job to the roster. The banner itself
+is `server/assets/masthead.jpg`, stored already lightened so the navy title
+reads over it.
+
 ### Notes on the two files
 
-The masthead, service times and footer are congregation facts rather than
-records, so they live in `server/lib/bulletinConfig.js` — that is where to
-change the phone number or widen the reminder window.
+Both renderers walk the same composed object, which is what keeps the two
+files saying the same thing. The `.docx` is assembled as OOXML and zipped with
+`jszip` (the same library `routes/documents.js` reads an uploaded one back
+with); the `.pdf` is drawn with `pdfkit`, which is pure JavaScript and so
+needs nothing added to the runtime image.
 
-The source document laid its content out in floating text boxes at fixed
-sizes. Word does not reflow between those, so a week with a longer prayer list
-would have clipped off the page; the side-by-side regions are borderless
-tables instead, which look the same and grow. The `.docx` is assembled as
-OOXML and zipped with `jszip` (the same library `routes/documents.js` reads an
-uploaded one back with); the `.pdf` is drawn with `pdfkit`, which is pure
-JavaScript and so needs nothing added to the runtime image. Both renderers
-walk the same composed object, which is what keeps the two files saying the
-same thing.
+Three things about the layout are worth knowing before changing it:
 
-Two quirks of the existing data are worth knowing. The tables disagree about
-what a date is — `MM/DD/YY` in the scraped attendance, `June 2025` plus
-`June 7` across two columns of the job sheet, a bare month and day for the
-recurring anniversaries, ISO from the announcement form — so
+- The printed newsletter positions its content in floating text boxes at fixed
+  sizes. Word does not reflow between those, so a week with a longer prayer
+  list would silently clip off the page. Every panel is a **table cell**
+  instead, which looks the same and grows. The banner is the one thing still
+  floated, because a masthead is a fixed-size decoration rather than content.
+
+- A card's box is the **cell's** border, not its paragraphs'. Word will draw a
+  box around a run of identically-bordered paragraphs, but some readers clip
+  the left and right sides of a paragraph border at the cell edge, which left
+  cards with a rule above and below and no sides.
+
+- Nesting a table inside a cell makes Word re-fit the outer grid and throws the
+  columns across the page, so there is none. Page one is one table whose spine
+  and prayer panel are vertically merged down beside the stack of grey cards.
+
+Two quirks of the existing data also matter. The tables disagree about what a
+date is — `MM/DD/YY` in the scraped attendance, `June 2025` plus `June 7`
+across two columns of the job sheet, a bare month and day for the recurring
+anniversaries, ISO from the announcement form — so
 `server/lib/bulletinData.js` normalises everything to ISO and drops a row it
 cannot read rather than guessing. And birthdays and anniversaries share one
 table with no column saying which, while the newsletter prints them under

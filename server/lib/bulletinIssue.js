@@ -128,13 +128,44 @@ function list(limit = 26) {
 
 // ─── Merging the two halves ───────────────────────────────────────────────────
 
-// A typed block becomes one bullet per non-empty line. Trailing blank lines and
+// A typed block becomes one entry per non-empty line. Trailing blank lines and
 // stray whitespace are a consequence of typing, not content.
 function lines(block) {
   return String(block || '')
     .split(/\r?\n/)
     .map(s => s.trim())
     .filter(Boolean);
+}
+
+// ─── Rich text ────────────────────────────────────────────────────────────────
+//
+// Three of the newsletter's blocks are a running paragraph rather than a list,
+// with each person's name in bold and what follows it in ordinary weight — the
+// evangelists, the elders and the deacons all read that way. Both renderers
+// need that distinction, so it is expressed once here as a list of segments
+// and walked twice, rather than each renderer re-deriving it from a string.
+function segment(text, bold = false) {
+  return { text, bold };
+}
+
+// 'Samuel Lopez – Ocosingo, Mexico' → the name bold, the rest plain. The split
+// is on the first dash of either kind; a line without one is all name, which is
+// what a bare list of people should look like.
+function splitName(entry) {
+  const m = String(entry).match(/^(.*?)\s*[–—-]\s*(.+)$/);
+  return m ? { name: m[1].trim(), rest: m[2].trim() } : { name: String(entry).trim(), rest: '' };
+}
+
+// Joins people into one paragraph: bold name, plain remainder, separated.
+function nameParagraph(entries, { separator = ', ', wrap = null, joiner = ' ' } = {}) {
+  const out = [];
+  entries.forEach((entry, i) => {
+    if (i) out.push(segment(separator));
+    const { name, rest } = typeof entry === 'string' ? splitName(entry) : entry;
+    out.push(segment(name, true));
+    if (rest) out.push(segment(wrap ? ` ${wrap[0]}${rest}${wrap[1]}` : `${joiner}${rest}`));
+  });
+  return out;
 }
 
 // Everything both renderers need, in the order the newsletter prints it. The
@@ -163,7 +194,9 @@ function compose(sunday) {
       ongoing:     lines(issue.ongoing),
       shutIns:     lines(issue.shut_ins),
       pregnancies: lines(issue.pregnancies),
-      evangelists: lines(issue.evangelists),
+      // The one prayer block the newsletter sets as a paragraph rather than a
+      // list, because it is long and every entry is the same shape.
+      evangelists: nameParagraph(lines(issue.evangelists), { separator: '; ', joiner: ' \u2013 ' }),
     },
 
     lastWeek: {
@@ -173,11 +206,11 @@ function compose(sunday) {
       building:  issue.building,
     },
 
-    anniversaries: auto.anniversaries.map(a => a.names),
+    // The printed newsletter dates an anniversary in brackets after the names
+    // and a birthday after a dash. Both are the recurrence's day in this week.
+    anniversaries: auto.anniversaries.map(a => `${a.names} (${data.shortDate(a.date)})`),
     birthdays:     auto.birthdays.map(b => `${b.names} – ${data.shortDate(b.date)}`),
 
-    // A group's name and address come from the portal; its leader and this
-    // week's meeting note are typed, so the two are stitched together here.
     // The key travels with the group so the compose screen can write a leader
     // back against the right one without inferring it from the row's position.
     groups: auto.groups.map(g => ({
@@ -188,10 +221,25 @@ function compose(sunday) {
       note:   issue.group_notes?.[g.key]?.note   || '',
     })),
 
-    serviceTimes:  config.serviceTimes,
-    elders:        auto.elders,
-    deacons:       auto.deacons,
-    emailContacts: auto.emailContacts,
+    serviceTimes: config.serviceTimes,
+
+    dutyRoster: auto.dutyRoster,
+
+    leadership: {
+      elders: nameParagraph(
+        auto.elders.map(e => ({ name: e.name, rest: e.phone })),
+      ),
+      evangelist: config.evangelist,
+      deacons: nameParagraph(
+        auto.deacons.map(d => ({ name: d.name, rest: d.duties.join(' / ') })),
+        { wrap: ['(', ')'] },
+      ),
+    },
+
+    contacts: {
+      groups: auto.emailContacts,
+      admins: config.websiteAdmins,
+    },
 
     footer: {
       address: config.address,
@@ -202,4 +250,4 @@ function compose(sunday) {
   };
 }
 
-module.exports = { TEXT_FIELDS, blank, find, previous, draftFor, save, list, compose, lines };
+module.exports = { TEXT_FIELDS, blank, find, previous, draftFor, save, list, compose, lines, nameParagraph, splitName };

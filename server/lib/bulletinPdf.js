@@ -10,233 +10,487 @@
 // parallel: a section added to one belongs in the other, and the export tests
 // assert that both carry the same content.
 //
-// pdfkit draws rather than flows, so the side-by-side regions are done by hand
-// — render the left column, note where it ended, rewind to the top for the
-// right column, then continue below whichever ran longer.
+// The layout is the printed newsletter's: a banner, a quote, a narrow column of
+// grey cards beside a wide prayer panel, a duty roster over two weeks, and the
+// leadership and contacts below it. pdfkit draws rather than flows, so a card
+// has to know its height before it can be filled — hence measure() below, which
+// runs the very same block list through a throwaway document and reports where
+// it ended. Measuring and drawing from one list is what stops a card being
+// sized for content it does not end up holding.
 const PDFDocument = require('pdfkit');
+const fs          = require('fs');
+const config      = require('./bulletinConfig');
 
-const PAGE   = { width: 612, height: 792 };   // US Letter, points
-const MARGIN = 72;                            // the draft's one inch
-const WIDTH  = PAGE.width - MARGIN * 2;       // 468pt of content
+const PAGE = { width: 612, height: 792 };
+const M    = 9;                            // the printed newsletter's own margin
+const W    = PAGE.width - M * 2;           // 594pt of content
 
-const NAVY = '#1F3864';
-const RULE = '#C9C9C9';
-const MUTED = '#595959';
+// Page one's two columns, and the navy spine down the left edge.
+const SPINE_W = 16;
+const LEFT_X  = 28,  LEFT_W  = 204;
+const RIGHT_X = 243, RIGHT_W = PAGE.width - M - RIGHT_X;
 
-const FONT      = 'Helvetica';
-const FONT_B    = 'Helvetica-Bold';
-const FONT_I    = 'Helvetica-Oblique';
-const FONT_BI   = 'Helvetica-BoldOblique';
+const C = config.colors;
+const navy  = `#${C.navy}`;
+const card  = `#${C.card}`;
+const rule  = `#${C.rule}`;
+const peach = `#${C.peach}`;
+const link  = `#${C.link}`;
 
-// ─── Drawing helpers ──────────────────────────────────────────────────────────
+const FONT    = 'Helvetica';
+const FONT_B  = 'Helvetica-Bold';
+const FONT_I  = 'Helvetica-Oblique';
+const FONT_BI = 'Helvetica-BoldOblique';
 
-// A full-width navy band with centred text, as the masthead and the service
-// times are set. Returns the y below it.
-function band(doc, lines, y) {
-  const padding = 8;
-  // Measure first so the rectangle fits the text rather than a guess.
-  let height = padding * 2;
-  for (const l of lines) {
-    doc.font(l.bold ? FONT_BI : FONT).fontSize(l.size);
-    height += doc.heightOfString(l.text, { width: WIDTH - padding * 2, align: 'center' });
-  }
-
-  doc.rect(MARGIN, y, WIDTH, height).fill(NAVY);
-
-  let cursor = y + padding;
-  for (const l of lines) {
-    doc.font(l.bold ? FONT_BI : FONT).fontSize(l.size).fillColor('#FFFFFF');
-    doc.text(l.text, MARGIN + padding, cursor, { width: WIDTH - padding * 2, align: 'center' });
-    cursor = doc.y;
-  }
-  doc.fillColor('#000000');
-  return y + height;
-}
-
-// A section heading: bold italic navy with a rule under it, as in the draft.
-function heading(doc, text, x, y, width) {
-  doc.font(FONT_BI).fontSize(11).fillColor(NAVY);
-  doc.text(text, x, y, { width });
-  const bottom = doc.y + 2;
-  doc.moveTo(x, bottom).lineTo(x + width, bottom).lineWidth(0.5).stroke(RULE);
-  doc.fillColor('#000000');
-  return bottom + 5;
-}
-
-// One bullet. The marker is drawn separately from the text so that a wrapped
-// line lines up under the first word rather than under the dot.
+// ─── Blocks ───────────────────────────────────────────────────────────────────
 //
-// Both markers have to exist in WinAnsi, which is what pdfkit encodes the
-// built-in Helvetica with: the obvious choice for a sub-bullet, ◦ (U+25E6), is
-// not in it and comes out as a stray glyph on top of the text.
-function bullet(doc, text, x, y, width, { level = 0, italic = false } = {}) {
-  const indent = 12 + level * 12;
-  doc.font(FONT).fontSize(9).fillColor(level ? MUTED : '#000000');
-  doc.text(level ? '·' : '•', x + level * 12, y, { width: 8 });
-  doc.font(italic ? FONT_I : FONT).fontSize(9).fillColor('#000000');
-  doc.text(text, x + indent, y, { width: width - indent });
-  return doc.y + 2;
+// A card's contents as data, so the same list can be measured and then drawn.
+// Every block reports where it left the cursor.
+
+const B = {
+  heading: (text, opts = {})   => ({ type: 'heading', text, ...opts }),
+  bullets: (items, opts = {})  => ({ type: 'bullets', items, ...opts }),
+  lines:   (items, opts = {})  => ({ type: 'lines',   items, ...opts }),
+  para:    (segments, opts = {}) => ({ type: 'para',  segments, ...opts }),
+  gap:     h                   => ({ type: 'gap', h }),
+};
+
+// A paragraph whose words change weight partway through — a bold name followed
+// by a plain telephone number, repeated.
+//
+// pdfkit can do this with `continued: true`, but after a continued run doc.y
+// does not reliably land below the last line, which put one heading on top of
+// the paragraph before it. Laying the words out by hand is a dozen lines and
+// gives an exact end position, which the enclosing card needs in order to size
+// itself.
+function drawPara(doc, block, x, y, width) {
+  const size    = block.size ?? 9;
+  const segments = block.segments || [];
+  if (!segments.length) return y;
+
+  doc.font(FONT).fontSize(size);
+  const lineHeight = doc.currentLineHeight(true);
+
+  // Words, each remembering the weight it was written in. The split keeps the
+  // whitespace so that a space between two segments is not lost.
+  const words = [];
+  for (const seg of segments) {
+    for (const part of String(seg.text).split(/(\s+)/)) {
+      if (part !== '') words.push({ text: part, bold: !!seg.bold, space: /^\s+$/.test(part) });
+    }
+  }
+
+  const right = x + width;
+  let cx = x, cy = y;
+
+  for (const word of words) {
+    doc.font(word.bold ? FONT_B : FONT).fontSize(size);
+    const w = doc.widthOfString(word.text);
+
+    if (word.space) {
+      // A space that would run off the end is where the line ends; a space at
+      // the start of a line is dropped rather than indenting it.
+      if (cx + w > right) { cy += lineHeight; cx = x; }
+      else if (cx > x) { cx += w; }
+      continue;
+    }
+
+    if (cx > x && cx + w > right) { cy += lineHeight; cx = x; }
+
+    doc.fillColor(block.color || '#000000');
+    doc.text(word.text, cx, cy, { lineBreak: false });
+    cx += w;
+  }
+
+  return cy + lineHeight + (block.after ?? 2);
 }
 
-function bullets(doc, items, x, y, width, opts) {
-  if (!items.length) {
-    doc.font(FONT).fontSize(9).fillColor(MUTED);
-    doc.text('—', x + 10, y, { width: width - 10 });
-    doc.fillColor('#000000');
-    return doc.y + 2;
+function drawBlock(doc, block, x, y, width) {
+  switch (block.type) {
+    case 'gap':
+      return y + block.h;
+
+    case 'heading': {
+      const size = block.size ?? 12;
+      doc.font(block.plain ? FONT_B : FONT_BI).fontSize(size).fillColor(navy);
+      doc.text(block.text, x, y, { width });
+      return doc.y + (block.after ?? 3);
+    }
+
+    case 'lines': {
+      const size = block.size ?? 9;
+      let cursor = y;
+      for (const item of block.items) {
+        doc.font(block.bold ? FONT_B : FONT).fontSize(size).fillColor(block.color || '#000000');
+        doc.text(item, x, cursor, { width });
+        cursor = doc.y + (block.spacing ?? 1);
+      }
+      return cursor;
+    }
+
+    case 'bullets': {
+      const size   = block.size ?? 9;
+      const indent = block.indent ?? 12;
+      let cursor = y;
+      for (const item of block.items) {
+        const sub  = typeof item === 'object' && item.level;
+        const text = typeof item === 'object' ? item.text : item;
+        const off  = sub ? indent : 0;
+        // Both markers must exist in WinAnsi, which is what pdfkit encodes the
+        // built-in Helvetica with: ◦ (U+25E6) is not in it and comes out as a
+        // stray glyph on top of the text.
+        doc.font(FONT).fontSize(size).fillColor('#000000');
+        doc.text(sub ? '·' : '•', x + off, cursor, { width: 8 });
+        doc.font(sub ? FONT_I : FONT).fontSize(size).fillColor('#000000');
+        doc.text(text, x + off + indent, cursor, { width: width - off - indent });
+        cursor = doc.y + (block.spacing ?? 2);
+      }
+      return cursor;
+    }
+
+    case 'para':
+      return drawPara(doc, block, x, y, width);
+
+    default:
+      return y;
   }
+}
+
+function drawBlocks(doc, blocks, x, y, width) {
   let cursor = y;
-  for (const item of items) cursor = bullet(doc, item, x, cursor, width, opts);
+  for (const block of blocks) cursor = drawBlock(doc, block, x, cursor, width);
   return cursor;
 }
 
-// Render one side of a two-column region, and report where it finished — both
-// the y and the page, since a long column can run onto the next one.
-function column(doc, draw, x, y, width, startPage) {
-  doc.switchToPage(startPage);
-  const endY = draw(x, y, width);
-  return { y: endY, page: doc.bufferedPageRange().count - 1 === startPage ? startPage : currentPage(doc) };
+// How tall a block list will be. The same list is run through a scratch
+// document tall enough that nothing paginates, so the answer is exact rather
+// than an estimate that a bold run could overflow.
+function measure(blocks, width) {
+  const scratch = new PDFDocument({ size: [PAGE.width, 20000], margin: 0, autoFirstPage: true });
+  const end = drawBlocks(scratch, blocks, 0, 0, width);
+  scratch.end();
+  return end;
 }
 
-function currentPage(doc) {
-  // pdfkit tracks the page being written to internally; its index within the
-  // buffered range is what switchToPage expects back.
-  return doc.bufferedPageRange().start + doc.bufferedPageRange().count - 1;
+// ─── Cards ────────────────────────────────────────────────────────────────────
+
+// One panel: a filled, bordered box sized to the blocks it holds. The printed
+// newsletter gives these a soft shadow, which is a second rectangle behind.
+function panel(doc, { x, y, width, blocks, fill = '#FFFFFF', border = navy, padding = 8, shadow = true }) {
+  const inner  = width - padding * 2;
+  const height = measure(blocks, inner) + padding * 2;
+
+  if (shadow) doc.rect(x + 2, y + 2, width, height).fill('#C9C9C9');
+  doc.rect(x, y, width, height).fill(fill);
+  doc.rect(x, y, width, height).lineWidth(0.8).stroke(border);
+
+  drawBlocks(doc, blocks, x + padding, y + padding, inner);
+  return y + height;
 }
 
-// ─── The newsletter's sections ────────────────────────────────────────────────
+// A full-width band of colour with one centred line on it.
+function band(doc, { x, y, width, text, fill, color, size, italic = true, border = null, padding = 6, align = 'center' }) {
+  doc.font(italic ? FONT_BI : FONT_B).fontSize(size);
+  const height = doc.heightOfString(text, { width: width - padding * 2, align }) + padding * 2;
 
-function prayerBlock(doc, title, items, x, y, width) {
-  // An empty heading in a printed newsletter reads as a mistake rather than as
-  // good news, so a block with nothing in it is left out entirely.
-  if (!items.length) return y;
-  let cursor = heading(doc, title, x, y, width);
-  return bullets(doc, items, x, cursor, width);
+  doc.rect(x, y, width, height).fill(fill);
+  if (border) doc.rect(x, y, width, height).lineWidth(0.8).stroke(border);
+
+  doc.font(italic ? FONT_BI : FONT_B).fontSize(size).fillColor(color);
+  doc.text(text, x + padding, y + padding, { width: width - padding * 2, align });
+  return y + height;
 }
 
-function draw(doc, b) {
-  // ── Masthead ──
-  let y = band(doc, [
-    { text: b.masthead,    size: 17, bold: true },
-    { text: b.sundayLabel, size: 11, bold: true },
-  ], MARGIN);
+// ─── Page one ─────────────────────────────────────────────────────────────────
 
-  y += 10;
+function masthead(doc, b) {
+  const y = 6, height = 101;
 
-  // ── Quote ──
-  if (b.quote) {
-    const text = b.quoteRef ? `“${b.quote}” – ${b.quoteRef}` : `“${b.quote}”`;
-    doc.font(FONT_I).fontSize(9).fillColor('#000000');
-    doc.text(text, MARGIN, y, { width: WIDTH, align: 'center' });
-    y = doc.y + 12;
+  // The banner artwork, cropped to the box by a clipped draw so an image of a
+  // different aspect never distorts the title behind it.
+  try {
+    if (fs.existsSync(config.mastheadImage)) {
+      doc.save();
+      doc.rect(M, y, W, height).clip();
+      doc.image(config.mastheadImage, M, y, { width: W, height });
+      doc.restore();
+    } else {
+      doc.rect(M, y, W, height).fill(card);
+    }
+  } catch {
+    // A missing or unreadable banner is a plainer newsletter, not a failed one.
+    doc.rect(M, y, W, height).fill(card);
   }
 
-  // ── Reminders beside the prayer list ──
-  const gutter   = 16;
-  const leftW    = 170;
-  const rightW   = WIDTH - leftW - gutter;
-  const rightX   = MARGIN + leftW + gutter;
-  const startPg  = currentPage(doc);
+  doc.rect(M, y, W, height).lineWidth(0.8).stroke(navy);
 
-  const left = column(doc, (x, yy, w) => {
-    let c = heading(doc, 'Reminders:', x, yy, w);
-    return bullets(doc, b.reminders, x, c, w);
-  }, MARGIN, y, leftW, startPg);
+  doc.font(FONT_B).fontSize(29).fillColor(navy);
+  doc.text(b.masthead, M + 10, y + 16, { width: W - 20, align: 'center' });
 
-  const right = column(doc, (x, yy, w) => {
-    doc.font(FONT_B).fontSize(13).fillColor(NAVY);
-    doc.text('Prayer Requests', x, yy, { width: w });
-    doc.fillColor('#000000');
-    let c = doc.y + 4;
-    c = prayerBlock(doc, 'Updates',                b.prayer.updates,     x, c, w);
-    c = prayerBlock(doc, 'Ongoing',                b.prayer.ongoing,     x, c, w);
-    c = prayerBlock(doc, 'Shut-Ins',               b.prayer.shutIns,     x, c, w);
-    c = prayerBlock(doc, 'Pregnancies',            b.prayer.pregnancies, x, c, w);
-    c = prayerBlock(doc, 'Evangelists We Support', b.prayer.evangelists, x, c, w);
-    return c;
-  }, rightX, y, rightW, startPg);
+  doc.font(FONT_B).fontSize(14).fillColor(navy);
+  doc.text(b.sundayLabel, M + 10, y + 70, { width: W - 20, align: 'center' });
 
-  // ── Page two ──
-  doc.addPage();
-  y = band(doc, [{ text: b.serviceTimes, size: 10, bold: true }], MARGIN);
-  y += 12;
+  return y + height;
+}
 
-  const dataLines = [
+function pageOne(doc, b) {
+  let y = masthead(doc, b) + 3;
+
+  // ── The verse, across the full width ──
+  if (b.quote) {
+    const text = b.quoteRef ? `“${b.quote}” – ${b.quoteRef}` : `“${b.quote}”`;
+    doc.font(FONT_BI).fontSize(9.5).fillColor(navy);
+    doc.text(text, M, y, { width: W, align: 'center' });
+    y = doc.y + 6;
+  }
+
+  const bodyTop = y;
+
+  // ── Left column: three grey cards ──
+  let ly = bodyTop;
+
+  ly = panel(doc, {
+    x: LEFT_X, y: ly, width: LEFT_W, fill: card,
+    blocks: [
+      B.heading('Reminders:', { size: 11, plain: true }),
+      B.bullets(b.reminders.length ? b.reminders : ['—'], { size: 8.5 }),
+    ],
+  }) + 12;
+
+  ly = panel(doc, {
+    x: LEFT_X, y: ly, width: LEFT_W, fill: card,
+    blocks: [
+      B.heading('Last Week’s Data:', { size: 11, plain: true }),
+      B.bullets(lastWeekLines(b), { size: 8.5 }),
+      B.gap(4),
+      B.heading('Anniversaries:', { size: 11, plain: true }),
+      B.bullets(b.anniversaries.length ? b.anniversaries : ['—'], { size: 8.5 }),
+      B.gap(4),
+      B.heading('Birthdays:', { size: 11, plain: true }),
+      B.bullets(b.birthdays.length ? b.birthdays : ['—'], { size: 8.5 }),
+    ],
+  }) + 12;
+
+  const groupItems = [];
+  for (const g of b.groups) {
+    groupItems.push(g.leader ? `${g.name} – Leader: ${g.leader}` : g.name);
+    if (g.note) groupItems.push({ text: g.note, level: 1 });
+  }
+  ly = panel(doc, {
+    x: LEFT_X, y: ly, width: LEFT_W, fill: card,
+    blocks: [
+      B.heading('Groups:', { size: 11, plain: true }),
+      B.bullets(groupItems.length ? groupItems : ['—'], { size: 8.5 }),
+    ],
+  });
+
+  // ── Right column: the prayer panel ──
+  let ry = band(doc, {
+    x: RIGHT_X, y: bodyTop, width: RIGHT_W,
+    text: 'Prayer Requests', fill: navy, color: '#FFFFFF',
+    size: 21, italic: false, align: 'left', padding: 9, border: navy,
+  }) + 5;
+
+  const prayerBlocks = [];
+  const add = (title, items) => {
+    // An empty heading in a printed newsletter reads as a mistake rather than
+    // as good news, so a block with nothing in it is left out entirely.
+    if (!items.length) return;
+    prayerBlocks.push(B.heading(title, { size: 13 }), B.bullets(items, { size: 10, spacing: 3 }), B.gap(3));
+  };
+  add('Updates',     b.prayer.updates);
+  add('Ongoing',     b.prayer.ongoing);
+  add('Shut-Ins',    b.prayer.shutIns);
+  add('Pregnancies', b.prayer.pregnancies);
+  if (b.prayer.evangelists.length) {
+    prayerBlocks.push(
+      B.heading('Evangelists We Support', { size: 13 }),
+      B.para(b.prayer.evangelists, { size: 10 }),
+    );
+  }
+  if (!prayerBlocks.length) prayerBlocks.push(B.lines(['—'], { color: '#888888' }));
+
+  ry = panel(doc, { x: RIGHT_X, y: ry, width: RIGHT_W, blocks: prayerBlocks });
+
+  // ── The spine, the full height of the body ──
+  // Tied to the service-times bar rather than to whichever column ran longer,
+  // so a short week does not print a stub of navy down the side.
+  doc.rect(M, bodyTop, SPINE_W, (PAGE.height - 36) - 8 - bodyTop).fill(navy);
+
+  // ── Service times, along the foot ──
+  band(doc, {
+    x: M, y: PAGE.height - 36, width: W,
+    text: b.serviceTimes, fill: peach, color: navy, size: 9.5, border: navy,
+  });
+}
+
+function lastWeekLines(b) {
+  const lines = [
     b.lastWeek.sunday    != null ? `Sunday attendance: ${b.lastWeek.sunday}`       : null,
     b.lastWeek.wednesday != null ? `Wednesday attendance: ${b.lastWeek.wednesday}` : null,
     b.lastWeek.offering          ? `Offering: ${b.lastWeek.offering}`              : null,
     b.lastWeek.building          ? `Building progress: ${b.lastWeek.building}`     : null,
   ].filter(Boolean);
-
-  const leftW2  = 200;
-  const rightW2 = WIDTH - leftW2 - gutter;
-  const rightX2 = MARGIN + leftW2 + gutter;
-  const pg2     = currentPage(doc);
-
-  const left2 = column(doc, (x, yy, w) => {
-    let c = heading(doc, 'Last Week’s Data:', x, yy, w);
-    c = bullets(doc, dataLines, x, c, w);
-    c = heading(doc, 'Anniversaries:', x, c, w);
-    c = bullets(doc, b.anniversaries, x, c, w);
-    c = heading(doc, 'Birthdays:', x, c, w);
-    c = bullets(doc, b.birthdays, x, c, w);
-    c = heading(doc, 'Groups:', x, c, w);
-    if (!b.groups.length) return bullets(doc, [], x, c, w);
-    for (const g of b.groups) {
-      c = bullet(doc, g.leader ? `${g.name} – Leader: ${g.leader}` : g.name, x, c, w);
-      if (g.note) c = bullet(doc, g.note, x, c, w, { level: 1, italic: true });
-    }
-    return c;
-  }, MARGIN, y, leftW2, pg2);
-
-  const person = p => (p.duties.length ? `${p.name} — ${p.duties.join(', ')}` : p.name);
-
-  const right2 = column(doc, (x, yy, w) => {
-    let c = heading(doc, 'Elders', x, yy, w);
-    c = bullets(doc, b.elders.map(person), x, c, w);
-    c = heading(doc, 'Deacons / Responsibilities', x, c, w);
-    return bullets(doc, b.deacons.map(person), x, c, w);
-  }, rightX2, y, rightW2, pg2);
-
-  // Continue below whichever column ran longer, on whichever page it ended on.
-  doc.switchToPage(Math.max(left2.page, right2.page));
-  y = (left2.page === right2.page ? Math.max(left2.y, right2.y)
-      : left2.page > right2.page  ? left2.y : right2.y) + 14;
-
-  // ── Key email contacts ──
-  y = heading(doc, 'Key Email Contacts:', MARGIN, y, WIDTH);
-  const labelW = 170;
-  for (const c of b.emailContacts) {
-    doc.font(FONT).fontSize(9).fillColor('#000000');
-    const h = Math.max(
-      doc.heightOfString(c.label, { width: labelW - 8 }),
-      doc.heightOfString(c.email, { width: WIDTH - labelW - 8 })
-    ) + 6;
-    doc.rect(MARGIN, y, WIDTH, h).lineWidth(0.5).stroke(RULE);
-    doc.moveTo(MARGIN + labelW, y).lineTo(MARGIN + labelW, y + h).stroke(RULE);
-    doc.text(c.label, MARGIN + 4, y + 3, { width: labelW - 8 });
-    doc.text(c.email, MARGIN + labelW + 4, y + 3, { width: WIDTH - labelW - 8 });
-    y += h;
-  }
-
-  // ── Footer ──
-  y += 16;
-  doc.font(FONT).fontSize(8).fillColor('#000000');
-  for (const line of b.footer.address) {
-    doc.text(line, MARGIN, y, { width: WIDTH, align: 'center' });
-    y = doc.y;
-  }
-  doc.text(`${b.footer.phone}  ·  ${b.footer.website}`, MARGIN, y, { width: WIDTH, align: 'center' });
-  y = doc.y;
-  doc.fillColor(MUTED);
-  doc.text(b.footer.social.map(([k, v]) => `${k}: ${v}`).join('  ·  '), MARGIN, y, { width: WIDTH, align: 'center' });
+  return lines.length ? lines : ['—'];
 }
 
-// A PDF of the composed newsletter, as a Buffer.
+// ─── Page two ─────────────────────────────────────────────────────────────────
+
+// The duty roster: two weeks side by side, a row per job, and a blank cell
+// where nobody is down yet — which is how a gap gets noticed.
+//
+// Drawn in two passes. A row's fill is opaque, so painting each row's rules as
+// it went meant the next row's fill covered half of them and the grid came out
+// broken; every fill is laid down first and the whole grid ruled over the top.
+function roster(doc, b, top) {
+  const labelW = 200;
+  const colW   = (W - labelW) / 2;
+  const cols   = [M, M + labelW, M + labelW + colW];
+  const widths = [labelW, colW, colW];
+  const MIN_ROW = 17;
+
+  const rows = [];
+  let y = top;
+
+  function push(cells, opts = {}) {
+    const { fill = '#FFFFFF', bold = false, size = 9, italic = false,
+            align = ['left', 'center', 'center'], span = false } = opts;
+
+    doc.font(bold ? (italic ? FONT_BI : FONT_B) : FONT).fontSize(size);
+    const height = span
+      ? Math.max(doc.heightOfString(String(cells[0] || ' '), { width: W - 8 }) + 6, MIN_ROW)
+      : Math.max(
+          Math.max(...cells.map((c, i) => doc.heightOfString(String(c || ' '), { width: widths[i] - 8 }))) + 6,
+          MIN_ROW
+        );
+
+    rows.push({ y, height, cells, fill, bold, size, italic, align, span });
+    y += height;
+  }
+
+  push(['Duty Roster'], { fill: rule, bold: true, italic: true, size: 10, span: true });
+
+  const section = (label, part) => {
+    push([label, ...part.dates.map(longLabel)], { fill: card, bold: true });
+    for (const job of part.jobs) push([job.job, ...job.names]);
+  };
+  section('Sunday',    b.dutyRoster.sunday);
+  section('Wednesday', b.dutyRoster.wednesday);
+
+  const bottom = y;
+
+  // Pass one: the fills.
+  for (const r of rows) doc.rect(M, r.y, W, r.height).fill(r.fill);
+
+  // Pass two: the text.
+  for (const r of rows) {
+    doc.font(r.bold ? (r.italic ? FONT_BI : FONT_B) : FONT).fontSize(r.size)
+       .fillColor(r.bold ? navy : '#000000');
+    if (r.span) {
+      doc.text(String(r.cells[0]), M + 4, r.y + 3, { width: W - 8, align: 'center' });
+    } else {
+      r.cells.forEach((c, i) => {
+        if (c === null || c === undefined) return;
+        doc.text(String(c), cols[i] + 4, r.y + 3, { width: widths[i] - 8, align: r.align[i] });
+      });
+    }
+  }
+
+  // Pass three: the grid, over the top of every fill.
+  doc.lineWidth(0.6);
+  for (const r of rows) doc.moveTo(M, r.y).lineTo(M + W, r.y).stroke('#000000');
+  doc.moveTo(M, bottom).lineTo(M + W, bottom).stroke('#000000');
+
+  // The column rules stop short of the title row, which spans the table.
+  const gridTop = rows[0].y + rows[0].height;
+  for (const x of [cols[1], cols[2]]) doc.moveTo(x, gridTop).lineTo(x, bottom).stroke('#000000');
+  doc.rect(M, top, W, bottom - top).stroke('#000000');
+
+  return bottom;
+}
+
+// 'May 3, 2026' for a roster heading.
+function longLabel(iso) {
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+                  'July', 'August', 'September', 'October', 'November', 'December'];
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${MONTHS[Number(m[2]) - 1]} ${Number(m[3])}, ${m[1]}` : '';
+}
+
+function pageTwo(doc, b) {
+  let y = roster(doc, b, 18) + 8;
+
+  const leftW  = 331;
+  const rightX = M + leftW + 8;
+  const rightW = PAGE.width - M - rightX;
+
+  // ── Leadership ──
+  const leadership = [B.heading('Elders', { size: 12 })];
+  leadership.push(b.leadership.elders.length
+    ? B.para(b.leadership.elders, { size: 9 })
+    : B.lines(['—'], { color: '#888888' }));
+
+  if (b.leadership.evangelist?.name) {
+    leadership.push(B.gap(4), B.heading('Evangelist', { size: 12 }), B.para([
+      { text: b.leadership.evangelist.name, bold: true },
+      { text: ` ${b.leadership.evangelist.phone}` },
+    ], { size: 9 }));
+  }
+
+  leadership.push(B.gap(4), B.heading('Deacons', { size: 12 }));
+  leadership.push(b.leadership.deacons.length
+    ? B.para(b.leadership.deacons, { size: 9 })
+    : B.lines(['—'], { color: '#888888' }));
+
+  const leftBottom = panel(doc, { x: M, y, width: leftW, blocks: leadership, shadow: false });
+
+  // ── Contacts ──
+  const contacts = [B.heading('Key Email Contacts', { size: 12 })];
+  for (const c of b.contacts.groups) {
+    contacts.push(
+      B.lines([`${c.label}:`], { size: 9, bold: true }),
+      B.lines([c.email], { size: 9, color: link }),
+      B.gap(3),
+    );
+  }
+  if (b.contacts.admins.length) {
+    contacts.push(B.lines(['Website Admins'], { size: 9, bold: true }), B.gap(2));
+    for (const a of b.contacts.admins) {
+      contacts.push(B.para([{ text: `${a.name} - ` }, { text: a.email }], { size: 9 }));
+    }
+  }
+
+  let ry = panel(doc, { x: rightX, y, width: rightW, blocks: contacts, shadow: false }) + 10;
+
+  // ── Find us ──
+  ry = band(doc, {
+    x: rightX, y: ry, width: rightW,
+    text: 'FIND US:', fill: card, color: navy, size: 11, italic: false, border: navy,
+  });
+
+  const findUs = [
+    B.lines(b.footer.address, { size: 9, color: '#FFFFFF', spacing: 4 }),
+    B.gap(3),
+    B.lines([b.footer.phone, b.footer.website], { size: 9, color: '#FFFFFF', spacing: 4 }),
+    B.gap(3),
+    B.lines(b.footer.social.map(([k, v]) => `${k}: ${v}`), { size: 8.5, color: '#FFFFFF', spacing: 3 }),
+  ];
+  panel(doc, { x: rightX, y: ry, width: rightW, blocks: findUs, fill: navy, border: navy, shadow: false });
+
+  return leftBottom;
+}
+
+// ─── The document ─────────────────────────────────────────────────────────────
+
+function draw(doc, b) {
+  pageOne(doc, b);
+  doc.addPage();
+  pageTwo(doc, b);
+}
+
 function render(bulletin) {
   return new Promise((resolve, reject) => {
-    // bufferPages is what lets a column rewind to the page it started on.
-    const doc = new PDFDocument({ size: 'LETTER', margin: MARGIN, bufferPages: true, autoFirstPage: true });
+    const doc = new PDFDocument({ size: 'LETTER', margin: M, autoFirstPage: true });
     const chunks = [];
     doc.on('data', c => chunks.push(c));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
@@ -248,7 +502,6 @@ function render(bulletin) {
       return reject(err);
     }
 
-    doc.flushPages();
     doc.end();
   });
 }

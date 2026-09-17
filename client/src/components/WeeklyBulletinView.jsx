@@ -29,6 +29,17 @@ function thisSunday() {
   return sundayOf(new Date().toISOString().slice(0, 10));
 }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function shortDate(iso) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${MONTHS[Number(m[2]) - 1]} ${Number(m[3])}` : '';
+}
+
+// The leadership arrives as bold/plain runs for the exports; the preview only
+// needs the words.
+const joinSegments = segs => (segs || []).map(s => s.text).join('');
+
 // ─── The typed half ───────────────────────────────────────────────────────────
 
 // Each of these is a list the congregation reads, typed one entry to a line.
@@ -194,6 +205,16 @@ export default function WeeklyBulletinView({ canWrite = false }) {
     bulletin.lastWeek.wednesday != null ? `Wednesday attendance: ${bulletin.lastWeek.wednesday}` : null,
   ].filter(Boolean);
 
+  // Only the filled slots are worth previewing here — the newsletter itself
+  // prints a row for every job, blanks included, so the gaps are visible there.
+  const rosterLines = ['sunday', 'wednesday'].flatMap(part =>
+    bulletin.dutyRoster[part].jobs.flatMap(job =>
+      job.names
+        .map((name, i) => (name ? `${job.job}, ${shortDate(bulletin.dutyRoster[part].dates[i])}: ${name}` : null))
+        .filter(Boolean)
+    )
+  );
+
   return (
     <div className="space-y-4">
 
@@ -347,14 +368,14 @@ export default function WeeklyBulletinView({ canWrite = false }) {
                          empty="None this week." />
             <AutoSection title="Birthdays"     source="Birthdays & Anniversaries" items={bulletin.birthdays}
                          empty="None this week." />
-            <AutoSection title="Elders"        source="Elders & Deacons"
-                         items={bulletin.elders.map(e => e.duties.length ? `${e.name} — ${e.duties.join(', ')}` : e.name)}
+            <AutoSection title="Duty Roster"   source="Serving Schedule" items={rosterLines}
+                         empty="Nothing on the serving schedule for these two weeks." />
+            <AutoSection title="Elders"        source="Elders & Deacons" items={[joinSegments(bulletin.leadership.elders)].filter(Boolean)}
                          empty="No elders recorded." />
-            <AutoSection title="Deacons"       source="Elders & Deacons"
-                         items={bulletin.deacons.map(d => d.duties.length ? `${d.name} — ${d.duties.join(', ')}` : d.name)}
+            <AutoSection title="Deacons"       source="Elders & Deacons" items={[joinSegments(bulletin.leadership.deacons)].filter(Boolean)}
                          empty="No deacons recorded." />
             <AutoSection title="Key Email Contacts" source="Email Groups"
-                         items={bulletin.emailContacts.map(c => `${c.label}: ${c.email}`)}
+                         items={bulletin.contacts.groups.map(c => `${c.label}: ${c.email}`)}
                          empty="No distribution groups." />
           </div>
 
