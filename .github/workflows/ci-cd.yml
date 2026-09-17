@@ -123,6 +123,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      # Only used on a push to main, by the publish step at the end.
+      packages: write
 
     steps:
       - uses: actions/checkout@v4
@@ -206,150 +208,121 @@ jobs:
         if: always()
         run: docker rm -f capshaw || true
 
-  # Still the SSH deploy: the image is built and exercised on every change, but
-  # switching the droplet over to it is a separate decision — see README →
-  # Running in Docker.
+      # Published only once the image above has served a request, reported
+      # healthy and written to its volume. The deploy job below pulls this
+      # exact digest, so what runs on the droplet is what was exercised here
+      # rather than a rebuild of the same commit.
+      - name: Sign in to the registry
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish it
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # The commit tag is what the deploy pins to; `main` is a convenience
+          # for looking at what is current by hand.
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ghcr.io/${{ github.repository }}:main
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
   deploy:
     name: Deploy to capshaw.jblairkiel.com
-    needs: test
+    # Only what CI built and exercised gets deployed, so the image job has to
+    # have published before there is anything to pull.
+    needs: [test, image]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Deploy via SSH
+      - name: Deploy the container
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}:${{ github.sha }}
         with:
           host: ${{ secrets.DO_HOST }}
           username: ${{ secrets.DO_USER }}
           key: ${{ secrets.DO_SSH_KEY }}
+          envs: IMAGE
           script: |
             set -e
             cd /var/www/capshaw-dashboard
 
+            # Only the compose file and the .env on this host are still read
+            # from the checkout; the application itself arrives as an image.
             git pull origin main
 
-            # The toolchain (vite 8 / vitest 5) requires Node >=22.12 — fail
-            # fast with a clear message rather than a cryptic npm ci error if
-            # this host's Node hasn't been upgraded to match package.json's
-            # engines field.
-            node -e "
-              const need = [22, 12];
-              const have = process.versions.node.split('.').map(Number);
-              if (have[0] < need[0] || (have[0] === need[0] && have[1] < need[1])) {
-                console.error(\`Node \${process.versions.node} is too old — this app needs >=22.12.0. Upgrade Node on this host before deploying.\`);
-                process.exit(1);
-              }
-            "
+            echo "${{ secrets.GHCR_TOKEN }}" \
+              | docker login ghcr.io -u "${{ secrets.GHCR_USER }}" --password-stdin
 
-            # Server deps (production only)
-            npm ci --omit=dev
+            # What is serving now, so a bad deploy has something to go back to.
+            # A first run has nothing running and nothing to roll back to.
+            previous=$(docker inspect --format='{{.Config.Image}}' \
+              "$(docker compose ps -q app 2>/dev/null)" 2>/dev/null || echo "")
+            echo "currently running: ${previous:-nothing}"
+            echo "deploying:         $IMAGE"
 
-            # The native SQLite addon is the one dependency that can install
-            # cleanly and still be unusable: a binary that does not match this
-            # Node's ABI loads fine, serves requests, and then aborts the whole
-            # process from a statement destructor during garbage collection —
-            # SIGABRT, no JS stack, nothing in dmesg. Prove it survives being
-            # used and collected here, while the old process is still serving,
-            # rather than finding out from the health check after we have
-            # already replaced a working app with a crashing one.
-            node --expose-gc -e "
-              const Database = require('better-sqlite3');
-              const db = new Database('server/data/bible_questions.db', { readonly: true });
-              for (let i = 0; i < 200; i++) db.prepare('SELECT ' + i).get();
-              if (global.gc) { global.gc(); global.gc(); }
-              db.close();
-              console.log('better-sqlite3 ' + require('better-sqlite3/package.json').version +
-                          ' OK on Node ' + process.versions.node +
-                          ' (ABI ' + process.versions.modules + ')');
-            "
-
-            # Build React
-            cd client
-            npm ci
-            npm run build
-            cd ..
-
-            # How many times PM2 has had to restart the app. Compared before
-            # and after the health check below: a count that climbs while we
-            # watch means the app is crash-looping, which a single successful
-            # curl can otherwise hide.
-            restart_count() {
-              pm2 jlist 2>/dev/null | node -e "
-                let s = '';
-                process.stdin.on('data', d => s += d).on('end', () => {
-                  try {
-                    const app = JSON.parse(s).find(p => p.name === 'capshaw-dashboard');
-                    console.log(app ? app.pm2_env.restart_time : 'unknown');
-                  } catch { console.log('unknown'); }
-                });
-              " || echo unknown
-            }
-
-            # Restart app
-            pm2 restart ecosystem.config.js --env production
-            pm2 save
-
-            restarts_before=$(restart_count)
+            export CAPSHAW_IMAGE="$IMAGE"
+            docker compose pull app
+            docker compose up -d --no-build app
 
             # ── Health check ─────────────────────────────────────────────────
-            # Polls rather than sleeping once: a cold start has to open the
-            # database and run migrations, which takes longer on a tired
-            # droplet than on the runner, and a fixed 5-second wait turns that
-            # into a failed deploy of code that is actually fine.
-            echo "Waiting for server to start..."
+            # The container has its own HEALTHCHECK, so this asks Docker what it
+            # thinks rather than curling and hoping: a container that is up but
+            # failing its check is not a successful deploy. Polls rather than
+            # sleeping once, because a cold start opens the database and runs
+            # migrations, which takes longer on a tired droplet than on a
+            # runner.
+            echo "Waiting for the container to report healthy..."
             healthy=0
-            for _ in $(seq 1 20); do
-              if curl -sf --max-time 5 http://localhost:3001/api/health; then
-                healthy=1
+            for _ in $(seq 1 30); do
+              state=$(docker inspect --format='{{.State.Health.Status}}' \
+                "$(docker compose ps -q app)" 2>/dev/null || echo missing)
+              if [ "$state" = "healthy" ]; then healthy=1; break; fi
+              if [ "$state" = "missing" ]; then
+                echo "the container is not running"
                 break
               fi
               sleep 3
             done
 
-            if [ "$healthy" != "1" ]; then
-              echo ""
-              echo "=== HEALTH CHECK FAILED after 60s ==="
-              echo "PM2 restarts: ${restarts_before} -> $(restart_count)"
-              echo ""
-              # `pm2 logs --lines 40` is useless here: express-session prints a
-              # three-line MemoryStore warning on every single boot, so a
-              # crash-looping app fills the whole window with that warning and
-              # pushes the actual stack trace out of view. Read the log files
-              # directly, drop the known noise, and take a much deeper slice.
-              echo "=== Error log (last 200 lines, MemoryStore warning filtered) ==="
-              tail -n 200 "$HOME/.pm2/logs/capshaw-dashboard-error-1.log" 2>/dev/null \
-                | grep -v -e 'MemoryStore is not' \
-                          -e 'designed for a production environment' \
-                          -e 'memory, and will not scale past a single process' \
-                || true
-              echo ""
-              echo "=== Output log (last 60 lines) ==="
-              tail -n 60 "$HOME/.pm2/logs/capshaw-dashboard-out-1.log" 2>/dev/null || true
-              echo ""
-              echo "=== PM2 describe ==="
-              pm2 describe capshaw-dashboard 2>&1 || true
-              exit 1
+            if [ "$healthy" = "1" ]; then
+              echo "Healthy. Now serving $IMAGE"
+              # Keep the last few images so a rollback by hand has something to
+              # go back to, and the disk does not fill with every deploy.
+              docker image prune -af --filter "until=720h" >/dev/null 2>&1 || true
+              exit 0
             fi
 
-            # Answering once is not the same as staying up. Give it a beat and
-            # see whether PM2 has had to restart it again in the meantime.
-            sleep 15
-            restarts_after=$(restart_count)
-            if [ "$restarts_before" != "unknown" ] && [ "$restarts_after" != "$restarts_before" ]; then
+            # ── It did not come up ───────────────────────────────────────────
+            echo ""
+            echo "=== DEPLOY FAILED — the container never reported healthy ==="
+            docker compose ps
+            echo ""
+            echo "=== Logs (last 200 lines) ==="
+            docker compose logs --tail 200 app || true
+
+            if [ -n "$previous" ]; then
               echo ""
-              echo "############################################################"
-              echo "# WARNING: the app answered the health check but PM2 has"
-              echo "# restarted it again since (${restarts_before} -> ${restarts_after})."
-              echo "# It is crashing and being restarted, not running steadily."
-              echo "# Recent errors:"
-              echo "############################################################"
-              tail -n 200 "$HOME/.pm2/logs/capshaw-dashboard-error-1.log" 2>/dev/null \
-                | grep -v -e 'MemoryStore is not' \
-                          -e 'designed for a production environment' \
-                          -e 'memory, and will not scale past a single process' \
-                | tail -n 40 || true
+              echo "=== Rolling back to $previous ==="
+              export CAPSHAW_IMAGE="$previous"
+              docker compose up -d --no-build app
+              for _ in $(seq 1 20); do
+                state=$(docker inspect --format='{{.State.Health.Status}}' \
+                  "$(docker compose ps -q app)" 2>/dev/null || echo missing)
+                [ "$state" = "healthy" ] && { echo "Rolled back; the previous image is serving again."; break; }
+                sleep 3
+              done
+            else
+              echo "Nothing was running before this, so there is nothing to roll back to."
             fi
 
-            echo "Deployment verified OK"
+            exit 1
