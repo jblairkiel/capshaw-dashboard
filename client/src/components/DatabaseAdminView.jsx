@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import SampleDataPanel from './SampleDataPanel';
 
 const API = '/api/admin';
 
@@ -827,6 +828,7 @@ export default function DatabaseAdminView() {
         >
           <option value="overview">Overview</option>
           <option value="scrape-status">Scrape Status</option>
+          <option value="sample-data">Sample Data</option>
           {tableKeys.map(k => <option key={k} value={k}>{TABLE_DEFS[k].label}</option>)}
         </select>
       </div>
@@ -837,7 +839,7 @@ export default function DatabaseAdminView() {
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Database Admin</p>
         </div>
         <nav className="flex-1 overflow-y-auto py-2">
-          {['overview', 'scrape-status'].map(id => (
+          {['overview', 'scrape-status', 'sample-data'].map(id => (
             <button
               key={id}
               onClick={() => setActiveTable(id)}
@@ -847,7 +849,7 @@ export default function DatabaseAdminView() {
                   : 'text-gray-600 hover:bg-gray-50 hover:text-church-navy'
               }`}
             >
-              {id === 'overview' ? 'Overview' : 'Scrape Status'}
+              {id === 'overview' ? 'Overview' : id === 'scrape-status' ? 'Scrape Status' : 'Sample Data'}
             </button>
           ))}
 
@@ -902,6 +904,10 @@ export default function DatabaseAdminView() {
         ) : activeTable === 'scrape-status' ? (
           <div className="overflow-y-auto flex-1">
             <ScrapeStatus onScrape={handleScrape} scraping={scraping} />
+          </div>
+        ) : activeTable === 'sample-data' ? (
+          <div className="overflow-y-auto flex-1">
+            <SampleDataPanel />
           </div>
         ) : (
           <TableView key={activeTable} tableKey={activeTable} />

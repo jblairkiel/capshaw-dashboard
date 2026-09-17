@@ -880,6 +880,78 @@ disturbs May, and publishing twice does not double it up.
 
 ---
 
+## Sample Data
+
+**Admin → Database → Sample Data** fills the site with made-up records so a page
+can be looked at with something in it — a directory with households, a month of
+serving jobs, guests with visit histories and follow-ups in each state.
+
+The hard part is not making it. It is getting it back out.
+
+**Every row is written down as it is made.** A generator has no database of its
+own: it is handed an `insert`, and that insert records the table and the id it
+just created in the same breath. Removing a batch reads that list back and
+deletes exactly those rows. Nothing anywhere recognises made-up data by how it
+looks — guessing ("names that look fake", "anything created today") is how
+somebody's real record ends up deleted.
+
+So a batch can promise two things, and the tests hold it to both: everything it
+made is gone, and nothing else moved.
+
+| | |
+|---|---|
+| **What it fills** | Tick the parts of the site you want, or nothing to fill all of them |
+| **How much** | A little (see each page working), a fair bit, or a lot (find out what gets slow) |
+| **What is there now** | Each batch, when it was made, who asked for it, and the rows it put in each table |
+| **Removing it** | One button per batch, asked about first, and reported afterwards |
+
+Both making and removing a batch are written to the action history, because
+putting a few hundred rows into the congregation's records is a change worth
+being able to trace even when it is meant to be temporary.
+
+### Adding sample data for something new
+
+Put a file in `server/seed/generators/`. They are found by reading the
+directory, so nothing has to be told about it:
+
+```js
+module.exports = {
+  id:    'lending-library',
+  label: 'Lending Library',
+  area:  'library',
+  page:  'Library',                  // where it shows up, for the panel
+  describe: 'Books on the shelf, and who has borrowed them.',
+  tables: ['library_books', 'library_loans'],   // what it claims to fill
+  generate({ insert, random, scale, db, helpers }) {
+    const id = insert('library_books', { title: 'Sample Title' }, 'Sample Title');
+    insert('library_loans', { book_id: id, borrower: 'Wren Ashdown' }, 'on loan');
+  },
+};
+```
+
+`insert(table, values, label)` is the only way to write, and it tracks what it
+wrote. `random` is seeded from the batch id, so the same batch makes the same
+data twice — useful when a screen renders oddly and the batch that did it has
+already been removed. `scale` is 1, 3 or 6 and each generator reads it as it
+sees fit.
+
+**The coverage test is what keeps this from falling behind the site.**
+`server/tests/seed.test.js` fails when a table in the schema is in neither a
+generator's `tables` nor `NOT_FILLED`. A feature that adds a table therefore
+cannot arrive without somebody deciding whether sample data should fill it —
+and answering "no" is fine, as long as the reason is written down:
+
+```js
+const NOT_FILLED = {
+  users:      'Accounts. Made-up sign-ins are not sample data, they are a way in.',
+  action_log: 'Append-only, and the record of what really happened.',
+  // …
+};
+```
+
+The same test also checks that a generator writes to every table it claims, so
+a claim cannot quietly stop being true while still counting as covered.
+
 ## Tests
 
 ```bash

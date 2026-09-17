@@ -32,6 +32,9 @@ const TABLES_TO_CLEAR = [
 
 beforeEach(() => {
   for (const t of TABLES_TO_CLEAR) db.prepare(`DELETE FROM "${t}"`).run();
+  db.prepare('DELETE FROM seed_records').run();
+  db.prepare('DELETE FROM seed_batches').run();
+  db.prepare('DELETE FROM action_log').run();
   scraper.readData.mockReset();
   scraper.readData.mockReturnValue(null);
 });
@@ -259,6 +262,93 @@ describe('DELETE /api/admin/:table (bulk clear)', () => {
 });
 
 // ─── GET /overview ────────────────────────────────────────────────────────────
+
+describe('sample data', () => {
+  test('only an admin may see it, make it or remove it', async () => {
+    for (const user of [null, PENDING, MEMBER, AREA_HOLDER]) {
+      const app = buildApp(user);
+      const expected = user ? 403 : 401;
+      expect((await request(app).get('/api/admin/sample-data')).status).toBe(expected);
+      expect((await request(app).post('/api/admin/sample-data').send({})).status).toBe(expected);
+      expect((await request(app).delete('/api/admin/sample-data/whatever')).status).toBe(expected);
+    }
+  });
+
+  test('lists what can be filled, and what is deliberately left alone', async () => {
+    const { body } = await request(buildApp(ADMIN)).get('/api/admin/sample-data');
+
+    expect(body.success).toBe(true);
+    expect(body.generators.map(g => g.id)).toContain('directory');
+    expect(body.generators.every(g => g.label && g.describe && g.page)).toBe(true);
+    // The accounts tables are never filled, and the panel can say why.
+    expect(body.notFilled.users).toMatch(/account/i);
+    expect(body.batches).toEqual([]);
+  });
+
+  test('making a batch fills the site and reports what it made', async () => {
+    const { body } = await request(buildApp(ADMIN))
+      .post('/api/admin/sample-data')
+      .send({ generators: ['directory', 'attendance'], scale: 1, note: 'looking at the pages' });
+
+    expect(body.success).toBe(true);
+    expect(body.total).toBeGreaterThan(0);
+    expect(Object.keys(body.made).sort()).toEqual(['attendance', 'directory']);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM directory').get().n).toBeGreaterThan(0);
+
+    const [batch] = body.batches;
+    expect(batch.note).toBe('looking at the pages');
+    expect(batch.rows).toBe(body.total);
+  });
+
+  test('a batch is recorded in the action history, both ways', async () => {
+    // The history points at a real account, so one has to exist for the entry
+    // to be kept — actionLog drops what it cannot attribute rather than throw.
+    db.prepare("INSERT OR IGNORE INTO users (id, provider, provider_id, name, role) VALUES (?, 'google', 'admin-id', 'Ada', 'admin')")
+      .run(ADMIN.id);
+
+    const app = buildApp(ADMIN);
+    const { body: made } = await request(app)
+      .post('/api/admin/sample-data').send({ generators: ['directory'], scale: 1 });
+
+    await request(app).delete(`/api/admin/sample-data/${made.batch}`);
+
+    const entries = db.prepare(
+      "SELECT action, summary FROM action_log WHERE entity = 'sample data' ORDER BY id"
+    ).all();
+    expect(entries.map(e => e.action)).toEqual(['create', 'delete']);
+    expect(entries[0].summary).toMatch(/Made \d+ rows of sample data/);
+    expect(entries[1].summary).toMatch(/Removed \d+ rows of sample data/);
+  });
+
+  test('removing a batch clears what it made and leaves real records alone', async () => {
+    db.prepare('INSERT INTO directory (name) VALUES (?)').run('A Real Member');
+
+    const app = buildApp(ADMIN);
+    const { body: made } = await request(app)
+      .post('/api/admin/sample-data').send({ generators: ['directory'], scale: 1 });
+
+    const { body: gone } = await request(app).delete(`/api/admin/sample-data/${made.batch}`);
+
+    expect(gone.success).toBe(true);
+    expect(gone.deleted).toBe(gone.rows);
+    expect(gone.batches).toEqual([]);
+    expect(db.prepare('SELECT name FROM directory').all()).toEqual([{ name: 'A Real Member' }]);
+  });
+
+  test('a batch that is not there is a 404, not a silent success', async () => {
+    const res = await request(buildApp(ADMIN)).delete('/api/admin/sample-data/sample-nope-0000');
+    expect(res.status).toBe(404);
+  });
+
+  test('"sample-data" is not mistaken for a table by the generic editor', async () => {
+    // The generic /:table routes would happily treat it as a table name, so
+    // the specific ones have to be declared first. If they ever stop being,
+    // this asks the table editor for a table that does not exist.
+    const res = await request(buildApp(ADMIN)).get('/api/admin/sample-data');
+    expect(res.status).toBe(200);
+    expect(res.body.generators).toBeDefined();
+  });
+});
 
 describe('GET /api/admin/overview', () => {
   test('counts every editable table and reports the last scrape', async () => {

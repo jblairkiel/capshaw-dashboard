@@ -7,6 +7,7 @@ const { syncDirectory } = require('../lib/directorySync');
 const { TABLES, tableDef } = require('../lib/recordTables');
 const store     = require('../lib/recordStore');
 const actionLog = require('../lib/actionLog');
+const seed      = require('../seed');
 
 // Direct database editing is an admin-only privilege — everyone else edits the
 // records their own area owns, through /api/records. Both go through
@@ -178,6 +179,68 @@ router.get('/action-log', (req, res) => {
     ).all();
 
     res.json({ success: true, rows, total, actors, areas, impersonated });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ─── Sample data ──────────────────────────────────────────────────────────────
+// Filling the site up to look at it, and taking that filling back out again.
+// Admin-only, like everything else here, and every batch is recorded in the
+// action history — putting a few hundred rows into the congregation's records
+// is a change worth being able to trace, even when it is meant to be temporary.
+
+router.get('/sample-data', (req, res) => {
+  try {
+    res.json({
+      success:    true,
+      generators: seed.catalogue(),
+      batches:    seed.batches(),
+      // What is deliberately never filled, and why, so the panel can say so
+      // rather than looking as though it forgot.
+      notFilled:  seed.NOT_FILLED,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/sample-data', (req, res) => {
+  try {
+    const made = seed.generate({
+      generators: Array.isArray(req.body?.generators) ? req.body.generators : [],
+      scale:      req.body?.scale,
+      note:       String(req.body?.note || '').trim().slice(0, 200),
+      by:         req.user?.name || '',
+    });
+
+    actionLog.record(req.user, {
+      area: 'admin', action: 'create', entity: 'sample data', entityId: made.batch,
+      summary: `Made ${made.total} rows of sample data (${made.batch})`,
+      details: { batch: made.batch, rows: made.total, made: made.made },
+    });
+
+    res.json({ success: true, ...made, batches: seed.batches() });
+  } catch (err) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+router.delete('/sample-data/:batch', (req, res) => {
+  try {
+    const batch = String(req.params.batch);
+    const known = seed.batches().find(b => b.id === batch);
+    if (!known) return res.status(404).json({ success: false, error: 'No such batch of sample data' });
+
+    const gone = seed.remove(batch);
+
+    actionLog.record(req.user, {
+      area: 'admin', action: 'delete', entity: 'sample data', entityId: batch,
+      summary: `Removed ${gone.deleted} rows of sample data (${batch})`,
+      details: { batch, tracked: gone.rows, deleted: gone.deleted },
+    });
+
+    res.json({ success: true, ...gone, batches: seed.batches() });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
