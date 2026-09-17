@@ -586,6 +586,27 @@ describe("the tracker's own controls", () => {
         .toBe('/members/visitor-tracker?r=Last%205%20Years');
     });
 
+    test('a form action carrying its own query is added to, not appended past', () => {
+      expect(widestSpanQuery(
+        '<form action="/members/visitor-tracker?view=cards&amp;b=2"><select name="r"><option selected>Last 30 Days</option><option value="all">All Time</option></select></form>',
+        PATH)).toBe('/members/visitor-tracker?view=cards&b=2&r=all');
+    });
+
+    test('a field the action already sets is overridden by the form, not repeated', () => {
+      expect(widestSpanQuery(
+        '<form action="/members/visitor-tracker?r=30"><select name="r"><option selected>Last 30 Days</option><option value="all">All Time</option></select></form>',
+        PATH)).toBe('/members/visitor-tracker?r=all');
+    });
+
+    test('an entity is decoded once, so a value the page escaped twice survives', () => {
+      // The option's value is the characters a&quot;b. Decoding &amp; and then
+      // decoding &quot; out of the result would submit a quotation mark
+      // instead — the page said what it meant, and it is not ours to reread.
+      expect(widestSpanQuery(
+        '<form><select name="r"><option selected>Last 30 Days</option><option value="a&amp;quot;b">All Time</option></select></form>',
+        PATH)).toBe('/members/visitor-tracker?r=a%26quot%3Bb');
+    });
+
     test('a page already showing everything is left as it came', () => {
       expect(widestSpanQuery('<form><select name="r"><option value="30">Last 30 Days</option><option value="all" selected>All Time</option></select></form>', PATH))
         .toBe('');

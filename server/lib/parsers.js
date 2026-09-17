@@ -581,14 +581,22 @@ function attr(tag, name) {
   return decodeEntities(match[2] ?? match[3] ?? match[4] ?? '');
 }
 
+// One pass, so an entity cannot be decoded out of the result of decoding
+// another: replacing &amp; first turns "&amp;quot;" — a literal "&quot;" the
+// page meant to show — into a quotation mark.
+const ENTITIES = { amp: '&', quot: '"', apos: "'", lt: '<', gt: '>', '#39': "'", '#039': "'" };
+
 function decodeEntities(str) {
-  return String(str).replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#039;/g, "'");
+  return String(str).replace(/&(amp|quot|apos|lt|gt|#0?39);/g, (whole, name) => ENTITIES[name] ?? whole);
 }
 
 // A link or action as a path this site can be asked for, or '' when it points
 // somewhere else entirely.
 function asPath(href, from) {
-  const raw = decodeEntities((href || '').trim());
+  // Already decoded by attr(), and decoding twice is how "&amp;quot;" becomes
+  // a quotation mark. Inside an href the decoded "&" is the query separator,
+  // which is what splitting the query below relies on.
+  const raw = (href || '').trim();
   if (!raw || /^(#|javascript:|mailto:|tel:)/i.test(raw)) return '';
   if (/^https?:\/\//i.test(raw)) {
     try {
@@ -632,7 +640,19 @@ function widestSpanQuery(html, path) {
     const selects = [...body.matchAll(/<select([^>]*)>([\s\S]*?)<\/select>/gi)];
     if (!selects.length) continue;
 
+    // An action may carry a query of its own, which the form's own fields are
+    // submitted on top of rather than after.
+    const action = asPath(attr(openTag, 'action'), path) || path.split('?')[0];
+    const [actionPath, actionQuery = ''] = action.split('?');
+
     const fields = new Map();
+    for (const pair of actionQuery.split('&')) {
+      if (!pair) continue;
+      const at = pair.indexOf('=');
+      const key = decodeURIComponent(at < 0 ? pair : pair.slice(0, at));
+      if (key) fields.set(key, at < 0 ? '' : decodeURIComponent(pair.slice(at + 1)));
+    }
+
     for (const input of body.matchAll(/<input([^>]*)>/gi)) {
       const tag  = input[1];
       const type = (attr(tag, 'type') || 'text').toLowerCase();
@@ -667,9 +687,8 @@ function widestSpanQuery(html, path) {
     }
     if (!widened) continue;
 
-    const action = asPath(attr(openTag, 'action'), path) || path.split('?')[0];
-    const query  = [...fields].map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
-    return query ? `${action}?${query}` : action;
+    const query = [...fields].map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+    return query ? `${actionPath}?${query}` : actionPath;
   }
   return '';
 }
