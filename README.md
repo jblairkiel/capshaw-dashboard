@@ -175,6 +175,7 @@ implicitly, and nobody else holds one until an admin grants it.
 | `calendar` | Church Calendar | Add and edit dated events |
 | `directory` | Member Directory | Edit anybody's directory entry, and add people who are not in it yet |
 | `mail-groups` | Email Groups | Decide who is in each distribution group, and send to them |
+| `bulletin` | Weekly Newsletter | Write each week's prayer lists and offering, and export the newsletter as Word or PDF |
 
 Everything else stays read-only for everyone signed in: the pages are all
 visible to the whole church family, and only the area holder sees the buttons.
@@ -751,6 +752,69 @@ normally costs nothing.
 If YouTube cannot be reached the page says so and still offers the channel
 link — the tab never becomes an error screen. Set `YOUTUBE_CHANNEL` to point at
 a different handle, or `YOUTUBE_CHANNEL_ID` to skip the lookup entirely.
+
+---
+
+## Weekly Newsletter
+
+**Church Office → Weekly Newsletter** builds the congregation's newsletter for
+one week and exports it as a `.docx` or a `.pdf`.
+
+The page is in two halves, and the split is the whole idea.
+
+**What the portal already knows** is queried live every time the newsletter is
+built, so a correction on the page that owns it is a correction in the export:
+
+| Section | Comes from |
+|---|---|
+| Reminders | Announcements — the dated events in the next 60 days, then the standing notices |
+| Last Week's Data | Attendance — last week's Sunday morning worship and Wednesday counts |
+| Anniversaries, Birthdays | Birthdays & Anniversaries |
+| Elders, Deacons | Elders & Deacons, with what each looks after |
+| Groups, Key Email Contacts | Email Groups |
+
+**What nobody else keeps** is typed on the page and stored per week in
+`bulletin_issues`: the prayer lists (Updates, Ongoing, Shut-Ins, Pregnancies,
+Evangelists We Support), the verse, the offering and building totals, and who
+leads each fellowship group. One entry to a line; a section left empty is left
+out of the newsletter rather than printed as a bare heading.
+
+Opening a week that has never been written offers the previous week's words to
+edit rather than an empty box, and the page says so — nothing is saved until
+somebody saves. Last week's collection is the one field a new week does not
+inherit, since repeating it would report a number that was never counted.
+Exporting saves first, so what is on the screen is what is in the file.
+
+Reading a week is open to anybody signed in. Writing and exporting need the
+`bulletin` area: an export goes out to the congregation under the church's
+name, rather than being another view of records the portal already shows.
+
+### Notes on the two files
+
+The masthead, service times and footer are congregation facts rather than
+records, so they live in `server/lib/bulletinConfig.js` — that is where to
+change the phone number or widen the reminder window.
+
+The source document laid its content out in floating text boxes at fixed
+sizes. Word does not reflow between those, so a week with a longer prayer list
+would have clipped off the page; the side-by-side regions are borderless
+tables instead, which look the same and grow. The `.docx` is assembled as
+OOXML and zipped with `jszip` (the same library `routes/documents.js` reads an
+uploaded one back with); the `.pdf` is drawn with `pdfkit`, which is pure
+JavaScript and so needs nothing added to the runtime image. Both renderers
+walk the same composed object, which is what keeps the two files saying the
+same thing.
+
+Two quirks of the existing data are worth knowing. The tables disagree about
+what a date is — `MM/DD/YY` in the scraped attendance, `June 2025` plus
+`June 7` across two columns of the job sheet, a bare month and day for the
+recurring anniversaries, ISO from the announcement form — so
+`server/lib/bulletinData.js` normalises everything to ISO and drops a row it
+cannot read rather than guessing. And birthdays and anniversaries share one
+table with no column saying which, while the newsletter prints them under
+separate headings, so they are told apart by how the names read: a couple, or
+a count of years, is an anniversary. The scraper rebuilds that table on every
+sync, so the distinction cannot be stored on it.
 
 ---
 
