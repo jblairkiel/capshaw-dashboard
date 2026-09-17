@@ -3,6 +3,12 @@
 #   cp .env.example .env     # fill in at least SESSION_SECRET
 #   docker compose up -d --build
 #
+# On the droplet it is not built at all — CI publishes the image and the deploy
+# pulls it:
+#
+#   CAPSHAW_IMAGE=ghcr.io/jblairkiel/capshaw-dashboard:<sha> \
+#     docker compose pull && docker compose up -d --no-build
+#
 # One service and one volume: the app, and everything it writes. TLS and the
 # public hostname stay with whatever is already in front of it — nginx on the
 # droplet terminates HTTPS and proxies to the published port, exactly as it
@@ -10,9 +16,13 @@
 
 services:
   app:
+    # Built here by default, which is what `docker compose up -d --build` does
+    # on a laptop. The droplet sets CAPSHAW_IMAGE to a published tag instead
+    # and pulls it, so what it runs is the image CI exercised rather than a
+    # rebuild of the same commit on a smaller machine.
     build:
       context: .
-    image: capshaw-dashboard:latest
+    image: ${CAPSHAW_IMAGE:-capshaw-dashboard:latest}
     # The container is the unit that gets restarted, so it restarts itself
     # rather than being watched by a process manager inside.
     restart: unless-stopped
