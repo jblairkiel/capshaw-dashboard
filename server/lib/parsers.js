@@ -377,6 +377,13 @@ const SITE_FURNITURE = new Set([
   'protected email', 'email protected', '[email protected]',
 ]);
 
+// A page's own section titles read exactly like people — "Our Elders" and
+// "Visitor Notes" are two capitalised words, the same shape as "Pat Lane" —
+// so they are ruled out by how a title is built rather than by listing them.
+// Nobody is called "Our" anything, and no surname is "Notes".
+const SECTION_TITLE_RE = /^(our|about|the|all|more|view|see)\s/i;
+const SECTION_NOUN_RE  = /\b(notes?|tracker|trackers|history|directory|calendar|schedule|login|logout|portal|records?|ministry|ministries|announcements?|bulletins?|information|info|us|home|page|menu|list|search|results?)$/i;
+
 // Lowercase words that belong inside a surname rather than marking the text as
 // a sentence.
 const NAME_PARTICLES = new Set(['de', 'del', 'della', 'da', 'di', 'dos', 'du', 'van', 'von', 'der', 'den', 'la', 'le', 'bin', 'ter']);
@@ -384,10 +391,17 @@ const NAME_PARTICLES = new Set(['de', 'del', 'della', 'da', 'di', 'dos', 'du', '
 // 0 — not a name at all. 1 — could be, but nothing says so. 2 — reads like a
 // person's name. The middle rank is what keeps a single-word guest readable
 // while still losing to a proper name when both are on offer.
-function nameScore(text) {
+//
+// A link drops a rank for the same reason. The site's menu sits above the
+// first guest's card, so "Our Elders" and a guest's name compete in the same
+// run, and a guest's name is written in their card rather than as a link off
+// to another page. A demotion rather than a refusal, so a page that does link
+// a guest to their own record still reads.
+function nameScore(text, isLink = false) {
   if (!text || text.length > 80) return 0;
   if (NOT_A_NAME.test(text)) return 0;
   if (SITE_FURNITURE.has(text.toLowerCase().replace(/\s+/g, ' '))) return 0;
+  if (SECTION_TITLE_RE.test(text) || SECTION_NOUN_RE.test(text)) return 0;
   // However the site writes its obfuscated-address placeholder.
   if (/e-?mail[\s_-]*protected|protected[\s_-]*e-?mail/i.test(text)) return 0;
   // "Last on 09/13/26", a visit date, a phone number, a count — a person's
@@ -400,7 +414,7 @@ function nameScore(text) {
   const words = text.split(/\s+/);
   const readsLikeAPerson = words.length >= 2 && words.length <= 4 &&
     words.every(w => /^[A-Z]/.test(w) || NAME_PARTICLES.has(w.toLowerCase()));
-  return readsLikeAPerson ? 2 : 1;
+  return readsLikeAPerson && !isLink ? 2 : 1;
 }
 
 // The likeliest name among the lines gathered for one guest. Ties go to the
@@ -408,7 +422,7 @@ function nameScore(text) {
 function bestName(candidates) {
   let best = null;
   for (const candidate of candidates) {
-    const score = nameScore(candidate.text);
+    const score = nameScore(candidate.text, candidate.isLink);
     if (score > 0 && (!best || score > best.score)) best = { ...candidate, score };
   }
   return best;
@@ -487,8 +501,11 @@ function parseVisitorsInOrder(html) {
     // A section label is recognised in whatever element the page wrote it in,
     // not only in a heading — the same reason the name is.
     const section = visitorSection(text);
-    tokens.push(section ? { at: match.index, kind: 'section', section }
-                        : { at: match.index, kind: 'label', text });
+    tokens.push(section
+      ? { at: match.index, kind: 'section', section }
+      // A link is a weaker candidate than plain text: the site's menu sits
+      // above the first guest's card, so the two compete in the same run.
+      : { at: match.index, kind: 'label', text, isLink: match[1].toLowerCase() === 'a' });
   }
   tokens.sort((a, b) => a.at - b.at);
 
