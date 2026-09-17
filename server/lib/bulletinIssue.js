@@ -178,7 +178,10 @@ function compose(sunday) {
 
     // A group's name and address come from the portal; its leader and this
     // week's meeting note are typed, so the two are stitched together here.
+    // The key travels with the group so the compose screen can write a leader
+    // back against the right one without inferring it from the row's position.
     groups: auto.groups.map(g => ({
+      key:    g.key,
       name:   g.name,
       email:  g.email,
       leader: issue.group_notes?.[g.key]?.leader || '',

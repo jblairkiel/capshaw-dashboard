@@ -128,7 +128,7 @@ function shortDate(iso) {
 // "Reminders" is the announcement board seen as one list: the dated events
 // coming up, and the standing notices that have no date. Dated first and in
 // date order, because that is the half that expires.
-function reminders(start, horizonDays = 35) {
+function reminders(start, horizonDays = config.reminderHorizonDays) {
   const end = addDays(start, horizonDays);
 
   const dated = db.prepare(`

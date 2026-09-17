@@ -24,6 +24,7 @@ import MailGroupsView from './components/MailGroupsView';
 import ServingSchedule from './components/ServingSchedule';
 import ServingJobsView from './components/ServingJobsView';
 import ActionHistoryView from './components/ActionHistoryView';
+import WeeklyBulletinView from './components/WeeklyBulletinView';
 import ImpersonationBanner from './components/ImpersonationBanner';
 import { hasWriteAccess, isAdmin, hasArea } from './lib/roles';
 
@@ -85,6 +86,7 @@ const OFFICE_ITEMS = [
   { id: 'serving-jobs',   label: 'Member Jobs',       when: user => hasArea(user, 'serving-schedule') },
   { id: 'directory',      label: 'Member Directory',  when: user => hasArea(user, 'directory') },
   { id: 'mail-groups',    label: 'Email Groups',      when: user => hasArea(user, 'mail-groups') },
+  { id: 'bulletin',       label: 'Weekly Newsletter', when: user => hasArea(user, 'bulletin') },
 ];
 
 function officeGroupFor(user) {
@@ -97,7 +99,7 @@ function officeGroupFor(user) {
 const STANDALONE_TABS = new Set([
   'bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database',
   'directory', 'profile', 'inbox', 'mail-groups', 'livestreams',
-  'assignments', 'visitors', 'leadership', 'serving-jobs', 'action-history',
+  'assignments', 'visitors', 'leadership', 'serving-jobs', 'action-history', 'bulletin',
 ]);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
@@ -421,6 +423,11 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       {!updating && activeTab === 'directory' && hasArea(user, 'directory') && (
         <main className="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           <DirectoryView />
+        </main>
+      )}
+      {!updating && activeTab === 'bulletin' && hasArea(user, 'bulletin') && (
+        <main className="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <WeeklyBulletinView canWrite={hasArea(user, 'bulletin')} />
         </main>
       )}
 

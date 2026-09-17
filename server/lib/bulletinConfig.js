@@ -8,6 +8,11 @@
 module.exports = {
   masthead: 'Capshaw Church of Christ Newsletter',
 
+  // How far ahead the Reminders list looks. "Coming up" is the point of that
+  // section, and the draft this reproduces announced a VBS kickoff seven weeks
+  // out, so the window is generous rather than a single week.
+  reminderHorizonDays: 60,
+
   serviceTimes: 'Sunday AM Classes – 9:00; Sunday AM Worship – 9:50; Wednesday PM Classes – 7:00',
 
   address: ['8941 Wall Triana Hwy,', 'Harvest, AL 35749'],
