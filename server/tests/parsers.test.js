@@ -7,6 +7,7 @@ const {
   parseVisitors,
   parseDeacons,
   parseBulletins,
+  widestSpanQuery, pagerLinks, mergeVisitors,
 } = require('../lib/parsers');
 
 // ─── stripTags ────────────────────────────────────────────────────────────────
@@ -517,6 +518,32 @@ describe('parseVisitors — the name above the table', () => {
     });
   });
 
+  test("the site's own menu is not a guest", () => {
+    // "About Us" reads exactly like a person — two capitalised words — so it
+    // is ruled out twice: by where it sits, and by what it says. Either alone
+    // would leave the other shape listed as a guest.
+    const inChrome = parseVisitors(`
+      <nav><a href="/about">About Us</a><a href="/contact">Contact Us</a></nav>
+      <span>Pat Lane</span><h4>Visit History</h4>${VISITS}
+      <footer><a href="/about">About Us</a></footer>
+    `);
+    expect(inChrome.map(g => g.name)).toEqual(['Pat Lane']);
+
+    const looseInThePage = parseVisitors(`
+      <div class="menu"><a href="/about">About Us</a><a href="/staff">Our Staff</a></div>
+      <span>Pat Lane</span><h4>Visit History</h4>${VISITS}
+    `);
+    expect(looseInThePage.map(g => g.name)).toEqual(['Pat Lane']);
+  });
+
+  test("the placeholder standing in for a hidden address is not a guest", () => {
+    const guests = parseVisitors(`
+      <a href="/cdn-cgi/l/email-protection"><span class="__cf_email__">Protected Email</span></a>
+      <span>Pat Lane</span><h4>Visit History</h4>${VISITS}
+    `);
+    expect(guests.map(g => g.name)).toEqual(['Pat Lane']);
+  });
+
   test('the heading shape still wins when the page does use headings for names', () => {
     // The fallback only runs when reading the headings found nobody, so a page
     // that names its guests properly is unaffected by any of the above.
@@ -527,5 +554,100 @@ describe('parseVisitors — the name above the table', () => {
     `);
 
     expect(guests.map(g => g.name)).toEqual(['Jo Reed']);
+  });
+});
+
+describe("the tracker's own controls", () => {
+  const PATH = '/members/visitor-tracker';
+
+  describe('the date-span dropdown', () => {
+    test('asks for the widest span the dropdown offers, carrying the form with it', () => {
+      const query = widestSpanQuery(`
+        <form method="get" action="/members/visitor-tracker">
+          <input type="hidden" name="view" value="cards">
+          <select name="range">
+            <option value="30">Last 30 Days</option>
+            <option value="365" selected>Last 12 Months</option>
+            <option value="all">All Time</option>
+          </select>
+          <input type="submit" value="Go">
+        </form>`, PATH);
+
+      expect(query).toBe('/members/visitor-tracker?view=cards&range=all');
+    });
+
+    test('an option with no value attribute is submitted as its own text', () => {
+      expect(widestSpanQuery('<form><select name="span"><option selected>Last 6 Months</option><option>All Dates</option></select></form>', PATH))
+        .toBe('/members/visitor-tracker?span=All%20Dates');
+    });
+
+    test('the widest span is measured, not assumed to be last', () => {
+      expect(widestSpanQuery('<form><select name="r"><option>Last 5 Years</option><option selected>Last 30 Days</option><option>Last 6 Months</option></select></form>', PATH))
+        .toBe('/members/visitor-tracker?r=Last%205%20Years');
+    });
+
+    test('a page already showing everything is left as it came', () => {
+      expect(widestSpanQuery('<form><select name="r"><option value="30">Last 30 Days</option><option value="all" selected>All Time</option></select></form>', PATH))
+        .toBe('');
+    });
+
+    test('a dropdown that is not about dates is not touched', () => {
+      expect(widestSpanQuery('<form><select name="sort"><option selected>By Name</option><option>By Date Added</option></select></form>', PATH))
+        .toBe('');
+    });
+
+    test('a filter submitted by POST is left alone rather than guessed at', () => {
+      expect(widestSpanQuery('<form method="POST"><select name="r"><option selected>Last 30 Days</option><option>All Time</option></select></form>', PATH))
+        .toBe('');
+    });
+  });
+
+  describe('the pager', () => {
+    test('finds a numbered pager', () => {
+      expect(pagerLinks('<a href="?page=1">1</a><a href="?page=2">2</a><a href="?page=3">3</a>', PATH))
+        .toEqual(['/members/visitor-tracker?page=1', '/members/visitor-tracker?page=2', '/members/visitor-tracker?page=3']);
+    });
+
+    test('finds a next link that carries no page number of its own', () => {
+      expect(pagerLinks('<a rel="next" href="/members/visitor-tracker?start=25">Next &rsaquo;</a>', PATH))
+        .toEqual(['/members/visitor-tracker?start=25']);
+    });
+
+    test('a link to a guest is not a pager link', () => {
+      expect(pagerLinks('<a href="?id=44">Pat Lane</a><a href="?page=2">2</a>', PATH))
+        .toEqual(['/members/visitor-tracker?page=2']);
+    });
+
+    test('a pager on another page of the site is not followed', () => {
+      expect(pagerLinks('<a href="/members/attendance?page=2">2</a>', PATH)).toEqual([]);
+    });
+
+    test('the page it is already on is not offered back', () => {
+      expect(pagerLinks('<a href="/members/visitor-tracker?page=2">2</a>', '/members/visitor-tracker?page=2')).toEqual([]);
+    });
+  });
+
+  describe('joining the pages together', () => {
+    test('a guest whose visits run across a page break is one guest', () => {
+      const merged = mergeVisitors([
+        [{ name: 'Pat Lane', visits: [{ date: '09/13/26', service: 'Sun AM' }], comments: 'Came with the Carters' }],
+        [{ name: 'Pat Lane', visits: [{ date: '09/13/26', service: 'Sun AM' }, { date: '08/30/26', service: 'Sun AM' }], phone: '(256) 555-0134' }],
+        [{ name: 'Sam Ford', visits: [{ date: '09/06/26', service: 'Sun AM' }] }],
+      ]);
+
+      expect(merged).toHaveLength(2);
+      // The repeated visit is not recorded twice, and each page's details survive.
+      expect(merged[0]).toMatchObject({ name: 'Pat Lane', comments: 'Came with the Carters', phone: '(256) 555-0134' });
+      expect(merged[0].visits).toHaveLength(2);
+      expect(merged[1].name).toBe('Sam Ford');
+    });
+
+    test('a later page does not blank a detail an earlier one had', () => {
+      const merged = mergeVisitors([
+        [{ name: 'Pat Lane', visits: [], phone: '(256) 555-0134' }],
+        [{ name: 'Pat Lane', visits: [], phone: '' }],
+      ]);
+      expect(merged[0].phone).toBe('(256) 555-0134');
+    });
   });
 });

@@ -28,6 +28,10 @@ const {
   parseAttendance,
   parseSermons,
   parseVisitors,
+  widestSpanQuery,
+  pagerLinks,
+  mergeVisitors,
+  nameScore,
   parseAnniversaries,
   parseDeacons,
   parseBulletins,
@@ -103,15 +107,14 @@ const _saveScraped = db.transaction((data) => {
     for (const vv of (v.visits || [])) insVisit.run(vid, vv.date, vv.service);
   }
 
-  // Every earlier reading of this page mistook one of the other lines in a
-  // guest's card for their name, and guests are matched by name, so those rows
-  // survive the scrape that fixes them — the real person arriving beside a row
-  // called "Just moved from Foley, AL" or "Last on 09/13/26". Two kinds are
-  // cleared once a scrape has read guests properly: a name this scrape has
-  // just read as somebody's comment, and a name carrying a digit, which no
-  // person's does. Anything typed in by hand — details, our own notes, a
-  // follow-up — is left alone however it is named, exactly as when a guest is
-  // matched rather than re-created. A duplicate in the list can be fixed by
+  // Every earlier reading of this page mistook some other line in a guest's
+  // card for their name, and guests are matched by name, so those rows survive
+  // the scrape that fixes them — the real person arriving beside a row called
+  // "Just moved from Foley, AL" or "Last on 09/13/26". Once a scrape has read
+  // guests properly they are cleared: first a name this scrape has just read
+  // as somebody's comment. Anything typed in by hand — details, our own notes,
+  // a follow-up — is left alone however it is named, exactly as when a guest
+  // is matched rather than re-created. A duplicate in the list can be fixed by
   // hand; a deleted phone number cannot.
   const removeMisread = db.prepare(`
     DELETE FROM visitors
@@ -124,10 +127,14 @@ const _saveScraped = db.transaction((data) => {
        AND trim(coalesce(notes, ''))             = ''
        AND trim(coalesce(last_contacted_at, '')) = ''
   `);
-  const removeNumberedNames = db.prepare(`
-    DELETE FROM visitors
-     WHERE name GLOB '*[0-9]*'
-       AND trim(coalesce(phone, ''))             = ''
+  // And a row whose name is one this parser would never produce: the summary
+  // line off a card ("Last on 09/13/26"), a link out of the site's own menu
+  // ("About Us"), the placeholder standing in for a hidden address. The test
+  // is the same one the parser applies when it picks a name, so the two cannot
+  // drift apart and start disagreeing about what a guest is called.
+  const untouchedNames = db.prepare(`
+    SELECT id, name FROM visitors
+     WHERE trim(coalesce(phone, ''))             = ''
        AND trim(coalesce(email, ''))             = ''
        AND trim(coalesce(address, ''))           = ''
        AND trim(coalesce(invited_by, ''))        = ''
@@ -135,6 +142,7 @@ const _saveScraped = db.transaction((data) => {
        AND trim(coalesce(notes, ''))             = ''
        AND trim(coalesce(last_contacted_at, '')) = ''
   `);
+  const removeById = db.prepare('DELETE FROM visitors WHERE id = ?');
 
   // Only once this scrape has actually read guests: a page that parsed to
   // nothing is a reason to keep every row, not to tidy them.
@@ -144,7 +152,9 @@ const _saveScraped = db.transaction((data) => {
         if (line.trim()) removeMisread.run(line);
       }
     }
-    removeNumberedNames.run();
+    for (const row of untouchedNames.all()) {
+      if (nameScore(row.name) === 0) removeById.run(row.id);
+    }
   }
 
   // Anniversaries
@@ -324,6 +334,14 @@ router.get('/debug/:section', requireAdmin, async (req, res) => {
         html: body.slice(Math.max(0, m.index - 300), m.index).replace(/\s+/g, ' ').trim(),
       }));
 
+      // What the scrape would do with the page's own controls. A tracker that
+      // comes back with fewer guests than the site shows is a question about
+      // exactly these two, and neither is visible in a dump of the markup.
+      report.controls = {
+        widestSpan: widestSpanQuery(body, section.path) || null,
+        pager:      pagerLinks(body, section.path),
+      };
+
       // And the 300 characters *after the previous table*, which is where an
       // entry begins. The two windows are not the same view: a guest's name is
       // at the top of their card and their comment is at the bottom, so the
@@ -378,6 +396,75 @@ router.get('/debug/:section', requireAdmin, async (req, res) => {
 
 let _updateInProgress = false;
 
+// ─── The tracker shows a slice; this collects the whole thing ─────────────────
+//
+// The page defaults to a date span and runs the rest onto further pages, so
+// what arrives is whatever the site chose to show. Both controls are read off
+// the page and used (see widestSpanQuery and pagerLinks in lib/parsers.js):
+// the span is set as wide as the dropdown goes, then every page of the result
+// is fetched. A page that will not load is a warning rather than a failure —
+// the guests already read are worth keeping, and saying so beats silently
+// returning fewer than there are.
+
+const VISITOR_TRACKER   = '/members/visitor-tracker';
+const MAX_TRACKER_PAGES = 40;
+
+async function fetchVisitorTracker(warnings) {
+  const first = await fetchPage(VISITOR_TRACKER).catch(e => ({ body: '', status: 0, _err: e.message }));
+  if (first._err || !first.body || first.status === 404) return { page: first, more: [] };
+
+  // The widest span the dropdown offers, if it is not already showing it.
+  let page = first;
+  const wide = widestSpanQuery(first.body, VISITOR_TRACKER);
+  if (wide) {
+    try {
+      const widened = await fetchPage(wide);
+      if (widened.status === 200 && widened.body) {
+        page = widened;
+        console.log(`[scraper] visitors — asked the tracker for every date it offers (${wide})`);
+      }
+    } catch (e) {
+      warnings.push(`visitors: could not widen the date filter — ${e.message}`);
+    }
+  }
+
+  // Then the rest of the pages, re-reading each one's pager so a window that
+  // only ever shows a few page numbers at a time is still followed to the end.
+  const more    = [];
+  const visited = new Set([wide || VISITOR_TRACKER, VISITOR_TRACKER]);
+  const queue   = pagerLinks(page.body, wide || VISITOR_TRACKER).filter(l => !visited.has(l));
+
+  while (queue.length && more.length < MAX_TRACKER_PAGES) {
+    const next = queue.shift();
+    if (visited.has(next)) continue;
+    visited.add(next);
+
+    let following;
+    try {
+      following = await fetchPage(next);
+    } catch (e) {
+      warnings.push(`visitors: ${next} could not be loaded — ${e.message}; some guests may be missing`);
+      continue;
+    }
+    if (following.status !== 200 || !following.body) {
+      warnings.push(`visitors: ${next} came back ${following.status}; some guests may be missing`);
+      continue;
+    }
+
+    more.push(following.body);
+    for (const link of pagerLinks(following.body, next)) {
+      if (!visited.has(link)) queue.push(link);
+    }
+  }
+
+  if (queue.length) {
+    warnings.push(`visitors: stopped after ${MAX_TRACKER_PAGES} pages of the tracker — there may be more`);
+  }
+  if (more.length) console.log(`[scraper] visitors — followed ${more.length} further page(s) of the tracker`);
+
+  return { page, more };
+}
+
 async function runUpdate() {
   if (_updateInProgress) throw new Error('Update already in progress');
   _updateInProgress = true;
@@ -389,12 +476,13 @@ async function runUpdate() {
       fetchPage('/members/job-assignments').catch(e => ({ body: '', status: 0, _err: e.message })),
       fetchPage('/members/attendance'),
       fetchPage('/members/sermons').catch(e => ({ body: '', status: 0, _err: e.message })),
-      fetchPage('/members/visitor-tracker').catch(e => ({ body: '', status: 0, _err: e.message })),
+      fetchVisitorTracker(warnings),
       fetchPage('/members/anniversaries-members-non-members').catch(e => ({ body: '', status: 0, _err: e.message })),
       fetchPage('/members/deacons').catch(e => ({ body: '', status: 0, _err: e.message })),
       fetchPage('/members'),
     ]);
-    const [jaPage, attPage, serPage, visPage, annPage, deaPage, dashPage] = pages;
+    const [jaPage, attPage, serPage, visitorTracker, annPage, deaPage, dashPage] = pages;
+    const visPage = visitorTracker.page;
 
     if (attPage.url && attPage.url.includes('login')) {
       throw new Error('Session expired or login failed — check credentials in .env');
@@ -459,7 +547,9 @@ async function runUpdate() {
       jobAssignments: tryParse('jobAssignments', jaPage, parseJobAssignments, existing.jobAssignments || EMPTY_JOB_ASSIGNMENTS),
       attendance:     parseAttendance(attPage.body),
       sermons:        tryParse('sermons', serPage, parseSermons, existing.sermons || []),
-      visitors:       tryParse('visitors', visPage, parseVisitors, existing.visitors || []),
+      visitors:       tryParse('visitors', visPage,
+        body => mergeVisitors([parseVisitors(body), ...visitorTracker.more.map(parseVisitors)]),
+        existing.visitors || []),
       anniversaries:  tryParse('anniversaries', annPage, parseAnniversaries, existing.anniversaries || []),
       deacons:        tryParse('deacons', deaPage, parseDeacons, existing.deacons || []),
       bulletins:      parseBulletins(dashPage.body),

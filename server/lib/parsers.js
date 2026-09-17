@@ -354,9 +354,28 @@ function parseVisitorsByHeading(html) {
 // characters where the name is chosen.
 const LABEL_RE = /<(h[1-6]|p|div|span|strong|b|em|a|td|th|caption|li|dt|summary)[^>]*>([^<]{2,300})<\/\1>/gi;
 
-// Things that sit inside a card and are plainly not a guest: the page's own
-// furniture, a column heading, a date, a count.
-const NOT_A_NAME = /^(date|service|comments?|notes?|visits?|visit history|history|attendance|home|menu|search|print|back|next|previous|more|«|»|\d+|[^a-z]*)$/i;
+// Things that sit inside a card and are plainly not a guest: a column heading,
+// a date, a count.
+const NOT_A_NAME = /^(date|service|comments?|notes?|visits?|visit history|history|attendance|print|back|next|previous|more|«|»|\d+|[^a-z]*)$/i;
+
+// The site's own navigation, which surrounds the tracker on every page. These
+// are ruled out by name as well as by where they sit, because a link like
+// "About Us" reads exactly like a person otherwise — two capitalised words —
+// and it only takes one to appear outside a <nav> to be listed as a guest.
+const SITE_FURNITURE = new Set([
+  'home', 'menu', 'search', 'about', 'about us', 'contact', 'contact us',
+  'our staff', 'staff', 'leadership', 'elders', 'deacons', 'ministries',
+  'directions', 'visit us', 'plan your visit', 'give', 'giving', 'donate',
+  'events', 'calendar', 'sermons', 'bulletin', 'bulletins', 'media', 'watch',
+  'livestream', 'live stream', 'news', 'blog', 'members', 'member login',
+  'log in', 'login', 'log out', 'logout', 'sign in', 'sign out', 'my profile',
+  'profile', 'account', 'admin', 'church office', 'directory', 'worship',
+  'bible study', 'privacy', 'privacy policy', 'terms', 'site map', 'sitemap',
+  'read more', 'learn more', 'view all', 'close', 'open', 'toggle navigation',
+  // The site hides addresses behind a link whose text is the placeholder
+  // rather than the address, and the placeholder is not a person either.
+  'protected email', 'email protected', '[email protected]',
+]);
 
 // Lowercase words that belong inside a surname rather than marking the text as
 // a sentence.
@@ -368,6 +387,9 @@ const NAME_PARTICLES = new Set(['de', 'del', 'della', 'da', 'di', 'dos', 'du', '
 function nameScore(text) {
   if (!text || text.length > 80) return 0;
   if (NOT_A_NAME.test(text)) return 0;
+  if (SITE_FURNITURE.has(text.toLowerCase().replace(/\s+/g, ' '))) return 0;
+  // However the site writes its obfuscated-address placeholder.
+  if (/e-?mail[\s_-]*protected|protected[\s_-]*e-?mail/i.test(text)) return 0;
   // "Last on 09/13/26", a visit date, a phone number, a count — a person's
   // name does not carry a digit, and every line in the card that is not the
   // name carries one or is an address.
@@ -447,9 +469,18 @@ function parseVisitorsInOrder(html) {
     .map(m => ({ at: m.index, end: m.index + m[0].length, kind: 'table', html: m[0] }));
   const insideATable = at => tables.some(t => at >= t.at && at < t.end);
 
+  // The site's navigation and footer wrap every page, and a link in them reads
+  // like anything else once it is just text. Ruling them out by where they sit
+  // costs nothing and does not depend on knowing what this site happens to
+  // call its pages. The card's own header is a <button>, not a <header>, so
+  // nothing a guest's entry holds is inside one of these.
+  const chromeRanges = [...html.matchAll(/<(nav|footer|aside)[\s>][\s\S]*?<\/\1>/gi)]
+    .map(m => [m.index, m.index + m[0].length]);
+  const insideChrome = at => chromeRanges.some(([from, to]) => at >= from && at < to);
+
   const tokens = [...tables];
   for (const match of html.matchAll(LABEL_RE)) {
-    if (insideATable(match.index)) continue;
+    if (insideATable(match.index) || insideChrome(match.index)) continue;
     const text = stripTags(match[2]);
     if (!text) continue;
 
@@ -530,6 +561,180 @@ function parseVisitorsInOrder(html) {
 
   keep();
   return guests;
+}
+
+// ─── Following the tracker's own controls ─────────────────────────────────────
+//
+// The tracker shows a slice of its guests: a dropdown picks how far back to
+// look, and what is left over runs onto further pages. Scraping the page as it
+// arrives therefore collects whatever the site happened to default to.
+//
+// Rather than hard-code a query this site is not obliged to keep, both are read
+// off the page the way a person uses them — find the dropdown, set it to its
+// widest span, then follow the pager. What was actually followed is reported,
+// so a scrape that came back short can be told from one that had nothing more
+// to fetch.
+
+function attr(tag, name) {
+  const match = tag.match(new RegExp(`\\b${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i'));
+  if (!match) return '';
+  return decodeEntities(match[2] ?? match[3] ?? match[4] ?? '');
+}
+
+function decodeEntities(str) {
+  return String(str).replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#039;/g, "'");
+}
+
+// A link or action as a path this site can be asked for, or '' when it points
+// somewhere else entirely.
+function asPath(href, from) {
+  const raw = decodeEntities((href || '').trim());
+  if (!raw || /^(#|javascript:|mailto:|tel:)/i.test(raw)) return '';
+  if (/^https?:\/\//i.test(raw)) {
+    try {
+      const url = new URL(raw);
+      if (!/capshawchurch\.org$/i.test(url.hostname)) return '';
+      return url.pathname + url.search;
+    } catch { return ''; }
+  }
+  if (raw.startsWith('/')) return raw;
+  if (raw.startsWith('?')) return from.split('?')[0] + raw;
+  const dir = from.split('?')[0].replace(/\/[^/]*$/, '');
+  return `${dir}/${raw}`;
+}
+
+// How much of the past an option asks for. Infinity is "everything".
+function spanWeight(text) {
+  const label = text.trim().toLowerCase();
+  if (!label) return -1;
+  if (/^(all|any|everything|no limit|show all|full)\b/.test(label) || /\ball (time|dates|history|visits)\b/.test(label)) {
+    return Infinity;
+  }
+  const counted = label.match(/(\d+)\s*(day|week|month|year)/);
+  if (counted) {
+    const per = { day: 1, week: 7, month: 30, year: 365 };
+    return Number(counted[1]) * per[counted[2]];
+  }
+  const singular = label.match(/\b(day|week|month|year)\b/);
+  if (singular) return { day: 1, week: 7, month: 30, year: 365 }[singular[1]];
+  return 0;
+}
+
+// The page asked for with its date-span dropdown set as wide as it goes, or ''
+// when the page has no such dropdown.
+function widestSpanQuery(html, path) {
+  for (const form of html.matchAll(/<form([^>]*)>([\s\S]*?)<\/form>/gi)) {
+    const [, openTag, body] = form;
+    // A filter submitted by POST cannot be asked for as a link, and guessing
+    // at one would be worse than leaving the page as it came.
+    if (/\bmethod\s*=\s*["']?post/i.test(openTag)) continue;
+
+    const selects = [...body.matchAll(/<select([^>]*)>([\s\S]*?)<\/select>/gi)];
+    if (!selects.length) continue;
+
+    const fields = new Map();
+    for (const input of body.matchAll(/<input([^>]*)>/gi)) {
+      const tag  = input[1];
+      const type = (attr(tag, 'type') || 'text').toLowerCase();
+      const name = attr(tag, 'name');
+      if (!name || type === 'submit' || type === 'button' || type === 'reset') continue;
+      if ((type === 'checkbox' || type === 'radio') && !/\bchecked\b/i.test(tag)) continue;
+      fields.set(name, attr(tag, 'value'));
+    }
+
+    let widened = '';
+    for (const [, selectTag, options] of selects) {
+      const name = attr(selectTag, 'name');
+      if (!name) continue;
+
+      const choices = [...options.matchAll(/<option([^>]*)>([\s\S]*?)<\/option>/gi)].map(o => ({
+        value:    /\bvalue\s*=/i.test(o[1]) ? attr(o[1], 'value') : stripTags(o[2]),
+        label:    stripTags(o[2]),
+        selected: /\bselected\b/i.test(o[1]),
+      }));
+      if (!choices.length) continue;
+
+      // Whatever it is set to now, unless this is the dropdown we came for.
+      const current = choices.find(c => c.selected) || choices[0];
+      fields.set(name, current.value);
+
+      const widest = choices.reduce((best, c) =>
+        spanWeight(c.label) > spanWeight(best.label) ? c : best, choices[0]);
+      if (spanWeight(widest.label) > spanWeight(current.label)) {
+        fields.set(name, widest.value);
+        widened = widest.label;
+      }
+    }
+    if (!widened) continue;
+
+    const action = asPath(attr(openTag, 'action'), path) || path.split('?')[0];
+    const query  = [...fields].map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+    return query ? `${action}?${query}` : action;
+  }
+  return '';
+}
+
+// Links that lead to more of the same listing: a numbered pager, a "next", a
+// "»". Anything pointing at another page of the site is left alone.
+const PAGER_TEXT_RE  = /^(\d{1,3}|»|›|>|>>|next|last|older|more)$/i;
+const PAGER_PARAM_RE = /[?&](page|pg|p|start|offset|from|skip)\b\s*=/i;
+
+function pagerLinks(html, path) {
+  const here  = path.split('?')[0];
+  const found = new Map();
+
+  for (const link of html.matchAll(/<a([^>]*)>([\s\S]*?)<\/a>/gi)) {
+    const tag  = link[1];
+    const text = stripTags(link[2]);
+    const rel  = attr(tag, 'rel').toLowerCase();
+    const aria = attr(tag, 'aria-label').toLowerCase();
+
+    const looksLikeAPager =
+      PAGER_TEXT_RE.test(text) || rel === 'next' || /\bnext\b|\bpage\b/.test(aria);
+    if (!looksLikeAPager) continue;
+
+    const target = asPath(attr(tag, 'href'), path);
+    if (!target || target.split('?')[0] !== here) continue;     // somewhere else on the site
+    if (target === path) continue;                              // the page we are already on
+    if (!target.includes('?') || !PAGER_PARAM_RE.test(target)) {
+      // A same-path link with no page-ish parameter is not a pager link, it is
+      // something else the listing links to — a guest, a sort, a filter.
+      if (rel !== 'next') continue;
+    }
+    if (!found.has(target)) found.set(target, true);
+  }
+
+  return [...found.keys()];
+}
+
+// One guest per name, with everything each page knew about them. A guest whose
+// visits run across a page break has their rows joined rather than replaced,
+// and a detail the later page leaves blank keeps the earlier page's.
+function mergeVisitors(pages) {
+  const byName = new Map();
+
+  for (const guest of pages.flat()) {
+    const key = guest.name.trim().toLowerCase();
+    if (!key) continue;
+
+    const seen = byName.get(key);
+    if (!seen) {
+      byName.set(key, { ...guest, visits: [...(guest.visits || [])] });
+      continue;
+    }
+
+    const dates = new Set(seen.visits.map(v => `${v.date}|${v.service}`));
+    for (const visit of (guest.visits || [])) {
+      const id = `${visit.date}|${visit.service}`;
+      if (!dates.has(id)) { dates.add(id); seen.visits.push(visit); }
+    }
+    for (const [field, value] of Object.entries(guest)) {
+      if (field === 'visits' || field === 'name') continue;
+      if (!seen[field] && value) seen[field] = value;
+    }
+  }
+
+  return [...byName.values()];
 }
 
 // One table, a guest per row: Name | Date | Service, in whatever order the
@@ -743,6 +948,10 @@ module.exports = {
   parseVisitors,
   parseVisitorTable,
   parseVisitorsInOrder,
+  widestSpanQuery,
+  pagerLinks,
+  mergeVisitors,
+  nameScore,
   parseAnniversaries,
   parseDeacons,
   parseBulletins,
