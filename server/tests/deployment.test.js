@@ -89,6 +89,31 @@ describe('the deploy runs what CI exercised', () => {
     expect(script).toMatch(/--no-build/);
   });
 
+  test('the host prerequisites are checked before anything is pulled', () => {
+    const script = deployJob.steps[0].with.script;
+    // Each of these is a one-time setup step on the droplet, not a bug in the
+    // release. The deploy has to say which one is missing: "permission denied
+    // on /var/run/docker.sock" halfway through a pull reads like a broken
+    // build, and the fix never gets made.
+    const preflight = script.slice(0, script.indexOf('docker compose pull'));
+    expect(preflight).toMatch(/command -v docker/);
+    expect(preflight).toMatch(/docker compose version/);
+    expect(preflight).toMatch(/docker info/);
+    expect(preflight).toMatch(/usermod -aG docker/);
+  });
+
+  test('a checkout owned by another user is trusted, not a dead end', () => {
+    const script = deployJob.steps[0].with.script;
+    // Installing Docker is done as root, and root-owned files in the checkout
+    // make git refuse to read it. The deploy only reads this repository.
+    const trusted = script.indexOf('safe.directory');
+    const pull    = script.indexOf('git pull origin main');
+    expect(trusted).toBeGreaterThan(-1);
+    expect(trusted).toBeLessThan(pull);
+    // And when it still cannot read it, it says whose files they are.
+    expect(script).toMatch(/chown -R/);
+  });
+
   test('a deploy that does not come up healthy rolls back and fails', () => {
     const script = deployJob.steps[0].with.script;
     expect(script).toMatch(/Rolling back/);

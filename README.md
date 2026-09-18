@@ -1203,6 +1203,24 @@ above — the migration reads it, it does not move it. So the way back is two
 commands and a revert of the deploy job, for as long as you want to keep that
 option.
 
+### When the deploy stops on the droplet
+
+Three failures come from the host rather than from the code, and the deploy
+names each one rather than failing part-way through:
+
+| What the log says | What to do on the droplet |
+|---|---|
+| `Docker is not installed on this host` | The install above, once |
+| `the compose plugin is not` installed | `sudo apt-get install docker-compose-plugin` |
+| `this user cannot reach it` | `sudo usermod -aG docker "$USER"`, then a new login session |
+| `Could not update the checkout` | `sudo chown -R "$USER:$USER" /var/www/capshaw-dashboard` |
+
+The last one is the tail of the migration: running any of the steps above with
+`sudo git ...` leaves part of `/var/www/capshaw-dashboard` owned by root, and
+git will not read a repository owned by somebody else. The deploy marks the
+directory trusted for the deploy user itself, so this only remains a problem if
+the files are also unwritable by that user — which the `chown` fixes.
+
 ### What the deploy needs from you
 
 | Secret | What it is |
