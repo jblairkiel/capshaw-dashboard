@@ -1207,6 +1207,24 @@ quiet one.
 The application is already containerised; what has to move is the data. It
 lives under `server/` on the droplet and belongs in the volume.
 
+**First, install Docker** — a droplet set up for the PM2 deployment does not
+have it, and the deploy says so rather than failing obscurely:
+
+```bash
+# Docker Engine and the compose plugin, from Docker's own repository
+curl -fsSL https://get.docker.com | sudo sh
+
+# So the deploy user can run docker without sudo. Log out and back in after.
+sudo usermod -aG docker "$USER"
+
+# Check, in a new session
+docker run --rm hello-world
+docker compose version
+```
+
+The deploy connects as `DO_USER`, so it is that account that needs to be in the
+`docker` group.
+
 **This is the one step that touches the congregation's records, so it stops the
 app first.** Copying a SQLite database while something is writing to it is how
 you get a file that opens fine and is subtly wrong.
@@ -1271,6 +1289,24 @@ above — the migration reads it, it does not move it. So the way back is two
 commands and a revert of the deploy job, for as long as you want to keep that
 option.
 
+### When the deploy stops on the droplet
+
+Three failures come from the host rather than from the code, and the deploy
+names each one rather than failing part-way through:
+
+| What the log says | What to do on the droplet |
+|---|---|
+| `Docker is not installed on this host` | The install above, once |
+| `the compose plugin is not` installed | `sudo apt-get install docker-compose-plugin` |
+| `this user cannot reach it` | `sudo usermod -aG docker "$USER"`, then a new login session |
+| `Could not update the checkout` | `sudo chown -R "$USER:$USER" /var/www/capshaw-dashboard` |
+
+The last one is the tail of the migration: running any of the steps above with
+`sudo git ...` leaves part of `/var/www/capshaw-dashboard` owned by root, and
+git will not read a repository owned by somebody else. The deploy marks the
+directory trusted for the deploy user itself, so this only remains a problem if
+the files are also unwritable by that user — which the `chown` fixes.
+
 ### What the deploy needs from you
 
 | Secret | What it is |
@@ -1289,6 +1325,11 @@ The publishing side needs nothing set up: the image job signs in with the
 ### First-time server setup
 
 These steps only need to be done once on the DigitalOcean droplet.
+
+> These are the PM2 instructions the droplet was first built with. A new
+> installation should follow [Running in Docker](#running-in-docker) instead —
+> the app is deployed as a container now, and none of the Node toolchain below
+> is needed on the host.
 
 ```bash
 # On the droplet

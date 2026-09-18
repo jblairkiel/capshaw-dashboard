@@ -258,7 +258,53 @@ jobs:
 
             # Only the compose file and the .env on this host are still read
             # from the checkout; the application itself arrives as an image.
-            git pull origin main
+            #
+            # Installing Docker is done as root, and a `sudo git pull` along
+            # the way leaves this checkout owned by root while the deploy user
+            # is somebody else. Git then refuses to read it at all — "dubious
+            # ownership" — which stops the deploy before it has looked at a
+            # single container. The deploy only ever reads this repository, so
+            # say once that the directory is trusted.
+            if ! git config --global --get-all safe.directory 2>/dev/null \
+              | grep -qx /var/www/capshaw-dashboard; then
+              git config --global --add safe.directory /var/www/capshaw-dashboard
+            fi
+
+            if ! git pull origin main; then
+              echo "::error::Could not update the checkout at /var/www/capshaw-dashboard."
+              echo "The deploy reads docker-compose.yml and .env from there."
+              echo "If git reported a permission problem, the files belong to"
+              echo "another user; hand them back to the deploy user with:"
+              echo "  sudo chown -R \$USER:\$USER /var/www/capshaw-dashboard"
+              exit 1
+            fi
+
+            # A host that has never run a container says "docker: command not
+            # found" from whichever line reaches for it first, which reads like
+            # a broken deploy rather than a missing prerequisite. Say which it
+            # is, and where the one-time setup is written down.
+            if ! command -v docker >/dev/null 2>&1; then
+              echo "::error::Docker is not installed on this host."
+              echo "This deploy runs the app as a container. Install Docker and"
+              echo "migrate the data once, then deploys work from here on:"
+              echo "  README → Moving an existing droplet from PM2 to the container"
+              exit 1
+            fi
+            if ! docker compose version >/dev/null 2>&1; then
+              echo "::error::Docker is installed but the compose plugin is not."
+              echo "Install docker-compose-plugin — see the README section above."
+              exit 1
+            fi
+            # Docker installs as root-only. Until the deploy user is in the
+            # docker group, every command below fails on the socket with a
+            # permission error that never says what to do about it.
+            if ! docker info >/dev/null 2>&1; then
+              echo "::error::Docker is installed, but this user cannot reach it."
+              echo "Add the deploy user to the docker group, once:"
+              echo "  sudo usermod -aG docker \$USER"
+              echo "Then open a new login session so the group takes effect."
+              exit 1
+            fi
 
             echo "${{ secrets.GHCR_TOKEN }}" \
               | docker login ghcr.io -u "${{ secrets.GHCR_USER }}" --password-stdin
