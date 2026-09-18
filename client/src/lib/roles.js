@@ -111,6 +111,13 @@ export const AREAS = [
     description: 'Decide who is in each distribution group, and send to them.',
     tone:        'bg-fuchsia-100 text-fuchsia-800',
   },
+  {
+    id:          'bulletin',
+    label:       'Weekly Newsletter',
+    page:        'Weekly Newsletter',
+    description: 'Write each week\'s prayer lists and offering, and export the newsletter as Word or PDF.',
+    tone:        'bg-indigo-100 text-indigo-800',
+  },
 ];
 
 export const AREA_IDS = AREAS.map(a => a.id);

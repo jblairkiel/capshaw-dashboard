@@ -435,6 +435,41 @@ function initSchema(db) {
 
   CREATE INDEX IF NOT EXISTS idx_mail_members_group ON mail_group_members(group_id);
   CREATE INDEX IF NOT EXISTS idx_mail_outbox_status ON mail_outbox(status, id);
+
+  -- ── The weekly newsletter ───────────────────────────────────────────────────
+  -- One row per Sunday, holding only the half of the newsletter that no other
+  -- page keeps: the prayer lists, the offering, the quote and who leads each
+  -- fellowship group. Everything else it prints — the reminders, last week's
+  -- attendance, the anniversaries, the elders and deacons, the distribution
+  -- groups — is read from the tables that already own it at the moment the
+  -- newsletter is built, so correcting an announcement corrects the newsletter
+  -- too. See server/lib/bulletinData.js.
+  --
+  -- The prayer lists are stored as typed: one entry per line. They are a
+  -- person's words rather than records to query, and a textarea is both what
+  -- the screen offers and what reads back correctly a year later.
+
+  CREATE TABLE IF NOT EXISTS bulletin_issues (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    sunday      TEXT    NOT NULL UNIQUE,        -- ISO date of the Sunday it is for
+    quote       TEXT    NOT NULL DEFAULT '',
+    quote_ref   TEXT    NOT NULL DEFAULT '',
+    updates     TEXT    NOT NULL DEFAULT '',
+    ongoing     TEXT    NOT NULL DEFAULT '',
+    shut_ins    TEXT    NOT NULL DEFAULT '',
+    pregnancies TEXT    NOT NULL DEFAULT '',
+    evangelists TEXT    NOT NULL DEFAULT '',
+    offering    TEXT    NOT NULL DEFAULT '',
+    building    TEXT    NOT NULL DEFAULT '',
+    -- JSON, keyed by the mail group's key: { "group-1": { leader, note } }.
+    -- A map rather than a table because it is written and read whole, always
+    -- alongside the rest of the issue.
+    group_notes TEXT    NOT NULL DEFAULT '{}',
+    created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_bulletin_issues_sunday ON bulletin_issues(sunday DESC);
 `);
   // ─── Migrations ───────────────────────────────────────────────────────────────
   // CREATE TABLE IF NOT EXISTS leaves existing installs untouched, so columns
