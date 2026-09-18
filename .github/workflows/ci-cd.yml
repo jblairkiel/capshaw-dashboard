@@ -260,6 +260,23 @@ jobs:
             # from the checkout; the application itself arrives as an image.
             git pull origin main
 
+            # A host that has never run a container says "docker: command not
+            # found" from whichever line reaches for it first, which reads like
+            # a broken deploy rather than a missing prerequisite. Say which it
+            # is, and where the one-time setup is written down.
+            if ! command -v docker >/dev/null 2>&1; then
+              echo "::error::Docker is not installed on this host."
+              echo "This deploy runs the app as a container. Install Docker and"
+              echo "migrate the data once, then deploys work from here on:"
+              echo "  README → Moving an existing droplet from PM2 to the container"
+              exit 1
+            fi
+            if ! docker compose version >/dev/null 2>&1; then
+              echo "::error::Docker is installed but the compose plugin is not."
+              echo "Install docker-compose-plugin — see the README section above."
+              exit 1
+            fi
+
             echo "${{ secrets.GHCR_TOKEN }}" \
               | docker login ghcr.io -u "${{ secrets.GHCR_USER }}" --password-stdin
 
