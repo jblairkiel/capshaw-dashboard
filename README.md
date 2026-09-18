@@ -1150,7 +1150,9 @@ git pull origin main
 # 1. Back up first. This is the only copy of the action history.
 tar czf ~/capshaw-backup-$(date +%F).tar.gz server/data server/uploads .env
 
-# 2. Stop the old app, so nothing is mid-write.
+# 2. Stop the old app, so nothing is mid-write. (A stop lasts until the next
+#    reboot or `pm2 resurrect`; the delete at the end of this section is what
+#    stops it coming back and taking port 3001 from the container.)
 pm2 stop capshaw-dashboard
 
 # 3. Let the droplet pull from the registry (read:packages is enough).
@@ -1205,7 +1207,7 @@ option.
 
 ### When the deploy stops on the droplet
 
-Three failures come from the host rather than from the code, and the deploy
+These failures come from the host rather than from the code, and the deploy
 names each one rather than failing part-way through:
 
 | What the log says | What to do on the droplet |
@@ -1214,8 +1216,17 @@ names each one rather than failing part-way through:
 | `the compose plugin is not` installed | `sudo apt-get install docker-compose-plugin` |
 | `this user cannot reach it` | `sudo usermod -aG docker "$USER"`, then a new login session |
 | `Could not update the checkout` | `sudo chown -R "$USER:$USER" /var/www/capshaw-dashboard` |
+| `address already in use` on 3001 | `pm2 delete capshaw-dashboard && pm2 save` — PM2 restarts itself and takes the port back |
 
-The last one is the tail of the migration: running any of the steps above with
+The port one is the other tail of the migration. PM2 does not stay stopped:
+`pm2 stop` lasts until the next reboot or `pm2 resurrect`, and the process then
+binds `127.0.0.1:3001` the moment a container releases it — so the next deploy
+recreates its container, finds the port taken and cannot start. `pm2 delete`
+plus `pm2 save` is what actually retires it. `ss -ltnp | grep 3001` says who
+holds the port, and the deploy prints that itself when a container will not
+start.
+
+The checkout one is the tail of the migration too: running any of the steps above with
 `sudo git ...` leaves part of `/var/www/capshaw-dashboard` owned by root, and
 git will not read a repository owned by somebody else. The deploy marks the
 directory trusted for the deploy user itself, so this only remains a problem if
