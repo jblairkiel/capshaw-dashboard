@@ -318,7 +318,13 @@ jobs:
 
             export CAPSHAW_IMAGE="$IMAGE"
             docker compose pull app
-            docker compose up -d --no-build app
+
+            # `set -e` would end the job right here on a start that fails,
+            # skipping the logs and the rollback below — which is exactly when
+            # both are wanted. A container that will not start is a failed
+            # deploy, not a broken script.
+            started=1
+            docker compose up -d --no-build app || started=0
 
             # ── Health check ─────────────────────────────────────────────────
             # The container has its own HEALTHCHECK, so this asks Docker what it
@@ -327,18 +333,20 @@ jobs:
             # sleeping once, because a cold start opens the database and runs
             # migrations, which takes longer on a tired droplet than on a
             # runner.
-            echo "Waiting for the container to report healthy..."
             healthy=0
-            for _ in $(seq 1 30); do
-              state=$(docker inspect --format='{{.State.Health.Status}}' \
-                "$(docker compose ps -q app)" 2>/dev/null || echo missing)
-              if [ "$state" = "healthy" ]; then healthy=1; break; fi
-              if [ "$state" = "missing" ]; then
-                echo "the container is not running"
-                break
-              fi
-              sleep 3
-            done
+            if [ "$started" = "1" ]; then
+              echo "Waiting for the container to report healthy..."
+              for _ in $(seq 1 30); do
+                state=$(docker inspect --format='{{.State.Health.Status}}' \
+                  "$(docker compose ps -q app)" 2>/dev/null || echo missing)
+                if [ "$state" = "healthy" ]; then healthy=1; break; fi
+                if [ "$state" = "missing" ]; then
+                  echo "the container is not running"
+                  break
+                fi
+                sleep 3
+              done
+            fi
 
             if [ "$healthy" = "1" ]; then
               echo "Healthy. Now serving $IMAGE"
@@ -350,17 +358,39 @@ jobs:
 
             # ── It did not come up ───────────────────────────────────────────
             echo ""
-            echo "=== DEPLOY FAILED — the container never reported healthy ==="
+            if [ "$started" = "1" ]; then
+              echo "=== DEPLOY FAILED — the container never reported healthy ==="
+            else
+              echo "=== DEPLOY FAILED — the container would not start ==="
+            fi
             docker compose ps
             echo ""
             echo "=== Logs (last 200 lines) ==="
             docker compose logs --tail 200 app || true
 
+            # The one failure whose cause is outside the container: something
+            # else on the host already has the port. On this droplet that is
+            # the PM2 process coming back — it restarts on its own, so it
+            # takes 3001 the moment a container stops and holds it against
+            # the next one.
+            echo ""
+            echo "=== What holds 127.0.0.1:3001 ==="
+            ss -ltnp 2>/dev/null | grep -E '[:.]3001' \
+              || echo "nothing else is listening on 3001"
+            if command -v pm2 >/dev/null 2>&1; then
+              pm2 list 2>/dev/null || true
+              echo "If PM2 is listed as online above, it is serving the old"
+              echo "build and the container cannot bind. Retire it with:"
+              echo "  pm2 delete capshaw-dashboard && pm2 save"
+            fi
+
             if [ -n "$previous" ]; then
               echo ""
               echo "=== Rolling back to $previous ==="
               export CAPSHAW_IMAGE="$previous"
-              docker compose up -d --no-build app
+              # A rollback that cannot start either — the port is still held,
+              # say — must not end the job before it has said so.
+              docker compose up -d --no-build app || true
               for _ in $(seq 1 20); do
                 state=$(docker inspect --format='{{.State.Health.Status}}' \
                   "$(docker compose ps -q app)" 2>/dev/null || echo missing)

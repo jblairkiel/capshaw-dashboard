@@ -114,6 +114,24 @@ describe('the deploy runs what CI exercised', () => {
     expect(script).toMatch(/chown -R/);
   });
 
+  test('a container that will not start still gets diagnosed and rolled back', () => {
+    const script = deployJob.steps[0].with.script;
+    // `set -e` would end the job on the failed `up` itself, skipping the logs
+    // and the rollback — which is exactly the run where both are wanted.
+    expect(script).toMatch(/docker compose up -d --no-build app \|\| started=0/);
+    // And the rollback must not end the job before it has said what happened.
+    expect(script).toMatch(/Rolling back[\s\S]*up -d --no-build app \|\| true/);
+  });
+
+  test('the one host-side cause of a failed start is named, not left to guess', () => {
+    const script = deployJob.steps[0].with.script;
+    // "address already in use" is the failure the container's own logs cannot
+    // explain: on this droplet PM2 restarts itself and takes 3001 back.
+    const diagnosis = script.slice(script.indexOf('DEPLOY FAILED'));
+    expect(diagnosis).toMatch(/3001/);
+    expect(diagnosis).toMatch(/pm2 delete capshaw-dashboard/);
+  });
+
   test('a deploy that does not come up healthy rolls back and fails', () => {
     const script = deployJob.steps[0].with.script;
     expect(script).toMatch(/Rolling back/);
