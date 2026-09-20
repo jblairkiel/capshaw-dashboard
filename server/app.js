@@ -27,6 +27,9 @@ const servingRoutes              = require('./routes/serving');
 const visitorRoutes              = require('./routes/visitors');
 const leadershipRoutes           = require('./routes/leadership');
 const bulletinRoutes             = require('./routes/bulletin');
+const groupRoutes                = require('./routes/groups');
+const commentRoutes              = require('./routes/comments');
+const notificationRoutes         = require('./routes/notifications');
 const paths                      = require('./lib/paths');
 const { requireSiteAuth }        = require('./middleware/auth');
 const { applyImpersonation }     = require('./middleware/impersonation');
@@ -130,6 +133,9 @@ function createApp() {
   app.use('/api/visitors',        visitorRoutes);
   app.use('/api/leadership',      leadershipRoutes);
   app.use('/api/bulletin',        bulletinRoutes);
+  app.use('/api/groups',          groupRoutes);
+  app.use('/api/comments',        commentRoutes);
+  app.use('/api/notifications',   notificationRoutes);
 
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });

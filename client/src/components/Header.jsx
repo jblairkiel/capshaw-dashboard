@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { roleInfo } from '../lib/roles';
+import NotificationsBell from './NotificationsBell';
 
 function UserMenu({ user, onLogout }) {
   const [open,     setOpen]     = useState(false);
@@ -62,7 +63,7 @@ function UserMenu({ user, onLogout }) {
   );
 }
 
-export default function Header({ user, onLogout }) {
+export default function Header({ user, onLogout, onGoToPage }) {
   return (
     <header className="bg-church-navy text-white">
       <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
@@ -90,6 +91,7 @@ export default function Header({ user, onLogout }) {
             <p className="text-gray-400 mt-0.5">8941 Wall Triana Hwy &bull; Harvest, AL</p>
           </div>
           {/* Everyone who gets this far is signed in. */}
+          {user && <NotificationsBell onGoToPage={onGoToPage} />}
           {user && <UserMenu user={user} onLogout={onLogout} />}
         </div>
       </div>

@@ -105,6 +105,13 @@ export const AREAS = [
     tone:        'bg-cyan-100 text-cyan-800',
   },
   {
+    id:          'church-groups',
+    label:       'Church Groups',
+    page:        'Church Groups',
+    description: 'Create the congregation\'s small groups (or generate a whole set at once), retire them, and say who leads each one.',
+    tone:        'bg-emerald-100 text-emerald-800',
+  },
+  {
     id:          'mail-groups',
     label:       'Email Groups',
     page:        'Email Groups',

@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { hasArea } from '../lib/roles';
+import EventComments from './EventComments';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -141,6 +142,9 @@ function ItemEditor({ initial, onSave, onCancel }) {
 function ItemCard({ item, onEdit, onDelete, onToggle, canWrite }) {
   const isEvent  = item.type === 'event';
   const isUrgent = item.priority === 'urgent';
+  // The thread is loaded only once somebody asks for it: a board of thirty
+  // notices should not be thirty requests to render.
+  const [showComments, setShowComments] = useState(false);
 
   return (
     <div className={`card flex gap-4 border-l-4 transition-opacity ${item.active ? 'opacity-100' : 'opacity-50'} ${isUrgent ? 'border-l-red-500' : isEvent ? 'border-l-blue-500' : 'border-l-church-gold'}`}>
@@ -162,6 +166,18 @@ function ItemCard({ item, onEdit, onDelete, onToggle, canWrite }) {
           </div>
         )}
         {item.body && <p className="text-sm text-gray-500 line-clamp-2">{item.body}</p>}
+
+        <button
+          onClick={() => setShowComments(o => !o)}
+          className="text-xs text-gray-400 hover:text-church-navy"
+        >
+          {showComments ? 'Hide comments' : '💬 Comments'}
+        </button>
+        {showComments && (
+          <div className="pt-2 border-t border-gray-100 mt-2">
+            <EventComments subjectType="announcement" subjectId={item.id} />
+          </div>
+        )}
       </div>
 
       {canWrite && (

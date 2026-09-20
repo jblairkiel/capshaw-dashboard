@@ -198,4 +198,97 @@ function monthlyReport({ draft, instanceId }) {
   });
 }
 
-module.exports = { taskAssigned, workflowCompleted, recipientsForTask, schedulePublished, monthlyReport };
+// ─── Church groups ────────────────────────────────────────────────────────────
+//
+// A group's meeting goes to the group's distribution list, which is the group's
+// roll mirrored (see server/lib/churchGroups.js) — so "everybody in my group"
+// means the same thing here as it does on the page. The portal's own
+// notification is written separately and does not depend on any of this: a mail
+// server that is down must not cost somebody the entry in their bell.
+
+function eventLines(event) {
+  return [
+    `  ${event.title}`,
+    event.date ? `  When: ${event.date}${event.time ? ` at ${event.time}` : ''}` : '',
+    event.location ? `  Where: ${event.location}` : '',
+    event.hostName ? `  Hosted by: ${event.hostName}` : '',
+  ].filter(Boolean);
+}
+
+function groupLink() {
+  return `${SITE_URL} → Our Church Family → Church Groups`;
+}
+
+function groupEventPublished({ group, event }) {
+  const { recipients, missing } = recipientsFor(group.key);
+  if (missing.length) {
+    console.log(`[mail] ${group.key}: no address on file for ${missing.join(', ')}`);
+  }
+  if (!recipients.length) return [];
+
+  const body = [
+    `${group.name} is meeting.`,
+    '',
+    ...eventLines(event),
+    event.description ? `\n${event.description}` : '',
+    '',
+    event.rsvpEnabled ? 'Let the group know whether you can come' : 'See the details',
+    event.signupEnabled ? `and take something off the ${event.signupTitle.toLowerCase()} list` : '',
+    `here: ${groupLink()}`,
+  ].filter(Boolean).join('\n');
+
+  return mailer.enqueue({
+    to: recipients,
+    subject: `${group.name}: ${event.title}`,
+    body,
+    context: `group-event:${event.id}:published`,
+  });
+}
+
+function groupEventCancelled({ group, event }) {
+  const { recipients } = recipientsFor(group.key);
+  if (!recipients.length) return [];
+
+  const body = [
+    `${group.name}'s meeting is off.`,
+    '',
+    ...eventLines(event),
+    '',
+    `Details, and anything the leaders have said about it: ${groupLink()}`,
+  ].join('\n');
+
+  return mailer.enqueue({
+    to: recipients,
+    subject: `Cancelled — ${group.name}: ${event.title}`,
+    body,
+    context: `group-event:${event.id}:cancelled`,
+  });
+}
+
+// Only the people who said they were coming: telling the whole group that a
+// meeting they never answered has moved half an hour is how a list gets muted.
+function groupEventChanged({ group, event, attendees = [], what = '' }) {
+  const recipients = attendees.filter(a => a.email).map(a => ({ email: a.email, name: a.name }));
+  if (!recipients.length) return [];
+
+  const body = [
+    `${group.name}'s meeting has changed.`,
+    what ? `  ${what}` : '',
+    '',
+    ...eventLines(event),
+    '',
+    `The current details are here: ${groupLink()}`,
+  ].filter(Boolean).join('\n');
+
+  return mailer.enqueue({
+    to: recipients,
+    subject: `Changed — ${group.name}: ${event.title}`,
+    body,
+    context: `group-event:${event.id}:changed`,
+  });
+}
+
+module.exports = {
+  taskAssigned, workflowCompleted, recipientsForTask, schedulePublished, monthlyReport,
+  groupEventPublished, groupEventCancelled, groupEventChanged,
+};
