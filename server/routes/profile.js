@@ -4,9 +4,10 @@ const db      = require('../db');
 const { requireAuth, requireApproved, holdsArea } = require('../middleware/auth');
 const actionLog = require('../lib/actionLog');
 const photoStore = require('../lib/photoStore');
+const worship = require('../lib/worship');
 const {
   sameHousehold,
-  WORSHIP_ROLES, PREFERENCE_LEVELS, isWorshipRole, isPreferenceLevel,
+  WORSHIP_ROLES, PREFERENCE_LEVELS,
   EDITABLE_FIELDS, GENDERS, isGender,
 } = require('../lib/people');
 
@@ -24,17 +25,6 @@ function householdOf(person) {
     .filter(other => sameHousehold(person, other));
 }
 
-function preferencesOf(directoryId) {
-  const rows = db.prepare('SELECT role, level FROM worship_preferences WHERE directory_id = ?').all(directoryId);
-  const map  = {};
-  for (const r of rows) map[r.role] = r.level;
-  return map;
-}
-
-function notesOf(directoryId) {
-  return db.prepare('SELECT notes FROM worship_profile WHERE directory_id = ?').get(directoryId)?.notes ?? '';
-}
-
 // A person plus everything the profile screens render about them.
 function personPayload(person) {
   const { edited_fields, photo, ...fields } = person;
@@ -42,7 +32,7 @@ function personPayload(person) {
     ...fields,
     edited_fields: safeParse(edited_fields),
     has_photo: !!photo,
-    worship: { preferences: preferencesOf(person.id), notes: notesOf(person.id) },
+    worship: { preferences: worship.preferencesOf(person.id), notes: worship.notesOf(person.id) },
   };
 }
 
@@ -183,20 +173,6 @@ router.patch('/person/:id', requireApproved, (req, res) => {
 
 // ─── PUT /api/profile/person/:id/worship — role preferences ───────────────────
 
-const saveWorship = db.transaction((directoryId, preferences, notes) => {
-  db.prepare('DELETE FROM worship_preferences WHERE directory_id = ?').run(directoryId);
-  const ins = db.prepare(
-    "INSERT INTO worship_preferences (directory_id, role, level, updated_at) VALUES (?, ?, ?, datetime('now'))"
-  );
-  for (const [role, level] of Object.entries(preferences)) ins.run(directoryId, role, level);
-
-  if (notes === undefined) return;
-  db.prepare(
-    "INSERT INTO worship_profile (directory_id, notes, updated_at) VALUES (?, ?, datetime('now'))\n" +
-    "ON CONFLICT(directory_id) DO UPDATE SET notes = excluded.notes, updated_at = excluded.updated_at"
-  ).run(directoryId, notes);
-});
-
 router.put('/person/:id/worship', requireApproved, (req, res) => {
   const person = getPerson(req.params.id);
   if (!person) return res.status(404).json({ success: false, error: 'Person not found' });
@@ -204,27 +180,11 @@ router.put('/person/:id/worship', requireApproved, (req, res) => {
     return res.status(403).json({ success: false, error: 'You can only edit your own household' });
   }
 
-  const incoming = req.body?.preferences;
-  if (incoming === undefined || incoming === null || typeof incoming !== 'object' || Array.isArray(incoming)) {
-    return res.status(400).json({ success: false, error: 'preferences must be an object of role → level' });
-  }
-
-  // Validate everything before writing anything: a bad role should not leave
-  // half a set of preferences behind.
-  const preferences = {};
-  for (const [role, level] of Object.entries(incoming)) {
-    if (level === null || level === '') continue;           // cleared — no preference
-    if (!isWorshipRole(role)) {
-      return res.status(400).json({ success: false, error: `Unknown worship role: ${role}` });
-    }
-    if (!isPreferenceLevel(level)) {
-      return res.status(400).json({ success: false, error: `Level must be one of: ${PREFERENCE_LEVELS.join(', ')}` });
-    }
-    preferences[role] = level;
-  }
+  const { preferences, error } = worship.readPreferences(req.body?.preferences);
+  if (error) return res.status(400).json({ success: false, error });
 
   const notes = req.body.notes === undefined ? undefined : String(req.body.notes).trim();
-  saveWorship(person.id, preferences, notes);
+  worship.save(person.id, preferences, notes);
 
   actionLog.record(req.user, {
     area:     holdsArea(req.user, 'directory') ? 'directory' : 'my-household',

@@ -42,7 +42,7 @@ function slotsIn(month) {
 let KEEPER, MAN, OTHER_MAN, WOMAN, UNLINKED, man, otherMan, woman;
 
 beforeEach(() => {
-  for (const t of ['action_log', 'job_eligibility', 'job_assignments', 'user_areas', 'users', 'directory']) {
+  for (const t of ['action_log', 'job_eligibility', 'job_assignments', 'worship_preferences', 'worship_profile', 'user_areas', 'users', 'directory']) {
     db.prepare(`DELETE FROM ${t}`).run();
   }
 
@@ -220,6 +220,125 @@ describe('managing who may sign up for what', () => {
       .send({ jobs: ['Song Leader'] });
     expect(res.status).toBe(403);
     expect(db.prepare('SELECT COUNT(*) n FROM job_eligibility').get().n).toBe(0);
+  });
+});
+
+// ─── The service roster ───────────────────────────────────────────────────────
+// What each man will volunteer for. He can say it himself on his profile; the
+// schedule keeper can write down what he said in the foyer.
+
+describe('recording what somebody will serve', () => {
+  function prefer(directoryId, role, level) {
+    db.prepare('INSERT INTO worship_preferences (directory_id, role, level) VALUES (?, ?, ?)')
+      .run(directoryId, role, level);
+  }
+
+  function levelsFor(directoryId) {
+    return Object.fromEntries(
+      db.prepare('SELECT role, level FROM worship_preferences WHERE directory_id = ? ORDER BY role').all(directoryId)
+        .map(r => [r.role, r.level])
+    );
+  }
+
+  test('the roster lists everyone with what they said and what they may sign up for', async () => {
+    allow(man.id, 'Song Leader');
+    prefer(man.id, 'Song Leader', 'preferred');
+    prefer(man.id, 'Usher', 'unavailable');
+    db.prepare('INSERT INTO worship_profile (directory_id, notes) VALUES (?, ?)').run(man.id, 'Away in June');
+
+    const res = await request(buildApp(KEEPER)).get('/api/serving/members');
+    expect(res.status).toBe(200);
+
+    const joe = res.body.members.find(m => m.name === 'Joe Carter');
+    expect(joe.preferences).toEqual({ 'Song Leader': 'preferred', Usher: 'unavailable' });
+    expect(joe.notes).toBe('Away in June');
+    expect(joe.jobs).toEqual(['Song Leader']);
+
+    // Somebody who has said nothing reads as nothing, not as a refusal.
+    expect(res.body.members.find(m => m.name === 'Ned Poole').preferences).toEqual({});
+    expect(res.body.levels).toEqual(['preferred', 'willing', 'unavailable']);
+  });
+
+  test('the schedule keeper can write down what a man said', async () => {
+    const res = await request(buildApp(KEEPER))
+      .put(`/api/serving/members/${man.id}/preferences`)
+      .send({ preferences: { 'Song Leader': 'preferred', Communion: 'willing' }, notes: 'Told me after services' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.member.preferences).toEqual({ 'Song Leader': 'preferred', Communion: 'willing' });
+    expect(res.body.member.notes).toBe('Told me after services');
+    expect(levelsFor(man.id)).toEqual({ 'Song Leader': 'preferred', Communion: 'willing' });
+  });
+
+  test('what is sent replaces what was there, and a cleared role goes', async () => {
+    prefer(man.id, 'Song Leader', 'preferred');
+    prefer(man.id, 'Usher', 'willing');
+
+    const res = await request(buildApp(KEEPER))
+      .put(`/api/serving/members/${man.id}/preferences`)
+      .send({ preferences: { 'Song Leader': 'willing', Usher: null } });
+
+    expect(res.status).toBe(200);
+    expect(levelsFor(man.id)).toEqual({ 'Song Leader': 'willing' });
+  });
+
+  test('a note is left alone by a save that does not mention it', async () => {
+    db.prepare('INSERT INTO worship_profile (directory_id, notes) VALUES (?, ?)').run(man.id, 'Works most Wednesdays');
+
+    const res = await request(buildApp(KEEPER))
+      .put(`/api/serving/members/${man.id}/preferences`)
+      .send({ preferences: { Usher: 'willing' } });
+
+    expect(res.status).toBe(200);
+    expect(res.body.member.notes).toBe('Works most Wednesdays');
+  });
+
+  test('a role or a level nobody has heard of is refused, and writes nothing', async () => {
+    prefer(man.id, 'Song Leader', 'preferred');
+
+    const badRole = await request(buildApp(KEEPER))
+      .put(`/api/serving/members/${man.id}/preferences`)
+      .send({ preferences: { 'Bell Ringer': 'willing' } });
+    expect(badRole.status).toBe(400);
+    expect(badRole.body.error).toMatch(/Bell Ringer/);
+
+    const badLevel = await request(buildApp(KEEPER))
+      .put(`/api/serving/members/${man.id}/preferences`)
+      .send({ preferences: { Usher: 'maybe' } });
+    expect(badLevel.status).toBe(400);
+
+    // Neither attempt left half a set behind.
+    expect(levelsFor(man.id)).toEqual({ 'Song Leader': 'preferred' });
+  });
+
+  test('a member cannot record preferences for somebody else from here', async () => {
+    const res = await request(buildApp(MAN))
+      .put(`/api/serving/members/${otherMan.id}/preferences`)
+      .send({ preferences: { Usher: 'willing' } });
+
+    expect(res.status).toBe(403);
+    expect(db.prepare('SELECT COUNT(*) n FROM worship_preferences').get().n).toBe(0);
+  });
+
+  test('somebody who is not in the directory at all is a 404', async () => {
+    const res = await request(buildApp(KEEPER))
+      .put('/api/serving/members/9999/preferences')
+      .send({ preferences: {} });
+    expect(res.status).toBe(404);
+  });
+
+  test('the history says what changed, and who wrote it down', async () => {
+    prefer(man.id, 'Usher', 'willing');
+
+    await request(buildApp(KEEPER))
+      .put(`/api/serving/members/${man.id}/preferences`)
+      .send({ preferences: { Usher: 'unavailable', 'Song Leader': 'preferred' } });
+
+    const entry = db.prepare('SELECT * FROM action_log ORDER BY id DESC').get();
+    expect(entry).toMatchObject({ area: 'serving-schedule', user_id: KEEPER.id, entity: 'worship preferences' });
+    expect(entry.summary).toMatch(/Joe Carter/);
+    expect(entry.summary).toMatch(/Song Leader: no preference → preferred/);
+    expect(entry.summary).toMatch(/Usher: willing → unavailable/);
   });
 });
 
