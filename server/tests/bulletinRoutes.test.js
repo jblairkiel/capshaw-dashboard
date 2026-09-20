@@ -128,6 +128,43 @@ describe('composing the two halves', () => {
     ]);
   });
 
+  describe('clipping a deacon\'s responsibilities', () => {
+    // Sixteen deacons at full length is a wall of running text, so the longest
+    // are cut. What matters is that the cut never exceeds the limit and never
+    // reads as a typo.
+    test('anything within the limit is left exactly as it is', () => {
+      expect(issues.clip('Website & Graphics', 30)).toBe('Website & Graphics');
+      expect(issues.clip('Communion & Baptistry / Boards', 30)).toBe('Communion & Baptistry / Boards');
+      expect(issues.clip('', 30)).toBe('');
+    });
+
+    test('a longer one is cut at a word boundary, ellipsis included in the limit', () => {
+      const clipped = issues.clip('Treasurer & Finance / New Building', 30);
+      expect(clipped).toBe('Treasurer & Finance / New\u2026');
+      expect(clipped.length).toBeLessThanOrEqual(30);
+    });
+
+    test('a trailing separator is not left hanging before the ellipsis', () => {
+      expect(issues.clip('Facilities & Grounds / Security', 30)).toBe('Facilities & Grounds\u2026');
+      expect(issues.clip('Contributions / Small Groups / VBS', 30)).toBe('Contributions / Small Groups\u2026');
+    });
+
+    test('a first word longer than the limit is cut anyway rather than vanishing', () => {
+      const clipped = issues.clip('Supercalifragilisticexpialidociousness', 12);
+      expect(clipped.length).toBe(12);
+      expect(clipped.endsWith('\u2026')).toBe(true);
+    });
+
+    test('the newsletter prints the clipped form', () => {
+      db.prepare('INSERT INTO deacons (id,name) VALUES (1,?)').run('Michael Bacci');
+      db.prepare('INSERT INTO deacon_duties (deacon_id,duty,position) VALUES (1,?,0)')
+        .run('Treasurer & Finance / New Building');
+
+      const text = issues.compose(SUNDAY).leadership.deacons.map(s => s.text).join('');
+      expect(text).toBe('Michael Bacci (Treasurer & Finance / New\u2026)');
+    });
+  });
+
   test('a deacon\'s responsibilities are bracketed after the name', () => {
     db.prepare('INSERT INTO deacons (id,name) VALUES (1,?)').run('Michael Bacci');
     db.prepare('INSERT INTO deacon_duties (deacon_id,duty,position) VALUES (1,?,0)').run('Treasurer & Finance');

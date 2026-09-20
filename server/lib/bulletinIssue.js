@@ -156,6 +156,25 @@ function splitName(entry) {
   return m ? { name: m[1].trim(), rest: m[2].trim() } : { name: String(entry).trim(), rest: '' };
 }
 
+// What the newsletter prints for a deacon's responsibilities. Sixteen of them
+// at full length is a wall of text, so the longest are clipped at a word
+// boundary rather than mid-word — '…' says the rest was left out instead of
+// letting a cut look like a typo. The ellipsis counts towards the limit, so
+// nothing printed is ever longer than it.
+function clip(text, max) {
+  const whole = String(text || '').trim();
+  if (whole.length <= max) return whole;
+
+  const room = max - 1;
+  const cut  = whole.slice(0, room);
+  const space = cut.lastIndexOf(' ');
+  // Only break on a space when one is far enough in to leave something
+  // readable; a duty whose first word is longer than the limit is cut anyway.
+  const kept = space > max / 2 ? cut.slice(0, space) : cut;
+
+  return `${kept.replace(/[\s/,&-]+$/, '')}\u2026`;
+}
+
 // Joins people into one paragraph: bold name, plain remainder, separated.
 function nameParagraph(entries, { separator = ', ', wrap = null, joiner = ' ' } = {}) {
   const out = [];
@@ -231,7 +250,10 @@ function compose(sunday) {
       ),
       evangelist: config.evangelist,
       deacons: nameParagraph(
-        auto.deacons.map(d => ({ name: d.name, rest: d.duties.join(' / ') })),
+        auto.deacons.map(d => ({
+          name: d.name,
+          rest: clip(d.duties.join(' / '), config.deaconDutyMaxLength),
+        })),
         { wrap: ['(', ')'] },
       ),
     },
@@ -250,4 +272,4 @@ function compose(sunday) {
   };
 }
 
-module.exports = { TEXT_FIELDS, blank, find, previous, draftFor, save, list, compose, lines, nameParagraph, splitName };
+module.exports = { TEXT_FIELDS, blank, find, previous, draftFor, save, list, compose, lines, nameParagraph, splitName, clip };

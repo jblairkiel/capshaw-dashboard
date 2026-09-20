@@ -139,6 +139,24 @@ describe('gathering a week', () => {
     expect(week.deacons).toEqual([{ name: 'A Deacon', phone: '', duties: ['Grounds'] }]);
   });
 
+  test('a congregation is listed by surname, not by first name', () => {
+    // ORDER BY name puts Adam Mowrer before Barton Barrett, which is nobody's
+    // idea of a list of deacons.
+    const ins = db.prepare('INSERT INTO deacons (name) VALUES (?)');
+    for (const n of ['Adam Mowrer', 'Michael Bacci', 'Barton Barrett', 'Hunter Reece', 'Greg Reece']) ins.run(n);
+
+    expect(bulletin.gather({ sunday: SUNDAY }).deacons.map(d => d.name)).toEqual([
+      'Michael Bacci', 'Barton Barrett', 'Adam Mowrer', 'Greg Reece', 'Hunter Reece',
+    ]);
+  });
+
+  test('two people sharing a surname keep a stable order', () => {
+    const ins = db.prepare('INSERT INTO deacons (name) VALUES (?)');
+    for (const n of ['Hunter Reece', 'Greg Reece']) ins.run(n);
+    expect(bulletin.gather({ sunday: SUNDAY }).deacons.map(d => d.name))
+      .toEqual(['Greg Reece', 'Hunter Reece']);
+  });
+
   test('an elder\'s telephone number comes through for the newsletter to print', () => {
     db.prepare('INSERT INTO elders (id,name,phone) VALUES (1,?,?)').run('Barry Britnell', '(256) 541-3405');
     expect(bulletin.gather({ sunday: SUNDAY }).elders[0])
