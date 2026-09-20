@@ -168,7 +168,7 @@ implicitly, and nobody else holds one until an admin grants it.
 | `worship-order` | This Sunday | Upload, replace and remove the order of service |
 | `songs` | Songs We Sing | Add songs, record what was sung, keep the song of the week |
 | `announcements` | Announcements | Write, edit and retire announcements and events |
-| `serving-schedule` | Serving Schedule, Member Jobs | Build a month of worship jobs, fill or clear any slot, and decide which jobs each member may sign up for |
+| `serving-schedule` | Serving Schedule, Service Roster, Member Jobs | Build a month of worship jobs, fill or clear any slot, record what each man will volunteer for, and decide which jobs each member may sign up for |
 | `attendance` | Attendance | Record attendance counts and correct earlier ones (the list of services they pick from is an admin's — see [Service types](#service-types)) |
 | `visitors` | Guests | Add guests, keep their details and comments, record their visits |
 | `leadership` | Elders & Deacons | Keep the elders and deacons, and what each looks after, up to date |
@@ -345,6 +345,35 @@ signed off for something they asked not to do. Somebody may take their own name
 back off a slot; only the schedule keeper may take somebody else's off. Every
 sign-up and every clearing is recorded in the action history by name.
 
+### Service Roster
+
+**Church Office → Service Roster** is the page for the question that comes
+before the schedule: *what will each man volunteer for?*
+
+A man can say so himself on **My Household & Preferences** — and plenty never
+will, because they say it in the foyer instead. So the schedule keeper writes
+it down for him here, against the same ten roles and the same three answers
+(*glad to*, *willing*, *rather not*). It is the same `worship_preferences`
+rows either way; the action history records who wrote each one down and what
+it changed, so a preference taken second-hand is never mistaken for one the
+man typed himself.
+
+| | |
+|---|---|
+| **Who is behind each job** | Every role, with how many of the men shown are glad to do it and how many are willing. A role with nobody behind it is called out — that is the gap a schedule keeper is looking for |
+| **Who to show** | Everyone, only those who have said something, or only those who have not — the last is the list to take round on a Sunday |
+| **Per man** | What he has said, his scheduling note, his turns on the roster so far, and which jobs he has been signed off for |
+
+The two pages are deliberately separate, because they are separate decisions:
+the Service Roster is **what somebody wants**, and Member Jobs is **what the
+schedule keeper has agreed to**. The roster page shows the sign-offs but does
+not change them.
+
+The Monthly Worship Schedule workflow reads these preferences when it fills a
+month: it never schedules somebody who said *rather not*, and among people with
+equally few turns it takes the one who said *glad to* first. See
+[Monthly Worship Schedule](#monthly-worship-schedule).
+
 ---
 
 ## Service types
@@ -404,7 +433,10 @@ from a name, and "prefer not to say" is a real answer.
 **Worship preferences** are per person, per role — `preferred` ("glad to"),
 `willing`, or `unavailable` ("rather not") — with a free-text note for the
 person building the schedule. Roles come from `server/lib/people.js` and match
-the job names the scraper reads off the church website.
+the job names the scraper reads off the church website. The same rows are kept
+from **Church Office → Service Roster** by whoever builds the schedule, for the
+men who say it in person rather than typing it in; both screens go through
+`server/lib/worship.js`, so neither can drift from the other's vocabulary.
 
 **Linking an account to a person.** A login is matched to its directory entry
 by email at sign-in, but only when exactly one entry matches — a shared family
@@ -970,7 +1002,8 @@ disturbs May, and publishing twice does not double it up.
 
 **Admin → Database → Sample Data** fills the site with made-up records so a page
 can be looked at with something in it — a directory with households, a month of
-serving jobs, guests with visit histories and follow-ups in each state.
+serving jobs, what each man will volunteer for, guests with visit histories and
+follow-ups in each state.
 
 The hard part is not making it. It is getting it back out.
 
@@ -1038,6 +1071,14 @@ const NOT_FILLED = {
 The same test also checks that a generator writes to every table it claims, so
 a claim cannot quietly stop being true while still counting as covered.
 
+**Sample data has to speak the site's own vocabulary**, too. A generator that
+writes `song-leader` where the site says `Song Leader` fills the table and
+leaves the screen looking empty, because every page renders only the roles it
+knows — so a generator reads its vocabulary from the module that owns it
+(`server/lib/people.js` for worship roles and preference levels,
+`server/workflows/scheduling.js` for the services in a month) rather than
+keeping a list of its own, and `seed.test.js` checks what came out.
+
 ## Tests
 
 ```bash
@@ -1072,12 +1113,13 @@ capshaw-dashboard/
 │   │   ├── parsers.js       # HTML parser functions (testable)
 │   │   ├── areas.js         # The catalogue of areas, and who holds what
 │   │   ├── actionLog.js     # The action history recorder
+│   │   ├── worship.js       # Worship role preferences: reading, checking, saving
 │   │   ├── recordTables.js  # Which table each area looks after
 │   │   └── recordStore.js   # Reading and writing those tables, logged
 │   ├── routes/
 │   │   ├── scraper.js       # Church website scraper + data endpoints
 │   │   ├── records.js       # Area-gated CRUD for the record tables
-│   │   ├── serving.js       # The roster, member jobs, and sign-ups
+│   │   ├── serving.js       # The roster, member jobs, preferences, and sign-ups
 │   │   ├── visitors.js      # Guests, their details and their visits
 │   │   ├── leadership.js    # Elders and deacons, with their duties
 │   │   ├── documents.js     # .docx upload + OOXML → HTML conversion

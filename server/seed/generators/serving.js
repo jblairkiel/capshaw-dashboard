@@ -1,9 +1,20 @@
 // Next month's worship jobs, filled from the directory, with a slot or two
 // left empty — an unfilled slot is the thing the page exists to show.
-const JOBS = [
-  'Song Leader', 'Opening Prayer', 'Closing Prayer', 'Lord\'s Table',
-  'Scripture Reading', 'Announcements', 'Usher', 'Greeter', 'Sound Booth',
-];
+//
+// The month is laid out the way the Serving Schedule page lays one out, from
+// the same services and the same roles, so a sample month is the shape of a
+// real one rather than a lookalike. Who may sign up for what follows what each
+// man said on the Service Roster: nobody is signed off for a job they asked
+// not to do.
+const { WORSHIP_ROLES } = require('../../lib/people');
+const { parseMonth, servicesIn } = require('../../workflows/scheduling');
+
+function monthLabel(offset) {
+  const when = new Date();
+  when.setDate(1);
+  when.setMonth(when.getMonth() + offset);
+  return `${when.toLocaleString('en-US', { month: 'long' })} ${when.getFullYear()}`;
+}
 
 module.exports = {
   id:    'serving',
@@ -11,40 +22,44 @@ module.exports = {
   area:  'serving-schedule',
   page:  'Serving Schedule',
   order: 50,
-  describe: 'A month of worship jobs, filled from the directory, with some slots left open.',
+  describe: 'A month of worship jobs, filled from the directory, with some slots left open — and who may sign up for what.',
   tables: ['job_assignments', 'job_eligibility'],
 
   generate({ insert, random, scale, db }) {
     const men = db.prepare("SELECT id, name FROM directory WHERE gender = 'male' ORDER BY id DESC LIMIT 30").all();
     const names = men.map(r => r.name);
 
-    const now   = new Date();
-    const month = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-    const label = `${month.toLocaleString('en-US', { month: 'long' })} ${month.getFullYear()}`;
+    // Next month always; the month after as well once there is enough of
+    // everything else to be worth paging through.
+    const labels = [monthLabel(1), ...(scale >= 3 ? [monthLabel(2)] : [])];
 
-    // Every Sunday next month, morning and evening.
-    const sundays = [];
-    for (let d = new Date(month); d.getMonth() === month.getMonth(); d.setDate(d.getDate() + 1)) {
-      if (d.getDay() === 0) sundays.push(new Date(d));
-    }
-
-    for (const sunday of sundays.slice(0, 5)) {
-      const date = `${sunday.toLocaleString('en-US', { month: 'long' })} ${sunday.getDate()}`;
-      for (const service of ['AM', 'PM']) {
-        for (const job of random.some(JOBS, 4 + scale)) {
+    for (const label of labels) {
+      const month = parseMonth(label);
+      for (const occasion of servicesIn(month)) {
+        for (const job of occasion.roles) {
           // One slot in six is left open on purpose.
           const filled = names.length && !random.chance(1 / 6);
           insert('job_assignments', {
-            month: label, date, service, job,
-            name:  filled ? random.pick(names) : '',
-          }, `${job} — ${date} ${service}`);
+            month:   label,
+            date:    occasion.dateLabel,
+            service: occasion.service,
+            job,
+            name:    filled ? random.pick(names) : '',
+          }, `${job} — ${occasion.dateLabel} ${occasion.service}`);
         }
       }
     }
 
-    // Who may sign up for what, so the member-jobs page has something in it.
+    // What each man has already said, so being signed off agrees with it.
+    const refused = new Map();
+    for (const row of db.prepare("SELECT directory_id, role FROM worship_preferences WHERE level = 'unavailable'").all()) {
+      if (!refused.has(row.directory_id)) refused.set(row.directory_id, new Set());
+      refused.get(row.directory_id).add(row.role);
+    }
+
     for (const member of men.slice(0, 6 * scale)) {
-      for (const job of random.some(JOBS, random.int(1, 4))) {
+      const open = WORSHIP_ROLES.filter(role => !refused.get(member.id)?.has(role));
+      for (const job of random.some(open, random.int(1, 4))) {
         insert('job_eligibility', { directory_id: member.id, job }, `${member.name} may do ${job}`);
       }
     }

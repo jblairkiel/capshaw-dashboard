@@ -10,6 +10,7 @@ jest.mock('../db', () => {
 
 const db   = require('../db');
 const seed = require('../seed');
+const { WORSHIP_ROLES, PREFERENCE_LEVELS } = require('../lib/people');
 
 // Everything the schema holds, minus the two tables that record what sample
 // data did — those are the bookkeeping, not the data.
@@ -147,6 +148,62 @@ describe('taking it back out', () => {
     expect(gone.deleted).toBeLessThanOrEqual(gone.rows);
     expect(db.prepare('SELECT COUNT(*) AS n FROM visitors').get().n).toBe(0);
     expect(db.prepare('SELECT COUNT(*) AS n FROM visitor_visits').get().n).toBe(0);
+  });
+});
+
+// ─── It has to speak the site's own vocabulary ────────────────────────────────
+//
+// Sample data that says "song-leader" where the site says "Song Leader" is
+// worse than no sample data: every page renders only the roles it knows, so the
+// rows are there and the screen still looks empty.
+
+describe('the words it writes', () => {
+  test('volunteer preferences use the roles and the levels the site knows', () => {
+    seed.generate({ scale: 2 });
+
+    const rows = db.prepare('SELECT DISTINCT role, level FROM worship_preferences').all();
+    expect(rows.length).toBeGreaterThan(0);
+
+    for (const { role, level } of rows) {
+      expect([role,  WORSHIP_ROLES.includes(role)]).toEqual([role, true]);
+      expect([level, PREFERENCE_LEVELS.includes(level)]).toEqual([level, true]);
+    }
+
+    // And they hang off real people, so the Service Roster can show a name.
+    const orphans = db.prepare(`
+      SELECT COUNT(*) AS n FROM worship_preferences p
+       WHERE NOT EXISTS (SELECT 1 FROM directory d WHERE d.id = p.directory_id)
+    `).get().n;
+    expect(orphans).toBe(0);
+  });
+
+  test('the jobs somebody is signed off for are jobs the roster has', () => {
+    seed.generate({ scale: 2 });
+
+    const jobs = db.prepare('SELECT DISTINCT job FROM job_eligibility').all().map(r => r.job);
+    expect(jobs.length).toBeGreaterThan(0);
+    expect(jobs.filter(job => !WORSHIP_ROLES.includes(job))).toEqual([]);
+  });
+
+  test('nobody is signed off for a job they said they would rather not do', () => {
+    seed.generate({ scale: 2 });
+
+    const contradictions = db.prepare(`
+      SELECT d.name, e.job FROM job_eligibility e
+        JOIN worship_preferences p ON p.directory_id = e.directory_id AND p.role = e.job
+        JOIN directory d ON d.id = e.directory_id
+       WHERE p.level = 'unavailable'
+    `).all();
+    expect(contradictions).toEqual([]);
+  });
+
+  test('a sample month is laid out the way the page would lay one out', () => {
+    seed.generate({ scale: 2 });
+
+    const slots = db.prepare('SELECT DISTINCT job, service FROM job_assignments').all();
+    expect(slots.length).toBeGreaterThan(0);
+    expect(slots.filter(s => !WORSHIP_ROLES.includes(s.job))).toEqual([]);
+    expect(slots.filter(s => !['Sunday Worship', 'Sunday Evening', 'Wednesday'].includes(s.service))).toEqual([]);
   });
 });
 
