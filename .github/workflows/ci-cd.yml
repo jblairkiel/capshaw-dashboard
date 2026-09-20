@@ -318,7 +318,35 @@ jobs:
 
             export CAPSHAW_IMAGE="$IMAGE"
             docker compose pull app
-            docker compose up -d --no-build app
+
+            # ── The port ─────────────────────────────────────────────────────
+            # PM2 served this app before the cutover and does not stay stopped:
+            # a reboot or a `pm2 resurrect` brings it back, and it then takes
+            # 127.0.0.1:3001 the moment compose stops the old container in
+            # order to recreate it — so the new container has nowhere to bind.
+            # The container is what serves now, so the deploy stops PM2 rather
+            # than losing that race. Stopped, not deleted: if this deploy does
+            # not come up, PM2 is started again below and the site keeps being
+            # served by the build it was already serving.
+            pm2_was_running=0
+            if command -v pm2 >/dev/null 2>&1 &&
+               pm2 pid capshaw-dashboard 2>/dev/null | grep -qE '^[1-9]'; then
+              echo "PM2 still serves capshaw-dashboard; stopping it for the container."
+              pm2 stop capshaw-dashboard || true
+              pm2_was_running=1
+              # The listening socket goes away a moment after the process does.
+              for _ in $(seq 1 10); do
+                ss -ltn 2>/dev/null | grep -q '127.0.0.1:3001' || break
+                sleep 1
+              done
+            fi
+
+            # `set -e` would end the job right here on a start that fails,
+            # skipping the logs and the rollback below — which is exactly when
+            # both are wanted. A container that will not start is a failed
+            # deploy, not a broken script.
+            started=1
+            docker compose up -d --no-build app || started=0
 
             # ── Health check ─────────────────────────────────────────────────
             # The container has its own HEALTHCHECK, so this asks Docker what it
@@ -327,21 +355,32 @@ jobs:
             # sleeping once, because a cold start opens the database and runs
             # migrations, which takes longer on a tired droplet than on a
             # runner.
-            echo "Waiting for the container to report healthy..."
             healthy=0
-            for _ in $(seq 1 30); do
-              state=$(docker inspect --format='{{.State.Health.Status}}' \
-                "$(docker compose ps -q app)" 2>/dev/null || echo missing)
-              if [ "$state" = "healthy" ]; then healthy=1; break; fi
-              if [ "$state" = "missing" ]; then
-                echo "the container is not running"
-                break
-              fi
-              sleep 3
-            done
+            if [ "$started" = "1" ]; then
+              echo "Waiting for the container to report healthy..."
+              for _ in $(seq 1 30); do
+                state=$(docker inspect --format='{{.State.Health.Status}}' \
+                  "$(docker compose ps -q app)" 2>/dev/null || echo missing)
+                if [ "$state" = "healthy" ]; then healthy=1; break; fi
+                if [ "$state" = "missing" ]; then
+                  echo "the container is not running"
+                  break
+                fi
+                sleep 3
+              done
+            fi
 
             if [ "$healthy" = "1" ]; then
               echo "Healthy. Now serving $IMAGE"
+              if [ "$pm2_was_running" = "1" ]; then
+                echo ""
+                echo "PM2 was stopped to free the port and is left stopped."
+                echo "A reboot or a \`pm2 resurrect\` would start it again and"
+                echo "this deploy would have to stop it again. To retire it:"
+                echo "  pm2 delete capshaw-dashboard && pm2 save"
+                echo "The way back stays \`docker compose down\` then"
+                echo "\`pm2 start ecosystem.config.js --env production\`."
+              fi
               # Keep the last few images so a rollback by hand has something to
               # go back to, and the disk does not fill with every deploy.
               docker image prune -af --filter "until=720h" >/dev/null 2>&1 || true
@@ -350,25 +389,61 @@ jobs:
 
             # ── It did not come up ───────────────────────────────────────────
             echo ""
-            echo "=== DEPLOY FAILED — the container never reported healthy ==="
+            if [ "$started" = "1" ]; then
+              echo "=== DEPLOY FAILED — the container never reported healthy ==="
+            else
+              echo "=== DEPLOY FAILED — the container would not start ==="
+            fi
             docker compose ps
             echo ""
             echo "=== Logs (last 200 lines) ==="
             docker compose logs --tail 200 app || true
 
+            # The one failure whose cause is outside the container: something
+            # else on the host already has the port. On this droplet that is
+            # the PM2 process coming back — it restarts on its own, so it
+            # takes 3001 the moment a container stops and holds it against
+            # the next one.
+            echo ""
+            echo "=== What holds 127.0.0.1:3001 ==="
+            ss -ltnp 2>/dev/null | grep -E '[:.]3001' \
+              || echo "nothing else is listening on 3001"
+            if command -v pm2 >/dev/null 2>&1; then
+              pm2 list 2>/dev/null || true
+              echo "If PM2 is listed as online above, something started it"
+              echo "after this job stopped it, and it is holding the port"
+              echo "against the container. Retire it for good with:"
+              echo "  pm2 delete capshaw-dashboard && pm2 save"
+            fi
+
+            rolled_back=0
             if [ -n "$previous" ]; then
               echo ""
               echo "=== Rolling back to $previous ==="
               export CAPSHAW_IMAGE="$previous"
-              docker compose up -d --no-build app
+              # A rollback that cannot start either — the port is still held,
+              # say — must not end the job before it has said so.
+              docker compose up -d --no-build app || true
               for _ in $(seq 1 20); do
                 state=$(docker inspect --format='{{.State.Health.Status}}' \
                   "$(docker compose ps -q app)" 2>/dev/null || echo missing)
-                [ "$state" = "healthy" ] && { echo "Rolled back; the previous image is serving again."; break; }
+                if [ "$state" = "healthy" ]; then
+                  echo "Rolled back; the previous image is serving again."
+                  rolled_back=1
+                  break
+                fi
                 sleep 3
               done
             else
               echo "Nothing was running before this, so there is nothing to roll back to."
+            fi
+
+            # Nothing came up, and PM2 was serving the site until this job
+            # stopped it. Give it back rather than leaving the site dark.
+            if [ "$pm2_was_running" = "1" ] && [ "$rolled_back" = "0" ]; then
+              echo ""
+              echo "=== Nothing is serving; starting PM2 again ==="
+              pm2 start capshaw-dashboard || true
             fi
 
             exit 1

@@ -114,6 +114,43 @@ describe('the deploy runs what CI exercised', () => {
     expect(script).toMatch(/chown -R/);
   });
 
+  test('a container that will not start still gets diagnosed and rolled back', () => {
+    const script = deployJob.steps[0].with.script;
+    // `set -e` would end the job on the failed `up` itself, skipping the logs
+    // and the rollback — which is exactly the run where both are wanted.
+    expect(script).toMatch(/docker compose up -d --no-build app \|\| started=0/);
+    // And the rollback must not end the job before it has said what happened.
+    expect(script).toMatch(/Rolling back[\s\S]*up -d --no-build app \|\| true/);
+  });
+
+  test('PM2 is stopped for the port before the container is started', () => {
+    const script = deployJob.steps[0].with.script;
+    const stop = script.indexOf('pm2 stop capshaw-dashboard');
+    const up   = script.indexOf('docker compose up -d --no-build app');
+    expect(stop).toBeGreaterThan(-1);
+    expect(stop).toBeLessThan(up);
+    // Stopped, not deleted: the site has to have something to go back to.
+    expect(script).not.toMatch(/^\s*pm2 delete/m);
+  });
+
+  test('PM2 gets the site back when nothing else came up', () => {
+    const script = deployJob.steps[0].with.script;
+    // Stopping PM2 is only safe if a deploy that then fails hands it back —
+    // otherwise a bad image leaves the congregation with no site at all.
+    expect(script).toMatch(/rolled_back=0[\s\S]*pm2 start capshaw-dashboard/);
+    // And not while the rolled-back container is serving on that same port.
+    expect(script).toMatch(/\[ "\$pm2_was_running" = "1" \] && \[ "\$rolled_back" = "0" \]/);
+  });
+
+  test('the one host-side cause of a failed start is named, not left to guess', () => {
+    const script = deployJob.steps[0].with.script;
+    // "address already in use" is the failure the container's own logs cannot
+    // explain: on this droplet PM2 restarts itself and takes 3001 back.
+    const diagnosis = script.slice(script.indexOf('DEPLOY FAILED'));
+    expect(diagnosis).toMatch(/3001/);
+    expect(diagnosis).toMatch(/pm2 delete capshaw-dashboard/);
+  });
+
   test('a deploy that does not come up healthy rolls back and fails', () => {
     const script = deployJob.steps[0].with.script;
     expect(script).toMatch(/Rolling back/);
