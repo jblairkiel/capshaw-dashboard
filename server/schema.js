@@ -470,6 +470,191 @@ function initSchema(db) {
   );
 
   CREATE INDEX IF NOT EXISTS idx_bulletin_issues_sunday ON bulletin_issues(sunday DESC);
+
+  -- ── Church groups ───────────────────────────────────────────────────────────
+  -- The small groups the congregation is divided into. Two vocabularies meet
+  -- here, and they are deliberately kept apart:
+  --
+  --   · the Church Groups area — whoever looks after *every* group: making
+  --     them, generating a whole set at once, and saying who leads each one.
+  --     That is a grant on the account, in user_areas.
+  --   · a part inside *one* group — leader, co-leader or host — which says
+  --     nothing at all about any other group. That is the role column below.
+  --
+  -- Every group is tied to a distribution list in mail_groups, so "who is in
+  -- my group" and "who gets my group's email" cannot drift apart: membership
+  -- is kept here and mirrored there whenever it changes.
+
+  CREATE TABLE IF NOT EXISTS church_groups (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    key           TEXT    NOT NULL UNIQUE,   -- 'group-3', and the mail_groups key too
+    name          TEXT    NOT NULL,
+    description   TEXT    NOT NULL DEFAULT '',
+    meets         TEXT    NOT NULL DEFAULT '',  -- 'Second Sunday, 5pm'
+    location      TEXT    NOT NULL DEFAULT '',
+    -- The address people write *to*. It has to exist at the mail provider,
+    -- which is outside this application — it is kept here so the page can show
+    -- it and so a message to the group can be copied to the list itself.
+    email         TEXT    NOT NULL DEFAULT '',
+    mail_group_id INTEGER REFERENCES mail_groups(id) ON DELETE SET NULL,
+    -- Retired rather than deleted: a group that stopped meeting should stop
+    -- being offered without erasing the events it held.
+    active        INTEGER NOT NULL DEFAULT 1,
+    sort_order    INTEGER NOT NULL DEFAULT 0,
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
+  -- One row per person in a group, pointing at the directory so an address
+  -- corrected there is corrected for the group and its mailing list at once.
+  CREATE TABLE IF NOT EXISTS church_group_members (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id     INTEGER NOT NULL REFERENCES church_groups(id) ON DELETE CASCADE,
+    directory_id INTEGER NOT NULL REFERENCES directory(id) ON DELETE CASCADE,
+    role         TEXT    NOT NULL DEFAULT 'member',  -- leader | co-leader | host | member
+    added_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+    added_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    UNIQUE(group_id, directory_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_church_group_members_group  ON church_group_members(group_id);
+  CREATE INDEX IF NOT EXISTS idx_church_group_members_person ON church_group_members(directory_id);
+
+  -- ── Group meetings ──────────────────────────────────────────────────────────
+  -- A group's own gathering, written by its leader. Separate from the
+  -- announcements table on purpose: that one is the congregation's board and
+  -- anybody signed in can read all of it, whereas these belong to one group
+  -- and carry replies, an RSVP and a sign-up list with them.
+
+  CREATE TABLE IF NOT EXISTS group_events (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id       INTEGER NOT NULL REFERENCES church_groups(id) ON DELETE CASCADE,
+    title          TEXT    NOT NULL,
+    description    TEXT    NOT NULL DEFAULT '',
+    event_date     TEXT    NOT NULL DEFAULT '',   -- YYYY-MM-DD, as text everywhere
+    event_time     TEXT    NOT NULL DEFAULT '',
+    end_time       TEXT    NOT NULL DEFAULT '',
+    location       TEXT    NOT NULL DEFAULT '',
+    host_name      TEXT    NOT NULL DEFAULT '',
+    rsvp_enabled   INTEGER NOT NULL DEFAULT 1,
+    rsvp_deadline  TEXT    NOT NULL DEFAULT '',
+    -- 0 means no limit, which is the usual case — a house with room for twenty
+    -- is the exception worth recording.
+    capacity       INTEGER NOT NULL DEFAULT 0,
+    signup_enabled INTEGER NOT NULL DEFAULT 0,
+    signup_title   TEXT    NOT NULL DEFAULT 'What to bring',
+    -- draft   — being written, only the leaders see it, nobody is told
+    -- published — the group has been told about it
+    -- cancelled — it is off, and the group has been told that too
+    status         TEXT    NOT NULL DEFAULT 'draft',
+    created_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+    published_at   TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_group_events_group ON group_events(group_id, event_date);
+
+  -- One answer per account per meeting. Overwritten rather than added to, so
+  -- changing your mind corrects your answer instead of counting you twice.
+  CREATE TABLE IF NOT EXISTS group_event_rsvps (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id     INTEGER NOT NULL REFERENCES group_events(id) ON DELETE CASCADE,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    person_name  TEXT    NOT NULL DEFAULT '',
+    response     TEXT    NOT NULL DEFAULT 'yes',   -- yes | no | maybe
+    -- People they are bringing beyond themselves, so a head count is the
+    -- answers plus their guests rather than the answers alone.
+    guests       INTEGER NOT NULL DEFAULT 0,
+    note         TEXT    NOT NULL DEFAULT '',
+    responded_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(event_id, user_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_group_event_rsvps_event ON group_event_rsvps(event_id);
+
+  -- What a leader is asking the group to cover: one row per thing needed,
+  -- with how many of it. The list is optional — a meeting with nothing to
+  -- bring simply has none of these.
+  CREATE TABLE IF NOT EXISTS group_event_signup_items (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id   INTEGER NOT NULL REFERENCES group_events(id) ON DELETE CASCADE,
+    label      TEXT    NOT NULL,
+    notes      TEXT    NOT NULL DEFAULT '',
+    needed     INTEGER NOT NULL DEFAULT 1,
+    sort_order INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_group_signup_items_event ON group_event_signup_items(event_id);
+
+  -- Who has taken one of those on. A person may take more than one thing, so
+  -- there is no unique constraint across the item — only one claim per person
+  -- per item, which the route enforces.
+  CREATE TABLE IF NOT EXISTS group_event_signups (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id    INTEGER NOT NULL REFERENCES group_event_signup_items(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_name  TEXT    NOT NULL DEFAULT '',
+    detail     TEXT    NOT NULL DEFAULT '',   -- 'a pan of lasagne'
+    quantity   INTEGER NOT NULL DEFAULT 1,
+    claimed_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(item_id, user_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_group_signups_item ON group_event_signups(item_id);
+
+  -- ── Comments on events ──────────────────────────────────────────────────────
+  -- One thread per event, whichever kind of event it is: a group's meeting or
+  -- a dated row on the congregation's announcement board. The subject is named
+  -- by a pair — what kind of thing, and which one — rather than by a column
+  -- per kind, so a third kind of event later needs no new table.
+  --
+  -- A removed comment is kept with deleted_at set instead of being dropped:
+  -- a thread that silently loses a message reads as though it never had one.
+
+  CREATE TABLE IF NOT EXISTS event_comments (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject_type TEXT    NOT NULL,            -- group-event | announcement
+    subject_id   INTEGER NOT NULL,
+    user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    author_name  TEXT    NOT NULL DEFAULT '',
+    body         TEXT    NOT NULL,
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    edited_at    TEXT,
+    deleted_at   TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_event_comments_subject
+    ON event_comments(subject_type, subject_id, id);
+
+  -- ── Notifications ───────────────────────────────────────────────────────────
+  -- What one person has to be told about, in the portal itself rather than only
+  -- in their email: a meeting posted for their group, a reply on an event they
+  -- are part of, somebody answering their invitation.
+  --
+  -- A notification is written after the change it describes has already been
+  -- saved, and never in the same breath as sending mail — the two go to the
+  -- same people for different reasons, and a mail server that is down must not
+  -- cost somebody the entry in their bell.
+
+  CREATE TABLE IF NOT EXISTS notifications (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    kind         TEXT    NOT NULL,            -- see server/lib/notifications.js
+    title        TEXT    NOT NULL,
+    body         TEXT    NOT NULL DEFAULT '',
+    -- Where it happened, so the bell can open the thing it is about.
+    subject_type TEXT    NOT NULL DEFAULT '',
+    subject_id   INTEGER,
+    page         TEXT    NOT NULL DEFAULT '',  -- the tab id to open
+    -- Who caused it. Kept as a name as well as an id so an entry still reads
+    -- properly after the account behind it is removed.
+    actor_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    actor_name   TEXT    NOT NULL DEFAULT '',
+    read_at      TEXT,
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_notifications_user
+    ON notifications(user_id, read_at, id DESC);
 `);
   // ─── Migrations ───────────────────────────────────────────────────────────────
   // CREATE TABLE IF NOT EXISTS leaves existing installs untouched, so columns

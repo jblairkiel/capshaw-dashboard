@@ -142,6 +142,36 @@ const TABLES = {
     order:    'created_at DESC',
     describe: r => r.title || 'an announcement',
   },
+  church_groups: {
+    area:     'church-groups',
+    entity:   'church group',
+    columns:  ['id', 'key', 'name', 'description', 'meets', 'location', 'email', 'active', 'sort_order', 'created_at'],
+    // `key` is deliberately not writable: it is the group's distribution list
+    // key as well, and editing it here would leave the list orphaned. Retire
+    // the group and make another one instead.
+    writable: ['name', 'description', 'meets', 'location', 'email', 'active', 'sort_order'],
+    search:   'name',
+    order:    'sort_order ASC, name ASC',
+    describe: r => r.name || 'a church group',
+  },
+  church_group_members: {
+    area:     'church-groups',
+    entity:   'church group member',
+    columns:  ['id', 'group_id', 'directory_id', 'role', 'added_at'],
+    writable: ['group_id', 'directory_id', 'role'],
+    search:   'role',
+    order:    'group_id ASC, role ASC',
+    describe: r => `member #${r.directory_id} of group #${r.group_id} (${r.role || 'member'})`,
+  },
+  group_events: {
+    area:     'church-groups',
+    entity:   'group meeting',
+    columns:  ['id', 'group_id', 'title', 'description', 'event_date', 'event_time', 'location', 'host_name', 'status', 'created_at'],
+    writable: ['title', 'description', 'event_date', 'event_time', 'location', 'host_name', 'status'],
+    search:   'title',
+    order:    'event_date DESC',
+    describe: r => `${r.title || 'a meeting'}${r.event_date ? ` on ${r.event_date}` : ''}`,
+  },
   songs: {
     area:     'songs',
     entity:   'song',

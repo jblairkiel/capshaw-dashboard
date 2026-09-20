@@ -67,6 +67,12 @@ const AREAS = [
     description: 'Edit anybody\'s directory entry, and add people who are not in it yet.',
   },
   {
+    id:    'church-groups',
+    label: 'Church Groups',
+    page:  'Church Groups',
+    description: 'Create the congregation\'s small groups (or generate a whole set at once), retire them, and say who leads each one.',
+  },
+  {
     id:    'mail-groups',
     label: 'Email Groups',
     page:  'Email Groups',
