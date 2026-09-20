@@ -3,8 +3,8 @@
 // Two different people use this page, and they can do different things:
 //
 //   · Whoever looks after the Serving Schedule builds next month's worship
-//     jobs, fills or clears any slot, and decides which jobs each member may
-//     put their own name against.
+//     jobs, fills or clears any slot, records what each man will volunteer
+//     for, and decides which jobs each member may put their own name against.
 //   · Every other member sees the roster, and — if they are down as a man in
 //     the directory and have been allowed that job — can sign themselves up
 //     for an empty slot, or take their own name back off one.
@@ -14,7 +14,8 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
 const { requireAuth, requireApproved, requireArea, holdsArea } = require('../middleware/auth');
-const { WORSHIP_ROLES } = require('../lib/people');
+const { WORSHIP_ROLES, PREFERENCE_LEVELS } = require('../lib/people');
+const worship = require('../lib/worship');
 const { SERVICE_ROLES, SERVICES, parseMonth, servicesIn } = require('../workflows/scheduling');
 const actionLog = require('../lib/actionLog');
 
@@ -264,10 +265,15 @@ router.delete('/assignments/:id/signup', requireApproved, (req, res) => {
 });
 
 // ─── Who may sign up for what ─────────────────────────────────────────────────
-// The dedicated page behind the Serving Schedule area: every member, whether
-// they are down as a man, and which jobs they may put their own name against.
+// What both office pages behind the Serving Schedule area are built from:
+// every member, whether they are down as a man, what they have said they will
+// volunteer for, and which jobs they may put their own name against.
+//
+// Member Jobs changes the last of those; the Service Roster changes the one
+// before it. They are separate decisions — what somebody wants is not what the
+// schedule keeper has agreed to — so they are separate endpoints.
 
-router.get('/members', requireApproved, manageOnly, (req, res) => {
+function rosterMembers() {
   const people = db.prepare(`
     SELECT d.id, d.name, d.gender, d.email,
            (SELECT COUNT(*) FROM job_assignments j WHERE lower(trim(j.name)) = lower(trim(d.name))) AS assignments
@@ -275,16 +281,27 @@ router.get('/members', requireApproved, manageOnly, (req, res) => {
   `).all();
 
   const eligibility = db.prepare('SELECT directory_id, job FROM job_eligibility').all();
-  const preferences = db.prepare('SELECT directory_id, role, level FROM worship_preferences').all();
+  const preferences = worship.allPreferences();
+  const notes       = worship.allNotes();
 
-  const byPerson = new Map(people.map(p => [p.id, { ...p, jobs: [], preferences: {} }]));
+  const byPerson = new Map(people.map(p => [p.id, {
+    ...p,
+    jobs:        [],
+    preferences: preferences.get(p.id) ?? {},
+    notes:       notes.get(p.id) ?? '',
+  }]));
   for (const row of eligibility) byPerson.get(row.directory_id)?.jobs.push(row.job);
-  for (const row of preferences) {
-    const entry = byPerson.get(row.directory_id);
-    if (entry) entry.preferences[row.role] = row.level;
-  }
 
-  res.json({ success: true, members: [...byPerson.values()], jobs: WORSHIP_ROLES });
+  return [...byPerson.values()];
+}
+
+router.get('/members', requireApproved, manageOnly, (req, res) => {
+  res.json({
+    success: true,
+    members: rosterMembers(),
+    jobs:    WORSHIP_ROLES,
+    levels:  PREFERENCE_LEVELS,
+  });
 });
 
 const saveEligibility = db.transaction((directoryId, jobs) => {
@@ -324,6 +341,52 @@ router.put('/members/:id/jobs', requireApproved, manageOnly, (req, res) => {
   }
 
   res.json({ success: true, member: { id: person.id, name: person.name, jobs: after } });
+});
+
+// ─── The service roster: what each man will volunteer for ─────────────────────
+// A man tells the portal himself on My Household & Preferences — but plenty of
+// them say it in the foyer instead, so whoever builds the roster can write it
+// down for them here. Same table, same vocabulary, and the action history says
+// who recorded it, so a preference set on somebody's behalf is never mistaken
+// for one they typed.
+
+router.put('/members/:id/preferences', requireApproved, manageOnly, (req, res) => {
+  const person = db.prepare('SELECT id, name FROM directory WHERE id = ?').get(req.params.id);
+  if (!person) return res.status(404).json({ success: false, error: 'No such member' });
+
+  const { preferences, error } = worship.readPreferences(req.body?.preferences);
+  if (error) return res.status(400).json({ success: false, error });
+
+  const before      = worship.preferencesOf(person.id);
+  const notesBefore = worship.notesOf(person.id);
+  const notes       = req.body?.notes === undefined ? undefined : String(req.body.notes).trim();
+
+  worship.save(person.id, preferences, notes);
+
+  const after      = worship.preferencesOf(person.id);
+  const changes    = worship.describeChange(before, after);
+  const noteMoved  = notes !== undefined && notes !== notesBefore;
+
+  actionLog.record(req.user, {
+    area:     AREA,
+    action:   'update',
+    entity:   'worship preferences',
+    entityId: person.id,
+    summary:  changes.length
+      ? `Recorded what ${person.name} will serve — ${changes.join('; ')}${noteMoved ? ', and their scheduling note' : ''}`
+      : `Reviewed what ${person.name} will serve${noteMoved ? ', and their scheduling note' : ' — nothing changed'}`,
+    details:  { preferences: after, changes },
+  });
+
+  res.json({
+    success: true,
+    member: {
+      id:          person.id,
+      name:        person.name,
+      preferences: after,
+      notes:       worship.notesOf(person.id),
+    },
+  });
 });
 
 module.exports = router;
