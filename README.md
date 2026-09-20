@@ -1216,15 +1216,25 @@ names each one rather than failing part-way through:
 | `the compose plugin is not` installed | `sudo apt-get install docker-compose-plugin` |
 | `this user cannot reach it` | `sudo usermod -aG docker "$USER"`, then a new login session |
 | `Could not update the checkout` | `sudo chown -R "$USER:$USER" /var/www/capshaw-dashboard` |
-| `address already in use` on 3001 | `pm2 delete capshaw-dashboard && pm2 save` — PM2 restarts itself and takes the port back |
+| `address already in use` on 3001 | Nothing, usually — the deploy stops PM2 itself. `pm2 delete capshaw-dashboard && pm2 save` retires it for good |
 
-The port one is the other tail of the migration. PM2 does not stay stopped:
-`pm2 stop` lasts until the next reboot or `pm2 resurrect`, and the process then
-binds `127.0.0.1:3001` the moment a container releases it — so the next deploy
-recreates its container, finds the port taken and cannot start. `pm2 delete`
-plus `pm2 save` is what actually retires it. `ss -ltnp | grep 3001` says who
-holds the port, and the deploy prints that itself when a container will not
-start.
+The port one is the other tail of the migration, and the deploy now handles it
+rather than reporting it. PM2 does not stay stopped: `pm2 stop` lasts until the
+next reboot or `pm2 resurrect`, and the process binds `127.0.0.1:3001` the
+moment a container releases it — so a deploy that recreates its container finds
+the port taken. Each deploy therefore stops PM2 before it starts the container,
+and starts it again if nothing came up, so a failed deploy does not leave the
+site dark. It stops PM2, it never deletes it: the way back has to stay open.
+
+That leaves one thing worth doing by hand, once, so a reboot stops resurrecting
+a process the deploy will only have to stop again:
+
+```bash
+pm2 delete capshaw-dashboard && pm2 save
+```
+
+`ss -ltnp | grep 3001` says who holds the port, and the deploy prints that
+itself when a container will not start.
 
 The checkout one is the tail of the migration too: running any of the steps above with
 `sudo git ...` leaves part of `/var/www/capshaw-dashboard` owned by root, and
