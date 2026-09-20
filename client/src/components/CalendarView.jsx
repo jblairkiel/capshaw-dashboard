@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { hasAnyArea } from '../lib/roles';
+import EventComments from './EventComments';
 
 // The calendar is a view over announcements, not a store of its own. Anything
 // with an event_date shows up here, and adding or editing a day writes back to
@@ -13,6 +14,16 @@ const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // Greenwich, so the pieces are handled as text throughout.
 function toKey(year, month, day) {
   return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+// The long form a dialog heading wants, from the same text-only handling the
+// grid uses.
+function formatDate(value) {
+  const [year, month, day] = String(value).split('-').map(Number);
+  if (!year || !month || !day) return value;
+  return new Date(year, month - 1, day).toLocaleDateString(undefined, {
+    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric',
+  });
 }
 
 function monthLabel(year, month) {
@@ -162,7 +173,56 @@ function EventModal({ event, onSaved, onClose, onDeleted }) {
             </button>
           )}
         </div>
+
+        {/* The conversation about this event, for whoever is editing it as much
+            as for everybody else. It sits inside the panel but outside the
+            form, so posting a comment can never submit the event. */}
+        {!isNew && (
+          <div className="pt-4 border-t border-gray-100">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Comments</p>
+            <EventComments subjectType="announcement" subjectId={event.id} />
+          </div>
+        )}
       </form>
+    </div>
+  );
+}
+
+// ─── An event somebody can read but not change ────────────────────────────────
+//
+// The calendar is everybody's to read and only two areas' to edit, so somebody
+// without either still gets the details — and the thread, which is theirs to
+// take part in.
+
+function EventDetail({ event, onClose }) {
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-label={event.title}
+        onClick={e => e.stopPropagation()}
+        className="bg-white rounded-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-5 space-y-4"
+      >
+        <div>
+          <h3 className="font-semibold text-church-navy">{event.title}</h3>
+          <div className="flex flex-wrap gap-3 text-xs text-gray-500 mt-1">
+            {event.event_date && <span>📆 {formatDate(event.event_date)}</span>}
+            {event.event_time && <span>🕐 {event.event_time}</span>}
+            {event.location   && <span>📍 {event.location}</span>}
+          </div>
+        </div>
+
+        {event.body && <p className="text-sm text-gray-600 whitespace-pre-wrap">{event.body}</p>}
+
+        <div className="pt-3 border-t border-gray-100">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Comments</p>
+          <EventComments subjectType="announcement" subjectId={event.id} />
+        </div>
+
+        <button onClick={onClose} className="text-sm px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">
+          Close
+        </button>
+      </div>
     </div>
   );
 }
@@ -175,6 +235,9 @@ export default function CalendarView({ user }) {
   const [month, setMonth] = useState(now.getMonth());
   const [items, setItems] = useState([]);
   const [modal, setModal] = useState(null);
+  // What somebody who cannot edit the calendar opens instead of the editor:
+  // the event as written, and the conversation under it.
+  const [reading, setReading] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -287,7 +350,7 @@ export default function CalendarView({ user }) {
                       {events.map(ev => (
                         <button
                           key={ev.id}
-                          onClick={e => { e.stopPropagation(); if (canEdit) setModal(ev); }}
+                          onClick={e => { e.stopPropagation(); if (canEdit) setModal(ev); else setReading(ev); }}
                           title={[ev.event_time, ev.location].filter(Boolean).join(' · ') || ev.title}
                           className={`block w-full text-left text-xs px-1.5 py-1 rounded leading-tight truncate ${
                             !ev.active            ? 'bg-gray-100 text-gray-400 line-through'
@@ -314,6 +377,8 @@ export default function CalendarView({ user }) {
           Events come from the announcements page. Ask the church office to add or change one.
         </p>
       )}
+
+      {reading && <EventDetail event={reading} onClose={() => setReading(null)} />}
 
       {modal && (
         <EventModal

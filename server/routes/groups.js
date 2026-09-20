@@ -438,8 +438,8 @@ function eventPayload(eventId, user, { canManage = false } = {}) {
     rsvp:     events.rsvpOf(eventId, user.id),
     rsvps:    events.rsvpsFor(eventId),
     summary:  events.rsvpSummary(eventId),
-    signups:  events.signupsFor(eventId),
-    comments: comments.listComments('group-event', eventId),
+    signups:  events.signupsFor(eventId, user),
+    comments: comments.listComments('group-event', eventId, user),
     canManage,
   };
 }
@@ -645,7 +645,7 @@ router.post('/:groupId/events/:eventId/rsvp', requireApproved, loadGroup, requir
 // ─── The sign-up list ─────────────────────────────────────────────────────────
 
 router.put('/:groupId/events/:eventId/signup-items', requireApproved, loadGroup, requireLeads, loadEvent, (req, res) => {
-  const items = events.saveSignupItems(req.event.id, Array.isArray(req.body?.items) ? req.body.items : []);
+  const items = events.saveSignupItems(req.event.id, Array.isArray(req.body?.items) ? req.body.items : [], req.user);
   db.prepare('UPDATE group_events SET signup_enabled = ? WHERE id = ?').run(items.length ? 1 : 0, req.event.id);
 
   actionLog.record(req.user, {
@@ -677,13 +677,13 @@ router.post('/:groupId/events/:eventId/signups', requireApproved, loadGroup, req
     actor: req.user,
   });
 
-  res.json({ success: true, signups: events.signupsFor(req.event.id) });
+  res.json({ success: true, signups: events.signupsFor(req.event.id, req.user) });
 });
 
 router.delete('/:groupId/events/:eventId/signups/:claimId', requireApproved, loadGroup, requireBelongs, loadEvent, (req, res) => {
   const result = events.releaseSignup(Number(req.params.claimId), req.user, { canManage: req.perms.leads });
   if (result.error) return res.status(403).json({ success: false, error: result.error });
-  res.json({ success: true, signups: events.signupsFor(req.event.id) });
+  res.json({ success: true, signups: events.signupsFor(req.event.id, req.user) });
 });
 
 module.exports = router;

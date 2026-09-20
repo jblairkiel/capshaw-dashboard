@@ -27,7 +27,7 @@ router.get('/:subjectType/:subjectId', (req, res) => {
 
   res.json({
     success:  true,
-    comments: comments.listComments(req.params.subjectType, subject.id),
+    comments: comments.listComments(req.params.subjectType, subject.id, req.user),
     canReply: kind.canReply(req.user, subject),
     canModerate: kind.canModerate(req.user, subject),
     maxLength: comments.MAX_LENGTH,
@@ -53,7 +53,7 @@ router.post('/:subjectType/:subjectId', requireApproved, (req, res) => {
 
   res.json({
     success:  true,
-    comments: comments.listComments(req.params.subjectType, result.subject.id),
+    comments: comments.listComments(req.params.subjectType, result.subject.id, req.user),
   });
 });
 
@@ -67,7 +67,7 @@ router.put('/:commentId', requireApproved, (req, res) => {
 
   res.json({
     success:  true,
-    comments: comments.listComments(result.comment.subject_type, result.comment.subject_id),
+    comments: comments.listComments(result.comment.subject_type, result.comment.subject_id, req.user),
   });
 });
 
@@ -90,7 +90,7 @@ router.delete('/:commentId', requireApproved, (req, res) => {
 
   res.json({
     success:  true,
-    comments: comments.listComments(result.comment.subject_type, result.comment.subject_id),
+    comments: comments.listComments(result.comment.subject_type, result.comment.subject_id, req.user),
   });
 });
 

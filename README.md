@@ -174,6 +174,7 @@ implicitly, and nobody else holds one until an admin grants it.
 | `leadership` | Elders & Deacons | Keep the elders and deacons, and what each looks after, up to date |
 | `calendar` | Church Calendar | Add and edit dated events |
 | `directory` | Member Directory | Edit anybody's directory entry, and add people who are not in it yet |
+| `church-groups` | Church Groups | Create the congregation's small groups (or generate a whole set at once), retire them, and appoint each group's leader |
 | `mail-groups` | Email Groups | Decide who is in each distribution group, and send to them |
 | `bulletin` | Weekly Newsletter | Write each week's prayer lists and offering, and export the newsletter as Word or PDF |
 
@@ -374,6 +375,142 @@ The list is seeded on first run from the services already present in the
 attendance table, so an existing database keeps working with nothing to do. A
 database with no attendance yet gets this congregation's usual services, which
 an admin can then change.
+
+---
+
+## Church Groups
+
+The smaller circles the congregation meets in through the week — fellowship
+groups, care groups, whatever they are called here — with their own meetings,
+invitations and conversation.
+
+Two vocabularies meet on this page, and they are deliberately kept apart:
+
+- **The `church-groups` area** is whoever looks after *every* group. They make
+  groups, generate a whole set at once, retire one, and appoint leaders. It is
+  an area on the account, granted like any other.
+- **A part inside one group** — `leader`, `co-leader`, `host` or `member` — is
+  a row on that group's roll, and says nothing whatever about any other group.
+  Leading Group 3 gets you Group 3's buttons and changes nothing on Group 4.
+
+| Part | Can |
+|---|---|
+| `leader` | Post, edit and cancel the group's meetings, keep its roll, edit its details |
+| `co-leader` | The same — for when two families share a group |
+| `host` | Be named on the group's meetings as where it gathers. No buttons |
+| `member` | See the meetings, answer the invitation, sign up, and reply |
+
+A leader can bring people onto their roll and name a host. Appointing a leader
+is the group manager's alone, so nobody can hand their group to somebody else.
+
+### The group and its mailing list
+
+Every group is tied to a distribution list in `mail_groups`, and the roll is
+the record: adding or removing somebody updates the list in the same
+transaction, and renaming the group renames the list. So "who is in my group"
+and "who gets my group's email" cannot drift apart. If a list is edited by
+hand from **Email Groups**, the group manager can put it back in step with
+**Sync the mailing list**; plain addresses that were never on the roll are left
+alone.
+
+The address people write *to* (`group-1@capshawchurch.org`) still has to exist
+at the mail provider — see [Distribution groups](#distribution-groups). The
+group stores it so the page can show it.
+
+### Generating the set
+
+Dividing a congregation into groups by hand means typing a dozen groups and
+then dragging two hundred people into them, which is the kind of job nobody
+finishes. **Church Groups → Generate the groups** asks for a number, a name to
+count from (`Group 1`, `Group 2`, …) and, optionally, an email domain, and
+makes them all — each with its own distribution list.
+
+Ticking **spread the directory across them** deals everybody in the directory
+out as well, under two rules that make the result usable:
+
+- **A household stays together.** People at one address are dealt as a unit, so
+  a group meeting in a living room never gets half a family. Anybody with no
+  address on file is their own household rather than being lumped in with every
+  other blank.
+- **Nobody already in a group is moved.** Running the generator again tops the
+  set up — existing keys are reported as skipped, and the rolls already made
+  are untouched.
+
+Everybody placed gets a notification saying which group they are in.
+
+### A group's meeting
+
+A leader posts their group's own gatherings from the group's page. A meeting
+carries three things an announcement does not:
+
+- **A draft state.** A new meeting is a draft: only the group's leaders can see
+  it, and nobody has been told. **Post it to the group** is the moment the
+  group hears — in the portal and by email at once — so writing one in two
+  sittings never tells the group twice.
+- **An invitation.** Members answer yes, no or maybe, and say how many they are
+  bringing, so the head count is the answers *plus* their guests. Changing your
+  mind corrects your answer instead of counting you twice. The leaders are told
+  about a new answer and not about a correction.
+- **A sign-up list** (optional). The leader lists what is needed and how many
+  of it — "Dessert ×1", "Drinks ×2" — and members take items. What is still
+  wanted goes down as people sign up; editing the wording of an item keeps the
+  claims under it.
+
+Cancelling a posted meeting tells the group; cancelling a draft tells nobody,
+because nobody ever heard of it.
+
+---
+
+## Comments & Notifications
+
+### Comments on any event
+
+Every event in the portal carries a conversation: a group's meeting, and any
+dated row on the announcement board (which is what the church calendar shows).
+One table, one router and one component serve both — a comment names its
+subject with a pair, `subject_type` and `subject_id`, so a third kind of event
+later needs none of them written again.
+
+Each kind decides for itself who may take part, in
+`server/lib/eventComments.js`:
+
+| Kind | Who reads it | Who replies | Who can remove somebody else's |
+|---|---|---|---|
+| `group-event` | The group's roll | The roll, unless the meeting is cancelled | The group's leaders, and the group manager |
+| `announcement` | Anybody signed in | Any confirmed member | Whoever holds `announcements` or `calendar` |
+
+You may edit your own words and nobody else's — a leader can take a comment
+down, but nobody can change what somebody else said. A removed comment is kept
+with `deleted_at` set and shown as a gap that says so, because a thread that
+quietly loses a message reads as though it never had one.
+
+### Notifications
+
+The bell in the header is what has happened that somebody has not seen yet.
+The site could already send email, and still does — but email is a copy that
+leaves. A notification is the thing itself: unread until it is opened, carrying
+the page it is about so the bell can go there, and written when the change is
+saved rather than when a mail server answers.
+
+| Kind | Who is told |
+|---|---|
+| `group-event-published` | Everybody on the group's roll |
+| `group-event-updated` | Everybody who said they were coming |
+| `group-event-cancelled` | Everybody on the roll |
+| `group-event-rsvp` | The group's leaders, on a new answer |
+| `group-event-signup` | The group's leaders |
+| `group-event-comment` | The leaders, the poster, everybody who answered, and everybody who replied before |
+| `announcement-comment` | Whoever looks after the board, and everybody already in the thread |
+| `group-membership` | The person added to a group, or made its leader |
+
+Two things it deliberately does not do: nobody is ever notified about their own
+doing, and opening the panel does not mark everything read — reading a list is
+not the same as dealing with what is in it. Picking one marks that one and
+opens the page it is about.
+
+Everything is scoped to the account asking. The user id comes from the session,
+and the ids a request names are matched against it in the `WHERE` clause, so
+there is no way to read or clear somebody else's bell.
 
 ---
 
@@ -908,6 +1045,11 @@ one copy.
 - **A workflow finishes** — the person who started it, plus any distribution
   group the outcome names. An outcome copies a list by naming it:
   `notifyGroups: ['announcements']`.
+- **A group's meeting is posted** — the group's distribution list, which is its
+  roll mirrored. Cancelling tells the same list; changing the details of a
+  posted meeting tells only the people who said they were coming, because
+  telling a whole group about a meeting they never answered is how a list gets
+  muted.
 
 ---
 
@@ -1073,13 +1215,20 @@ capshaw-dashboard/
 │   │   ├── areas.js         # The catalogue of areas, and who holds what
 │   │   ├── actionLog.js     # The action history recorder
 │   │   ├── recordTables.js  # Which table each area looks after
-│   │   └── recordStore.js   # Reading and writing those tables, logged
+│   │   ├── recordStore.js   # Reading and writing those tables, logged
+│   │   ├── churchGroups.js  # The groups, their rolls, and generating a set
+│   │   ├── groupEvents.js   # A group's meetings, invitations and sign-ups
+│   │   ├── eventComments.js # One thread per event, whatever kind of event
+│   │   └── notifications.js # What somebody has not seen yet
 │   ├── routes/
 │   │   ├── scraper.js       # Church website scraper + data endpoints
 │   │   ├── records.js       # Area-gated CRUD for the record tables
 │   │   ├── serving.js       # The roster, member jobs, and sign-ups
 │   │   ├── visitors.js      # Guests, their details and their visits
 │   │   ├── leadership.js    # Elders and deacons, with their duties
+│   │   ├── groups.js        # Church groups, their rolls and their meetings
+│   │   ├── comments.js      # Comments on any kind of event
+│   │   ├── notifications.js # One account's bell, and only ever its own
 │   │   ├── documents.js     # .docx upload + OOXML → HTML conversion
 │   │   └── bibleClass.js    # Question generation + library CRUD
 │   ├── data/                # Runtime data (gitignored)

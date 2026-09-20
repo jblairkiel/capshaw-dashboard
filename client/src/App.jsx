@@ -26,6 +26,7 @@ import ServingJobsView from './components/ServingJobsView';
 import ActionHistoryView from './components/ActionHistoryView';
 import WeeklyBulletinView from './components/WeeklyBulletinView';
 import ImpersonationBanner from './components/ImpersonationBanner';
+import GroupsView from './components/GroupsView';
 import { hasWriteAccess, isAdmin, hasArea } from './lib/roles';
 
 const API = '/api/members';
@@ -49,6 +50,7 @@ const BASE_GROUPS = [
       { id: 'assignments',   label: 'Serving Schedule' },
       { id: 'attendance',    label: 'Attendance' },
       { id: 'visitors',      label: 'Guests' },
+      { id: 'groups',        label: 'Church Groups' },
       { id: 'anniversaries', label: 'Birthdays & Anniversaries' },
       { id: 'leadership',    label: 'Elders & Deacons' },
       { id: 'livestreams',   label: 'Livestreams' },
@@ -100,6 +102,7 @@ const STANDALONE_TABS = new Set([
   'bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database',
   'directory', 'profile', 'inbox', 'mail-groups', 'livestreams',
   'assignments', 'visitors', 'leadership', 'serving-jobs', 'action-history', 'bulletin',
+  'groups',
 ]);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
@@ -212,7 +215,9 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       {impersonatedBy && (
         <ImpersonationBanner user={user} impersonatedBy={impersonatedBy} onStopped={onStoppedImpersonating} />
       )}
-      <Header user={user} onLogout={onLogout} />
+      {/* The bell opens whatever it mentions, which is why the header needs
+          to be able to change the tab. */}
+      <Header user={user} onLogout={onLogout} onGoToPage={setActiveTab} />
 
       {/* Pending approval banner */}
       {user?.role === 'pending' && (
@@ -353,6 +358,11 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       {!updating && activeTab === 'calendar' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           <CalendarView user={user} />
+        </main>
+      )}
+      {!updating && activeTab === 'groups' && (
+        <main className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
+          <GroupsView user={user} />
         </main>
       )}
       {!updating && activeTab === 'livestreams' && (

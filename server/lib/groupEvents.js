@@ -149,7 +149,7 @@ function rsvpOf(eventId, userId) {
 
 // ─── The sign-up list ─────────────────────────────────────────────────────────
 
-function signupsFor(eventId) {
+function signupsFor(eventId, viewer = null) {
   const items = db.prepare(`
     SELECT id, label, notes, needed, sort_order
       FROM group_event_signup_items
@@ -179,6 +179,9 @@ function signupsFor(eventId) {
       claims: taken.map(c => ({
         id:       c.id,
         userId:   c.user_id,
+        // Whether this one is the reader's own, so a page can offer "I can't
+        // after all" on exactly the claims the route would let them drop.
+        mine:     !!viewer && c.user_id === viewer.id,
         name:     c.user_name,
         detail:   c.detail,
         quantity: c.quantity,
@@ -192,7 +195,7 @@ function signupsFor(eventId) {
 // list, and sending the list back is what keeps the screen and the table
 // agreeing. Items that survive keep their id, so nobody's claim is dropped by
 // an edit to the wording next to it.
-const saveSignupItems = db.transaction((eventId, items = []) => {
+const saveSignupItems = db.transaction((eventId, items = [], viewer = null) => {
   const existing = db.prepare('SELECT id FROM group_event_signup_items WHERE event_id = ?').all(eventId).map(r => r.id);
   const kept = new Set();
 
@@ -215,7 +218,7 @@ const saveSignupItems = db.transaction((eventId, items = []) => {
   });
 
   for (const id of existing) if (!kept.has(id)) remove.run(id);
-  return signupsFor(eventId);
+  return signupsFor(eventId, viewer);
 });
 
 const claimSignup = db.transaction((itemId, user, { detail = '', quantity = 1 } = {}) => {

@@ -105,7 +105,7 @@ function resolve(subjectType, subjectId) {
 // A removed comment is still in the table; what comes back in its place is a
 // gap that says so, because a thread that quietly loses a message reads as
 // though it never had one.
-function listComments(subjectType, subjectId) {
+function listComments(subjectType, subjectId, viewer = null) {
   return db.prepare(`
     SELECT c.id, c.user_id, c.author_name, c.body, c.created_at, c.edited_at, c.deleted_at,
            u.name AS account_name, u.photo AS photo
@@ -116,6 +116,10 @@ function listComments(subjectType, subjectId) {
   `).all(subjectType, Number(subjectId)).map(row => ({
     id:        row.id,
     userId:    row.user_id,
+    // Whether this is the reader's own, so the screen can offer Edit without
+    // having to know who they are — and so the offer matches what the route
+    // will actually allow.
+    mine:      !!viewer && row.user_id === viewer.id && !row.deleted_at,
     author:    row.author_name || row.account_name || 'Somebody',
     photo:     row.deleted_at ? null : row.photo || null,
     body:      row.deleted_at ? '' : row.body,
