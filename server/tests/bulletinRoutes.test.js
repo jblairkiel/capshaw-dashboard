@@ -128,6 +128,81 @@ describe('composing the two halves', () => {
     ]);
   });
 
+  describe('a deacon\'s primary responsibility', () => {
+    // The newsletter has room for one of them. The Elders & Deacons page takes
+    // responsibilities one to a line, but plenty are written as a single line
+    // with several packed into it.
+    test('the first line is the primary one', () => {
+      expect(issues.primaryDuty(['Upper Ed', 'Bulletin', 'Workroom'])).toBe('Upper Ed');
+    });
+
+    test('a line packing several together yields the first', () => {
+      expect(issues.primaryDuty(['Treasurer & Finance / New Building'])).toBe('Treasurer & Finance');
+      expect(issues.primaryDuty(['Contributions / Small Groups / VBS'])).toBe('Contributions');
+      expect(issues.primaryDuty(["Children's Bible Drill/ Special Services"])).toBe("Children's Bible Drill");
+    });
+
+    test('a slash inside a word is not a separator', () => {
+      // 'Audio/Video & Sound Booth' must not come out as 'Audio'.
+      expect(issues.primaryDuty(['Audio/Video & Sound Booth'])).toBe('Audio/Video & Sound Booth');
+    });
+
+    test('a deacon with nothing recorded gets nothing printed', () => {
+      expect(issues.primaryDuty([])).toBe('');
+      expect(issues.primaryDuty(undefined)).toBe('');
+    });
+
+    test('the newsletter prints only the primary one', () => {
+      db.prepare('INSERT INTO deacons (id,name) VALUES (1,?)').run('Greg Reece');
+      const ins = db.prepare('INSERT INTO deacon_duties (deacon_id,duty,position) VALUES (1,?,?)');
+      ins.run('Upper Ed', 0);
+      ins.run('Workroom', 1);
+
+      const text = issues.compose(SUNDAY).leadership.deacons.map(s => s.text).join('');
+      expect(text).toBe('Greg Reece (Upper Ed)');
+      expect(text).not.toContain('Workroom');
+    });
+  });
+
+  describe('clipping a deacon\'s responsibilities', () => {
+    // Sixteen deacons at full length is a wall of running text, so the longest
+    // are cut. What matters is that the cut never exceeds the limit and never
+    // reads as a typo.
+    test('anything within the limit is left exactly as it is', () => {
+      expect(issues.clip('Website & Graphics', 30)).toBe('Website & Graphics');
+      expect(issues.clip('Communion & Baptistry / Boards', 30)).toBe('Communion & Baptistry / Boards');
+      expect(issues.clip('', 30)).toBe('');
+    });
+
+    test('a longer one is cut at a word boundary, ellipsis included in the limit', () => {
+      const clipped = issues.clip('Treasurer & Finance / New Building', 30);
+      expect(clipped).toBe('Treasurer & Finance / New\u2026');
+      expect(clipped.length).toBeLessThanOrEqual(30);
+    });
+
+    test('a trailing separator is not left hanging before the ellipsis', () => {
+      expect(issues.clip('Facilities & Grounds / Security', 30)).toBe('Facilities & Grounds\u2026');
+      expect(issues.clip('Contributions / Small Groups / VBS', 30)).toBe('Contributions / Small Groups\u2026');
+    });
+
+    test('a first word longer than the limit is cut anyway rather than vanishing', () => {
+      const clipped = issues.clip('Supercalifragilisticexpialidociousness', 12);
+      expect(clipped.length).toBe(12);
+      expect(clipped.endsWith('\u2026')).toBe(true);
+    });
+
+    test('the newsletter prints the clipped form', () => {
+      // A primary responsibility that is one long phrase, so the clip is what
+      // shortens it rather than the split on its own.
+      db.prepare('INSERT INTO deacons (id,name) VALUES (1,?)').run('Dick Chittam');
+      db.prepare('INSERT INTO deacon_duties (deacon_id,duty,position) VALUES (1,?,0)')
+        .run('Attendance, Insurance and Legal Matters');
+
+      const text = issues.compose(SUNDAY).leadership.deacons.map(s => s.text).join('');
+      expect(text).toBe('Dick Chittam (Attendance, Insurance and\u2026)');
+    });
+  });
+
   test('a deacon\'s responsibilities are bracketed after the name', () => {
     db.prepare('INSERT INTO deacons (id,name) VALUES (1,?)').run('Michael Bacci');
     db.prepare('INSERT INTO deacon_duties (deacon_id,duty,position) VALUES (1,?,0)').run('Treasurer & Finance');
@@ -225,6 +300,14 @@ describe('the exports', () => {
     // A picture is only shown if something points at it.
     const rels = await zip.file('word/_rels/document.xml.rels').async('string');
     expect(rels).toContain('media/masthead.jpg');
+
+    // Word renders a vertically merged cell differently from every other
+    // reader: it loses the cell's sides and bottom, and pushes what follows a
+    // page late, which is how this newsletter grew a blank second page. Every
+    // table here is a single row instead, and nothing may quietly put the
+    // merge back.
+    const document = await zip.file('word/document.xml').async('string');
+    expect(document).not.toContain('<w:vMerge');
 
     const { value: html, messages } = await mammoth.convertToHtml({ buffer: res.body });
     expect(messages).toEqual([]);

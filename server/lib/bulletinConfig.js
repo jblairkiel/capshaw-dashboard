@@ -49,6 +49,13 @@ module.exports = {
   // on the newsletter beneath the elders.
   evangelist: { name: 'Buc Chumbley', phone: '(256) 777-1065' },
 
+  // How much of a deacon's responsibilities the newsletter prints. Sixteen
+  // deacons each carrying a full description turned that block into a wall of
+  // running text; clipping the longest of them keeps the list readable without
+  // dropping the responsibilities altogether. The Elders & Deacons page still
+  // holds the whole thing — this is the newsletter's summary of it.
+  deaconDutyMaxLength: 30,
+
   // ─── Contacts ───────────────────────────────────────────────────────────────
 
   // Distribution groups are addressed at this domain. The local part is the

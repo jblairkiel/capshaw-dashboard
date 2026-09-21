@@ -112,8 +112,16 @@ function drawBlock(doc, block, x, y, width) {
 
     case 'heading': {
       const size = block.size ?? 12;
+      let top = y;
+      if (block.rule) {
+        // Divides one section from the next now that the left column is a
+        // single card rather than three.
+        top += 5;
+        doc.moveTo(x, top).lineTo(x + width, top).lineWidth(0.5).stroke(rule);
+        top += 4;
+      }
       doc.font(block.plain ? FONT_B : FONT_BI).fontSize(size).fillColor(navy);
-      doc.text(block.text, x, y, { width });
+      doc.text(block.text, x, top, { width });
       return doc.y + (block.after ?? 3);
     }
 
@@ -246,40 +254,30 @@ function pageOne(doc, b) {
 
   const bodyTop = y;
 
-  // ── Left column: three grey cards ──
-  let ly = bodyTop;
+  // ── Left column ──
+  //
+  // One grey card holding all three sections. The .docx cannot put three
+  // separate boxes beside one tall panel without a nested table or a vertical
+  // merge, and both misrender in Word; the two files have to agree, so the
+  // sections are divided by their headings here as well.
+  const groupItems = [];
+  for (const g of b.groups) {
+    groupItems.push(g.leader ? `${g.name} \u2013 Leader: ${g.leader}` : g.name);
+    if (g.note) groupItems.push({ text: g.note, level: 1 });
+  }
 
-  ly = panel(doc, {
-    x: LEFT_X, y: ly, width: LEFT_W, fill: card,
+  const ly = panel(doc, {
+    x: LEFT_X, y: bodyTop, width: LEFT_W, fill: card,
     blocks: [
       B.heading('Reminders:', { size: 11, plain: true }),
       B.bullets(b.reminders.length ? b.reminders : ['—'], { size: 8.5 }),
-    ],
-  }) + 12;
-
-  ly = panel(doc, {
-    x: LEFT_X, y: ly, width: LEFT_W, fill: card,
-    blocks: [
-      B.heading('Last Week’s Data:', { size: 11, plain: true }),
+      B.heading('Last Week\u2019s Data:', { size: 11, plain: true, rule: true }),
       B.bullets(lastWeekLines(b), { size: 8.5 }),
-      B.gap(4),
-      B.heading('Anniversaries:', { size: 11, plain: true }),
+      B.heading('Anniversaries:', { size: 11, plain: true, rule: true }),
       B.bullets(b.anniversaries.length ? b.anniversaries : ['—'], { size: 8.5 }),
-      B.gap(4),
-      B.heading('Birthdays:', { size: 11, plain: true }),
+      B.heading('Birthdays:', { size: 11, plain: true, rule: true }),
       B.bullets(b.birthdays.length ? b.birthdays : ['—'], { size: 8.5 }),
-    ],
-  }) + 12;
-
-  const groupItems = [];
-  for (const g of b.groups) {
-    groupItems.push(g.leader ? `${g.name} – Leader: ${g.leader}` : g.name);
-    if (g.note) groupItems.push({ text: g.note, level: 1 });
-  }
-  ly = panel(doc, {
-    x: LEFT_X, y: ly, width: LEFT_W, fill: card,
-    blocks: [
-      B.heading('Groups:', { size: 11, plain: true }),
+      B.heading('Groups:', { size: 11, plain: true, rule: true }),
       B.bullets(groupItems.length ? groupItems : ['—'], { size: 8.5 }),
     ],
   });
@@ -420,15 +418,15 @@ function longLabel(iso) {
 function pageTwo(doc, b) {
   let y = roster(doc, b, 18) + 8;
 
-  const leftW  = 331;
-  const rightX = M + leftW + 8;
-  const rightW = PAGE.width - M - rightX;
-
-  // ── Leadership ──
+  // ── Leadership, across the width ──
+  //
+  // Full width rather than beside the contacts, matching the .docx: putting a
+  // tall panel next to a stack of short ones needs a vertical merge there, and
+  // Word renders that badly enough to lose the card's borders.
   const leadership = [B.heading('Elders', { size: 12 })];
   leadership.push(b.leadership.elders.length
     ? B.para(b.leadership.elders, { size: 9 })
-    : B.lines(['—'], { color: '#888888' }));
+    : B.lines(['\u2014'], { color: '#888888' }));
 
   if (b.leadership.evangelist?.name) {
     leadership.push(B.gap(4), B.heading('Evangelist', { size: 12 }), B.para([
@@ -440,11 +438,16 @@ function pageTwo(doc, b) {
   leadership.push(B.gap(4), B.heading('Deacons', { size: 12 }));
   leadership.push(b.leadership.deacons.length
     ? B.para(b.leadership.deacons, { size: 9 })
-    : B.lines(['—'], { color: '#888888' }));
+    : B.lines(['\u2014'], { color: '#888888' }));
 
-  const leftBottom = panel(doc, { x: M, y, width: leftW, blocks: leadership, shadow: false });
+  y = panel(doc, { x: M, y, width: W, blocks: leadership, shadow: false }) + 10;
 
-  // ── Contacts ──
+  // ── Contacts beside the address ──
+  const gap    = 10;
+  const halfL  = 300;
+  const halfR  = W - halfL - gap;
+  const rightX = M + halfL + gap;
+
   const contacts = [B.heading('Key Email Contacts', { size: 12 })];
   for (const c of b.contacts.groups) {
     contacts.push(
@@ -460,11 +463,11 @@ function pageTwo(doc, b) {
     }
   }
 
-  let ry = panel(doc, { x: rightX, y, width: rightW, blocks: contacts, shadow: false }) + 10;
+  const contactsBottom = panel(doc, { x: M, y, width: halfL, blocks: contacts, shadow: false });
 
-  // ── Find us ──
-  ry = band(doc, {
-    x: rightX, y: ry, width: rightW,
+  // The grey heading sits inside the navy card, as it does in the .docx.
+  const findUsTop = band(doc, {
+    x: rightX, y, width: halfR,
     text: 'FIND US:', fill: card, color: navy, size: 11, italic: false, border: navy,
   });
 
@@ -475,9 +478,12 @@ function pageTwo(doc, b) {
     B.gap(3),
     B.lines(b.footer.social.map(([k, v]) => `${k}: ${v}`), { size: 8.5, color: '#FFFFFF', spacing: 3 }),
   ];
-  panel(doc, { x: rightX, y: ry, width: rightW, blocks: findUs, fill: navy, border: navy, shadow: false });
+  const findUsBottom = panel(doc, {
+    x: rightX, y: findUsTop, width: halfR, blocks: findUs,
+    fill: navy, border: navy, shadow: false,
+  });
 
-  return leftBottom;
+  return Math.max(contactsBottom, findUsBottom);
 }
 
 // ─── The document ─────────────────────────────────────────────────────────────

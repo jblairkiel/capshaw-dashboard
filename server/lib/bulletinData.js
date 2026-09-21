@@ -238,15 +238,27 @@ function anniversariesInWeek(start) {
 // Elders and deacons with what each looks after. The newsletter prints an
 // elder's telephone number and a deacon's responsibilities, which is exactly
 // the difference between the two tables — only elders carry contact columns.
+// Sorting a congregation's names means sorting on the surname: `ORDER BY name`
+// puts Adam Mowrer before Barton Barrett, which is nobody's idea of a list of
+// deacons. The surname is the last word of the name, and two people who share
+// one are separated by the whole name, so the Reeces stay in a stable order.
+function bySurname(a, b) {
+  const surname = n => String(n || '').trim().split(/\s+/).pop().toLowerCase();
+  return surname(a.name).localeCompare(surname(b.name))
+      || String(a.name).localeCompare(String(b.name));
+}
+
 function leadership(table, dutiesTable, key, withPhone = false) {
   const columns = withPhone ? 'id, name, phone' : 'id, name';
-  const people  = db.prepare(`SELECT ${columns} FROM "${table}" ORDER BY name ASC`).all();
+  const people  = db.prepare(`SELECT ${columns} FROM "${table}"`).all();
   const duties  = db.prepare(`SELECT "${key}" AS person_id, duty FROM "${dutiesTable}" ORDER BY position ASC, id ASC`).all();
-  return people.map(p => ({
-    name:   p.name,
-    phone:  withPhone ? (p.phone || '') : '',
-    duties: duties.filter(d => d.person_id === p.id).map(d => d.duty),
-  }));
+  return people
+    .map(p => ({
+      name:   p.name,
+      phone:  withPhone ? (p.phone || '') : '',
+      duties: duties.filter(d => d.person_id === p.id).map(d => d.duty),
+    }))
+    .sort(bySurname);
 }
 
 // ─── The duty roster ──────────────────────────────────────────────────────────

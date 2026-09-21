@@ -156,6 +156,37 @@ function splitName(entry) {
   return m ? { name: m[1].trim(), rest: m[2].trim() } : { name: String(entry).trim(), rest: '' };
 }
 
+// What the newsletter prints for a deacon's responsibilities. Sixteen of them
+// at full length is a wall of text, so the longest are clipped at a word
+// boundary rather than mid-word — '…' says the rest was left out instead of
+// letting a cut look like a typo. The ellipsis counts towards the limit, so
+// nothing printed is ever longer than it.
+function clip(text, max) {
+  const whole = String(text || '').trim();
+  if (whole.length <= max) return whole;
+
+  const room = max - 1;
+  const cut  = whole.slice(0, room);
+  const space = cut.lastIndexOf(' ');
+  // Only break on a space when one is far enough in to leave something
+  // readable; a duty whose first word is longer than the limit is cut anyway.
+  const kept = space > max / 2 ? cut.slice(0, space) : cut;
+
+  return `${kept.replace(/[\s/,&-]+$/, '')}\u2026`;
+}
+
+// A deacon's primary responsibility.
+//
+// The Elders & Deacons page takes responsibilities one to a line, so the first
+// line is the primary one. Plenty of them are written as one line with several
+// packed into it — 'Treasurer & Finance / New Building' — so the first of those
+// counts too. The split needs a space on one side of the slash or the other:
+// without that rule 'Audio/Video & Sound Booth' would come out as 'Audio'.
+function primaryDuty(duties) {
+  const first = String((duties || [])[0] || '').trim();
+  return first.split(/\s\/\s*|\s*\/\s/)[0].trim();
+}
+
 // Joins people into one paragraph: bold name, plain remainder, separated.
 function nameParagraph(entries, { separator = ', ', wrap = null, joiner = ' ' } = {}) {
   const out = [];
@@ -230,8 +261,14 @@ function compose(sunday) {
         auto.elders.map(e => ({ name: e.name, rest: e.phone })),
       ),
       evangelist: config.evangelist,
+      // Only the primary responsibility. A deacon may look after several
+      // things and the Elders & Deacons page lists them all; the newsletter
+      // has room for one, and the first is the one that page puts first.
       deacons: nameParagraph(
-        auto.deacons.map(d => ({ name: d.name, rest: d.duties.join(' / ') })),
+        auto.deacons.map(d => ({
+          name: d.name,
+          rest: clip(primaryDuty(d.duties), config.deaconDutyMaxLength),
+        })),
         { wrap: ['(', ')'] },
       ),
     },
@@ -250,4 +287,4 @@ function compose(sunday) {
   };
 }
 
-module.exports = { TEXT_FIELDS, blank, find, previous, draftFor, save, list, compose, lines, nameParagraph, splitName };
+module.exports = { TEXT_FIELDS, blank, find, previous, draftFor, save, list, compose, lines, nameParagraph, splitName, clip, primaryDuty };
