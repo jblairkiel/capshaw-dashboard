@@ -207,6 +207,68 @@ describe('the words it writes', () => {
   });
 });
 
+describe('church groups', () => {
+  // A group page with rolls but no answers, nothing on the sign-up list and an
+  // empty thread shows none of what the page is for, so a batch fills all of
+  // it — and has to do so without inventing a single account.
+  test('fills the answers, the sign-up lists and the threads', () => {
+    seed.generate({ generators: ['directory', 'announcements', 'church-groups'], scale: 2 });
+
+    for (const table of ['group_event_rsvps', 'group_event_signups', 'event_comments']) {
+      expect([table, db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get().n > 0]).toEqual([table, true]);
+    }
+  });
+
+  test('attributes all of it to directory people, never to an account', () => {
+    seed.generate({ generators: ['directory', 'announcements', 'church-groups'], scale: 2 });
+
+    // Accounts are never sample data, so nothing a batch writes may claim one.
+    for (const table of ['group_event_rsvps', 'group_event_signups']) {
+      const rows = db.prepare(`SELECT user_id, directory_id FROM "${table}"`).all();
+      expect([table, rows.every(r => r.user_id === null)]).toEqual([table, true]);
+      expect([table, rows.every(r => r.directory_id !== null)]).toEqual([table, true]);
+    }
+    expect(db.prepare('SELECT COUNT(*) AS n FROM event_comments WHERE user_id IS NOT NULL').get().n).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM users').get().n).toBe(0);
+  });
+
+  test('never signs more people up for a thing than were asked for', () => {
+    seed.generate({ generators: ['directory', 'church-groups'], scale: 3 });
+
+    const overSubscribed = db.prepare(`
+      SELECT i.label, i.needed, COALESCE(SUM(s.quantity), 0) AS taken
+        FROM group_event_signup_items i
+        LEFT JOIN group_event_signups s ON s.item_id = i.id
+       GROUP BY i.id
+      HAVING taken > i.needed
+    `).all();
+    expect(overSubscribed).toEqual([]);
+  });
+
+  test('everybody it writes down is somebody on that meeting\'s roll', () => {
+    seed.generate({ generators: ['directory', 'church-groups'], scale: 2 });
+
+    const strangers = db.prepare(`
+      SELECT r.id FROM group_event_rsvps r
+        JOIN group_events e ON e.id = r.event_id
+       WHERE NOT EXISTS (
+         SELECT 1 FROM church_group_members m
+          WHERE m.group_id = e.group_id AND m.directory_id = r.directory_id
+       )
+    `).all();
+    expect(strangers).toEqual([]);
+  });
+
+  test('a batch takes its answers, sign-ups and replies back out with it', () => {
+    const made = seed.generate({ generators: ['directory', 'announcements', 'church-groups'], scale: 2 });
+    seed.remove(made.batch);
+
+    for (const table of ['group_event_rsvps', 'group_event_signups', 'event_comments', 'church_groups']) {
+      expect([table, db.prepare(`SELECT COUNT(*) AS n FROM "${table}"`).get().n]).toEqual([table, 0]);
+    }
+  });
+});
+
 // ─── The part that keeps this honest ──────────────────────────────────────────
 
 describe('coverage', () => {

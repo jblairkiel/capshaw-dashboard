@@ -480,10 +480,20 @@ carries three things an announcement does not:
   bringing, so the head count is the answers *plus* their guests. Changing your
   mind corrects your answer instead of counting you twice. The leaders are told
   about a new answer and not about a correction.
+
+  An answer belongs to a **person**, and only sometimes to an account. Much of
+  any congregation will never sign in, and they still say whether they are
+  coming — to their leader, at church, on the way out. So a leader can write an
+  answer down against anybody on the roll, and the meeting shows them who is
+  still to be heard from. Such an answer is marked *written down*, so a list of
+  names never implies that everybody on it opened the portal. If that person
+  later signs in, the answer held for them is theirs to correct, and answering
+  for themselves replaces it rather than being counted twice.
 - **A sign-up list** (optional). The leader lists what is needed and how many
   of it — "Dessert ×1", "Drinks ×2" — and members take items. What is still
   wanted goes down as people sign up; editing the wording of an item keeps the
-  claims under it.
+  claims under it. A leader can put somebody down the same way they write an
+  answer down, and what they wrote is that person's to drop once they sign in.
 
 Cancelling a posted meeting tells the group; cancelling a draft tells nobody,
 because nobody ever heard of it.
@@ -505,8 +515,12 @@ Each kind decides for itself who may take part, in
 
 | Kind | Who reads it | Who replies | Who can remove somebody else's |
 |---|---|---|---|
-| `group-event` | The group's roll | The roll, unless the meeting is cancelled | The group's leaders, and the group manager |
+| `group-event` | The group's roll — or, for a draft, its leaders only | The same, unless the meeting is cancelled | The group's leaders, and the group manager |
 | `announcement` | Anybody signed in | Any confirmed member | Whoever holds `announcements` or `calendar` |
+
+A draft meeting's thread follows the meeting: the leaders can talk it over
+before they post it, and nobody else can read it or reply, exactly as the
+meeting itself is served.
 
 You may edit your own words and nobody else's — a leader can take a comment
 down, but nobody can change what somebody else said. A removed comment is kept
@@ -1158,7 +1172,16 @@ disturbs May, and publishing twice does not double it up.
 **Admin → Database → Sample Data** fills the site with made-up records so a page
 can be looked at with something in it — a directory with households, a month of
 serving jobs, what each man will volunteer for, guests with visit histories and
-follow-ups in each state.
+follow-ups in each state, church groups with rolls and a meeting each, the
+answers and sign-ups that meeting collects, and the replies under it.
+
+Sample answers, sign-ups and replies are attributed to **directory people**,
+never to accounts — a made-up sign-in is not sample data, it is a way in. That
+is why an answer belongs to a person rather than to an account (see
+[Church Groups](#church-groups)): it is the same shape a leader writes down for
+somebody who never signs in. The sign-up lists are deliberately left
+part-covered, because a list with something still wanted on it is what the page
+has to render well and a full one never shows it.
 
 The hard part is not making it. It is getting it back out.
 

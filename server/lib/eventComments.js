@@ -32,10 +32,17 @@ const SUBJECTS = {
     },
     title: subject => subject.title,
     where: subject => subject.group_name,
-    // A meeting nobody outside the group can see is a thread nobody outside
-    // the group can read either.
-    canRead: (user, subject) => groups.belongsToGroup(user, subject.group_id),
-    canReply: (user, subject) => subject.status !== 'cancelled' && groups.belongsToGroup(user, subject.group_id),
+    // A meeting nobody can see is a thread nobody can read either, and a draft
+    // is the leaders' until they post it — the same rule the meeting itself is
+    // served under, rather than a second answer to the same question.
+    canRead: (user, subject) => (
+      subject.status === 'draft'
+        ? groups.leadsGroup(user, subject.group_id)
+        : groups.belongsToGroup(user, subject.group_id)
+    ),
+    canReply: (user, subject) => (
+      subject.status !== 'cancelled' && SUBJECTS['group-event'].canRead(user, subject)
+    ),
     // A leader may tidy their own group's thread; so may whoever looks after
     // groups. Nobody else touches anybody else's words.
     canModerate: (user, subject) => groups.leadsGroup(user, subject.group_id),

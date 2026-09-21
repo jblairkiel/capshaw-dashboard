@@ -90,7 +90,74 @@ function Rsvp({ groupId, event, detail, onChanged }) {
           others
         </label>
       </div>
-      {mine && <p className="text-xs text-gray-400">You said {responseInfo(mine).label.toLowerCase()}. Change it any time.</p>}
+      {mine && (
+        <p className="text-xs text-gray-400">
+          {detail?.rsvp?.recorded
+            ? `Your group's leader wrote you down as ${responseInfo(mine).label.toLowerCase()}. Change it if that is not right.`
+            : `You said ${responseInfo(mine).label.toLowerCase()}. Change it any time.`}
+        </p>
+      )}
+      {error && <p className="text-sm text-red-600">{error}</p>}
+    </div>
+  );
+}
+
+// ─── Answering for somebody who does not use the portal ───────────────────────
+//
+// Most of a congregation will never sign in, and they still say whether they
+// are coming — to their leader, at church, on the way out. This is where that
+// gets written down, and it doubles as the leader's list of who has not
+// answered yet.
+
+function RecordAnswer({ groupId, event, detail, members, onChanged }) {
+  const [who,   setWho]   = useState('');
+  const [busy,  setBusy]  = useState(false);
+  const [error, setError] = useState('');
+
+  const answered = new Set((detail?.rsvps ?? []).map(r => r.directoryId).filter(Boolean));
+  const waiting  = (members ?? []).filter(m => !answered.has(m.directoryId));
+
+  if (event.status !== 'published' || !event.rsvpEnabled || !waiting.length) return null;
+
+  async function record(response) {
+    setBusy(true); setError('');
+    try {
+      await call(`/api/groups/${groupId}/events/${event.id}/rsvp`, {
+        method: 'POST',
+        body: JSON.stringify({ directoryId: Number(who), response }),
+      });
+      setWho('');
+      onChanged();
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="space-y-2 pt-3 border-t border-gray-100">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+        Write down an answer ({waiting.length} still to hear from)
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={who}
+          onChange={e => setWho(e.target.value)}
+          aria-label="Who told you"
+          className="flex-1 min-w-[10rem] border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:border-church-gold"
+        >
+          <option value="">Who told you…</option>
+          {waiting.map(m => <option key={m.id} value={m.directoryId}>{m.name}</option>)}
+        </select>
+        {RESPONSES.map(option => (
+          <button
+            key={option.id}
+            disabled={!who || busy}
+            onClick={() => record(option.id)}
+            className="text-xs px-2.5 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold disabled:opacity-40"
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
     </div>
   );
@@ -98,7 +165,7 @@ function Rsvp({ groupId, event, detail, onChanged }) {
 
 // ─── The sign-up list ─────────────────────────────────────────────────────────
 
-function SignupList({ groupId, event, detail, onChanged }) {
+function SignupList({ groupId, event, detail, canManage, members, onChanged }) {
   const [busy,   setBusy]   = useState(null);
   const [detailText, setDetailText] = useState({});
   const [error,  setError]  = useState('');
@@ -112,6 +179,20 @@ function SignupList({ groupId, event, detail, onChanged }) {
       await call(`/api/groups/${groupId}/events/${event.id}/signups`, {
         method: 'POST',
         body: JSON.stringify({ itemId: item.id, detail: detailText[item.id] || '' }),
+      });
+      onChanged();
+    } catch (e) { setError(e.message); }
+    finally { setBusy(null); }
+  }
+
+  // The same thing a leader does for an answer: somebody said on Sunday that
+  // they would bring a pudding and will never open the portal to say so.
+  async function claimFor(item, directoryId) {
+    setBusy(item.id); setError('');
+    try {
+      await call(`/api/groups/${groupId}/events/${event.id}/signups`, {
+        method: 'POST',
+        body: JSON.stringify({ itemId: item.id, directoryId: Number(directoryId) }),
       });
       onChanged();
     } catch (e) { setError(e.message); }
@@ -181,9 +262,25 @@ function SignupList({ groupId, event, detail, onChanged }) {
                   {item.claims.map(c => (
                     <li key={c.id} className="text-xs text-gray-500">
                       · {c.name}{c.detail ? ` — ${c.detail}` : ''}
+                      {c.recorded && <span className="text-gray-400"> (written down)</span>}
                     </li>
                   ))}
                 </ul>
+              )}
+
+              {canManage && item.remaining > 0 && (
+                <select
+                  value=""
+                  disabled={busy === item.id}
+                  aria-label={`Put somebody down for ${item.label}`}
+                  onChange={e => e.target.value && claimFor(item, e.target.value)}
+                  className="mt-1.5 text-xs border border-gray-200 rounded-lg px-2 py-1 text-gray-500 focus:outline-none focus:border-church-gold"
+                >
+                  <option value="">Put somebody down…</option>
+                  {(members ?? [])
+                    .filter(m => !item.claims.some(c => c.directoryId === m.directoryId))
+                    .map(m => <option key={m.id} value={m.directoryId}>{m.name}</option>)}
+                </select>
               )}
             </li>
           );
@@ -212,6 +309,7 @@ function Attendance({ detail }) {
         {(detail.rsvps ?? []).map(r => (
           <li key={r.id} className={`text-xs ${responseInfo(r.response).quiet}`}>
             {r.name}{r.guests ? ` +${r.guests}` : ''}
+            {r.recorded && <span className="text-gray-400"> (written down)</span>}
           </li>
         ))}
       </ul>
@@ -221,7 +319,7 @@ function Attendance({ detail }) {
 
 // ─── The card ─────────────────────────────────────────────────────────────────
 
-export function MeetingCard({ groupId, event, canManage, onChanged, onEdit, defaultOpen = false }) {
+export function MeetingCard({ groupId, event, canManage, members, onChanged, onEdit, defaultOpen = false }) {
   const [open,   setOpen]   = useState(defaultOpen);
   const [detail, setDetail] = useState(null);
   const [busy,   setBusy]   = useState(false);
@@ -234,6 +332,9 @@ export function MeetingCard({ groupId, event, canManage, onChanged, onEdit, defa
   }, [groupId, event.id]);
 
   useEffect(() => { if (open) load(); }, [open, load]);
+
+  // Reload this card, and let the page around it know its counts moved.
+  const refresh = useCallback(() => { load(); onChanged(); }, [load, onChanged]);
 
   async function act(path, confirmText) {
     if (confirmText && !confirm(confirmText)) return;
@@ -327,8 +428,24 @@ export function MeetingCard({ groupId, event, canManage, onChanged, onEdit, defa
 
           {detail ? (
             <>
-              <Rsvp groupId={groupId} event={shown} detail={detail} onChanged={() => { load(); onChanged(); }} />
-              <SignupList groupId={groupId} event={shown} detail={detail} onChanged={() => { load(); onChanged(); }} />
+              <Rsvp groupId={groupId} event={shown} detail={detail} onChanged={refresh} />
+              {canManage && (
+                <RecordAnswer
+                  groupId={groupId}
+                  event={shown}
+                  detail={detail}
+                  members={members}
+                  onChanged={refresh}
+                />
+              )}
+              <SignupList
+                groupId={groupId}
+                event={shown}
+                detail={detail}
+                canManage={canManage}
+                members={members}
+                onChanged={refresh}
+              />
               <Attendance detail={detail} />
               <div>
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Comments</p>

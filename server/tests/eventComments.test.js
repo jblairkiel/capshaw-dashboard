@@ -195,6 +195,28 @@ describe('comments on a group meeting', () => {
     expect(notifications.listFor(member.id).some(n => n.kind === 'group-event-comment')).toBe(true);
   });
 
+  test('a draft is the leaders\' to talk about, as the meeting itself is', async () => {
+    // The meeting route answers 404 for a member asking about a draft. The
+    // thread under it has to agree, or the draft leaks through its comments.
+    const drafted = await request(buildApp(leader))
+      .post(`/api/groups/${group.id}/events`)
+      .send({ title: 'Not settled yet', date: '2099-06-01' });
+    const draftId = drafted.body.event.id;
+
+    const read = await request(buildApp(member)).get(`/api/comments/group-event/${draftId}`);
+    expect(read.status).toBe(403);
+
+    const wrote = await request(buildApp(member))
+      .post(`/api/comments/group-event/${draftId}`).send({ body: 'What is this?' });
+    expect(wrote.status).toBe(403);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM event_comments').get().n).toBe(0);
+
+    // Its leaders can still talk it over before they post it.
+    const theirs = await request(buildApp(leader))
+      .post(`/api/comments/group-event/${draftId}`).send({ body: 'Shall we say six?' });
+    expect(theirs.status).toBe(200);
+  });
+
   test('a cancelled meeting stops taking replies', async () => {
     await request(buildApp(leader)).post(`/api/groups/${group.id}/events/${eventId}/cancel`);
     const res = await request(buildApp(member))

@@ -1,5 +1,6 @@
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, test, expect, vi, beforeEach } from 'vitest';
+import { useState, useCallback } from 'react';
 import EventComments from '../components/EventComments';
 import NotificationsBell from '../components/NotificationsBell';
 
@@ -118,6 +119,59 @@ describe('the thread under an event', () => {
     })));
     render(<EventComments subjectType="group-event" subjectId={90} />);
     expect(await screen.findByText('That is not yours to read')).toBeInTheDocument();
+  });
+});
+
+// ─── The loop this used to be ─────────────────────────────────────────────────
+//
+// A card shows "💬 3" and reloads itself when the count changes, so it hands
+// the thread an inline arrow. That arrow is a new function on every render,
+// and while the thread listed it as a dependency of its loader, every reply
+// count it reported started the whole thing again: the thread fetched
+// hundreds of times a second until the rate limiter cut it off.
+
+function ReloadingParent({ onFetchCount }) {
+  const [reloads, setReloads] = useState(0);
+  const reload = useCallback(() => setReloads(n => n + 1), []);
+  return (
+    <div>
+      <span data-testid="reloads">{reloads}</span>
+      {/* Inline, exactly as a meeting card passes it */}
+      <EventComments subjectType="group-event" subjectId={90} onCountChange={() => { reload(); onFetchCount?.(); }} />
+    </div>
+  );
+}
+
+describe('the thread does not chase its own tail', () => {
+  test('opening it is one request, however often the parent re-renders', async () => {
+    const fetchMock = mockThread({ comments: [] });
+    render(<ReloadingParent />);
+    await screen.findByLabelText('Write a comment');
+
+    // Long enough for a runaway chain of re-renders to show itself.
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    expect(fetchMock.mock.calls).toHaveLength(1);
+    // And the parent was not reloaded to be told a count it already had.
+    expect(screen.getByTestId('reloads').textContent).toBe('0');
+  });
+
+  test('a reply still tells the parent the count has moved', async () => {
+    let comments = [];
+    const fetchMock = vi.fn((url, options) => {
+      if (options?.method === 'POST') comments = [{ id: 1, userId: 5, mine: true, author: 'Jo Member', body: 'Hello', deleted: false, edited: false, createdAt: '2099-01-01 10:00:00' }];
+      return Promise.resolve({ json: () => Promise.resolve({ success: true, comments, canReply: true, canModerate: false, maxLength: 2000 }) });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<ReloadingParent />);
+    fireEvent.change(await screen.findByLabelText('Write a comment'), { target: { value: 'Hello' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Post' }));
+
+    await waitFor(() => expect(screen.getByTestId('reloads').textContent).toBe('1'));
+    await new Promise(resolve => setTimeout(resolve, 100));
+    // The reply, and nothing set running by reporting it.
+    expect(fetchMock.mock.calls).toHaveLength(2);
   });
 });
 

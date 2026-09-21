@@ -86,7 +86,7 @@ router.get('/', (req, res) => {
     mine,
     upcoming: upcoming.map(event => ({
       ...event,
-      rsvp:     events.rsvpOf(event.id, req.user.id),
+      rsvp:     events.rsvpOf(event.id, req.user),
       summary:  events.rsvpSummary(event.id),
       comments: counts[event.id] ?? 0,
     })),
@@ -196,7 +196,7 @@ router.get('/:groupId', loadGroup, (req, res) => {
     members: groups.membersOf(req.group.id),
     events: list.map(event => ({
       ...event,
-      rsvp:     events.rsvpOf(event.id, req.user.id),
+      rsvp:     events.rsvpOf(event.id, req.user),
       summary:  events.rsvpSummary(event.id),
       comments: counts[event.id] ?? 0,
     })),
@@ -435,8 +435,8 @@ function eventPayload(eventId, user, { canManage = false } = {}) {
   if (!event) return null;
   return {
     ...event,
-    rsvp:     events.rsvpOf(eventId, user.id),
-    rsvps:    events.rsvpsFor(eventId),
+    rsvp:     events.rsvpOf(eventId, user),
+    rsvps:    events.rsvpsFor(eventId, user),
     summary:  events.rsvpSummary(eventId),
     signups:  events.signupsFor(eventId, user),
     comments: comments.listComments('group-event', eventId, user),
@@ -609,18 +609,40 @@ router.post('/:groupId/events/:eventId/rsvp', requireApproved, loadGroup, requir
     return res.status(400).json({ success: false, error: 'That meeting is not open for answers' });
   }
 
-  const previous = events.rsvpOf(req.event.id, req.user.id);
-  const result = events.setRsvp(req.event.id, req.user, {
-    response: req.body?.response,
-    guests:   req.body?.guests,
-    note:     req.body?.note,
-  });
+  // A leader may write down what somebody told them in person — most of any
+  // congregation will never open the portal to answer for themselves. Only a
+  // leader may answer for anybody else, and nobody may answer for a person who
+  // is not on the roll.
+  const onBehalfOf = req.body?.directoryId ? Number(req.body.directoryId) : null;
+  if (onBehalfOf && !req.perms.leads) {
+    return res.status(403).json({
+      success: false,
+      error:   `Only ${req.group.name}'s leaders can answer for somebody else.`,
+    });
+  }
+  if (onBehalfOf && !groups.membersOf(req.group.id).some(m => m.directoryId === onBehalfOf)) {
+    return res.status(400).json({ success: false, error: 'They are not in this group' });
+  }
+
+  const previous = onBehalfOf ? null : events.rsvpOf(req.event.id, req.user);
+  const result = onBehalfOf
+    ? events.setRsvpFor(req.event.id, onBehalfOf, {
+        response: req.body?.response,
+        guests:   req.body?.guests,
+        note:     req.body?.note,
+      })
+    : events.setRsvp(req.event.id, req.user, {
+        response: req.body?.response,
+        guests:   req.body?.guests,
+        note:     req.body?.note,
+      });
   if (result.error) return res.status(400).json({ success: false, error: result.error });
 
   // The leaders hear about a new answer, so a host planning chairs and food
   // does not have to keep opening the page. A correction to an answer they
-  // have already seen is not worth a second notification.
-  if (!previous) {
+  // have already seen is not worth a second notification, and neither is one
+  // a leader has just written down themselves.
+  if (!previous && !onBehalfOf) {
     const leaders = groups.membersOf(req.group.id).filter(m => m.role === 'leader' || m.role === 'co-leader');
     const guests  = Math.max(0, Number(req.body?.guests) || 0);
     notifications.notify({
@@ -634,11 +656,22 @@ router.post('/:groupId/events/:eventId/rsvp', requireApproved, loadGroup, requir
     });
   }
 
+  if (onBehalfOf) {
+    actionLog.record(req.user, {
+      area:     'church-groups',
+      action:   'update',
+      entity:   'group meeting',
+      entityId: req.event.id,
+      summary:  `Recorded ${result.person.name} as ${req.body?.response} for "${req.event.title}"`,
+      details:  { directoryId: onBehalfOf, response: req.body?.response },
+    });
+  }
+
   res.json({
     success: true,
-    rsvp:    events.rsvpOf(req.event.id, req.user.id),
+    rsvp:    events.rsvpOf(req.event.id, req.user),
     summary: events.rsvpSummary(req.event.id),
-    rsvps:   events.rsvpsFor(req.event.id),
+    rsvps:   events.rsvpsFor(req.event.id, req.user),
   });
 });
 
@@ -660,17 +693,35 @@ router.put('/:groupId/events/:eventId/signup-items', requireApproved, loadGroup,
 });
 
 router.post('/:groupId/events/:eventId/signups', requireApproved, loadGroup, requireBelongs, loadEvent, (req, res) => {
-  const result = events.claimSignup(Number(req.body?.itemId), req.user, {
-    detail:   req.body?.detail,
-    quantity: req.body?.quantity,
-  });
+  // Same rule as the invitation: a leader may put somebody on the list who
+  // told them in person, and nobody else may sign anybody else up.
+  const onBehalfOf = req.body?.directoryId ? Number(req.body.directoryId) : null;
+  if (onBehalfOf && !req.perms.leads) {
+    return res.status(403).json({
+      success: false,
+      error:   `Only ${req.group.name}'s leaders can sign somebody else up.`,
+    });
+  }
+  if (onBehalfOf && !groups.membersOf(req.group.id).some(m => m.directoryId === onBehalfOf)) {
+    return res.status(400).json({ success: false, error: 'They are not in this group' });
+  }
+
+  const result = onBehalfOf
+    ? events.claimSignupFor(Number(req.body?.itemId), onBehalfOf, {
+        detail:   req.body?.detail,
+        quantity: req.body?.quantity,
+      })
+    : events.claimSignup(Number(req.body?.itemId), req.user, {
+        detail:   req.body?.detail,
+        quantity: req.body?.quantity,
+      });
   if (result.error) return res.status(400).json({ success: false, error: result.error });
 
   const leaders = groups.membersOf(req.group.id).filter(m => m.role === 'leader' || m.role === 'co-leader');
   notifications.notify({
     users: leaders.map(m => m.userId),
     kind:  'group-event-signup',
-    title: `${req.user.name} is bringing ${result.item.label}`,
+    title: `${onBehalfOf ? result.person.name : req.user.name} is bringing ${result.item.label}`,
     body:  `For "${req.event.title}".`,
     subjectType: 'group-event',
     subjectId:   req.event.id,
