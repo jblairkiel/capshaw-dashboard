@@ -61,9 +61,6 @@ const NOT_FILLED = {
   service_types: 'The list of services every attendance record agrees on. Seeded once at start-up and shared by real records, so a batch must not take it away.',
   workflow_participants: 'Who may see a workflow, which is earned by taking part. Sample follow-ups are not aimed at a real account, so nobody is a participant in one.',
   notifications: 'Somebody\'s bell. An entry here tells a real person about something, so sample data would be telling them about a meeting that was never called.',
-  group_event_rsvps: 'An answer to an invitation is one account\'s. Accounts are never sample data, so the church groups generator answers only for accounts that already exist, and a fresh install has none.',
-  group_event_signups: 'Who is bringing what, which is one account\'s doing — same as the answers above.',
-  event_comments: 'Somebody\'s words, under their name. Made-up replies are attributed to accounts that already exist or not written at all.',
   seed_batches: 'The record of what sample data made.',
   seed_records: 'The record of what sample data made.',
 };

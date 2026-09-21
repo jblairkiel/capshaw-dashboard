@@ -30,11 +30,11 @@ const EVENT_DETAIL = {
   event: {
     ...UPCOMING[0],
     description: 'Come and eat.',
-    rsvps: [{ id: 1, userId: 5, name: 'Ray Harris', response: 'yes', guests: 2, note: '' }],
+    rsvps: [{ id: 1, userId: 5, directoryId: 5, name: 'Lee Leader', response: 'yes', guests: 2, note: '', recorded: false }],
     signups: [
       { id: 7, label: 'Dessert', notes: '', needed: 1, claimed: 0, remaining: 1, claims: [] },
       { id: 8, label: 'Drinks',  notes: '', needed: 2, claimed: 2, remaining: 0,
-        claims: [{ id: 3, userId: 5, mine: false, name: 'Ray Harris', detail: 'lemonade', quantity: 2 }] },
+        claims: [{ id: 3, userId: null, directoryId: 6, mine: false, recorded: true, name: 'Jo Member', detail: 'lemonade', quantity: 2 }] },
     ],
     comments: [],
     canManage: false,
@@ -322,6 +322,107 @@ describe('a meeting', () => {
     await waitFor(() => {
       expect(fetchMock.mock.calls.some(c => String(c[0]).includes('/publish'))).toBe(true);
     });
+  });
+});
+
+// ─── Answers a leader writes down ─────────────────────────────────────────────
+//
+// Most of a congregation will never sign in. Their leader still has to be able
+// to count them, so the meeting carries a way to write an answer down — and it
+// is the leaders' alone.
+
+describe('writing somebody down', () => {
+  const LEADS = { manages: false, leads: true, belongs: true, myRole: 'leader', canSeeRoll: true };
+
+  async function openAsLeader(extra = {}) {
+    const fetchMock = mockApi({
+      list: landing({ upcoming: [] }),
+      one: detail({ perms: LEADS }),
+      event: { success: true, event: { ...EVENT_DETAIL.event, canManage: true, ...extra } },
+    });
+    render(<GroupsView user={MEMBER} />);
+    const mine = (await screen.findByText('My groups')).closest('section');
+    fireEvent.click(within(mine).getByText('North Harvest'));
+    fireEvent.click(await screen.findByText('Fellowship meal'));
+    await screen.findByText('Come and eat.');
+    return fetchMock;
+  }
+
+  test('a leader is shown who has not answered yet', async () => {
+    await openAsLeader();
+    // Lee has answered in the fixture, so only Jo is still to be heard from.
+    expect(screen.getByText(/1 still to hear from/)).toBeInTheDocument();
+    const picker = screen.getByLabelText('Who told you');
+    expect(within(picker).getByRole('option', { name: 'Jo Member' })).toBeInTheDocument();
+    expect(within(picker).queryByRole('option', { name: 'Lee Leader' })).not.toBeInTheDocument();
+  });
+
+  test('writing one down sends the person, not the account', async () => {
+    const fetchMock = await openAsLeader();
+
+    fireEvent.change(screen.getByLabelText('Who told you'), { target: { value: '6' } });
+    fireEvent.click(within(screen.getByText(/still to hear from/).closest('div')).getByRole('button', { name: 'Coming' }));
+
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(c => String(c[0]).includes('/rsvp'));
+      expect(JSON.parse(post[1].body)).toEqual({ directoryId: 6, response: 'yes' });
+    });
+  });
+
+  test('a member is never offered it', async () => {
+    mockApi();
+    render(<GroupsView user={MEMBER} />);
+    fireEvent.click(await screen.findByText('Fellowship meal'));
+    await screen.findByText('Come and eat.');
+
+    expect(screen.queryByLabelText('Who told you')).not.toBeInTheDocument();
+    expect(screen.queryByText(/still to hear from/)).not.toBeInTheDocument();
+  });
+
+  test('an answer held for you says who put it there', async () => {
+    mockApi({
+      event: { success: true, event: { ...EVENT_DETAIL.event, rsvp: { response: 'yes', guests: 0, recorded: true } } },
+    });
+    render(<GroupsView user={MEMBER} />);
+    fireEvent.click(await screen.findByText('Fellowship meal'));
+
+    expect(await screen.findByText(/leader wrote you down as coming/i)).toBeInTheDocument();
+  });
+
+  test('your own answer is not described as written down', async () => {
+    mockApi({
+      event: { success: true, event: { ...EVENT_DETAIL.event, rsvp: { response: 'yes', guests: 0, recorded: false } } },
+    });
+    render(<GroupsView user={MEMBER} />);
+    fireEvent.click(await screen.findByText('Fellowship meal'));
+
+    expect(await screen.findByText(/You said coming/i)).toBeInTheDocument();
+    expect(screen.queryByText(/wrote you down/i)).not.toBeInTheDocument();
+  });
+
+  test('a leader can put somebody down for something still needed', async () => {
+    const fetchMock = await openAsLeader();
+
+    fireEvent.change(screen.getByLabelText('Put somebody down for Dessert'), { target: { value: '6' } });
+
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(c => String(c[0]).includes('/signups') && c[1]?.method === 'POST');
+      expect(JSON.parse(post[1].body)).toMatchObject({ itemId: 7, directoryId: 6 });
+    });
+  });
+
+  test('nobody is offered for something already covered', async () => {
+    await openAsLeader();
+    expect(screen.queryByLabelText('Put somebody down for Drinks')).not.toBeInTheDocument();
+  });
+
+  test('a sign-up somebody else wrote down is marked as such', async () => {
+    mockApi();
+    render(<GroupsView user={MEMBER} />);
+    fireEvent.click(await screen.findByText('Fellowship meal'));
+    await screen.findByText('Come and eat.');
+
+    expect(screen.getByText(/written down/)).toBeInTheDocument();
   });
 });
 

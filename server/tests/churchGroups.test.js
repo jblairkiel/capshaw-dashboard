@@ -408,6 +408,97 @@ describe('a group meeting', () => {
     });
   });
 
+  // ─── Answers a leader writes down ───────────────────────────────────────────
+  //
+  // Much of any congregation never signs in. Their leader still has to be able
+  // to count them, so an answer belongs to a person on the roll, with an
+  // account only when it came through the portal.
+
+  describe('answering for somebody else', () => {
+    let event;
+    let quietPerson;
+
+    beforeEach(async () => {
+      event = await draftMeeting();
+      await request(buildApp(leader)).post(`/api/groups/${group.id}/events/${event.id}/publish`);
+      quietPerson = addPerson('Ada Quiet', { email: 'ada@example.com' });
+      groups.addMember(group.id, { directoryId: quietPerson, role: 'member' });
+    });
+
+    test('a leader writes down what somebody told them, and it is counted', async () => {
+      const res = await request(buildApp(leader))
+        .post(`/api/groups/${group.id}/events/${event.id}/rsvp`)
+        .send({ directoryId: quietPerson, response: 'yes', guests: 2 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.summary).toMatchObject({ yes: 1, guests: 2, attending: 3 });
+
+      const written = res.body.rsvps.find(r => r.name === 'Ada Quiet');
+      // It says it was written down, so a list of names never implies that
+      // everybody on it opened the portal.
+      expect(written).toMatchObject({ response: 'yes', guests: 2, recorded: true, userId: null });
+    });
+
+    test('an ordinary member cannot answer for anybody else', async () => {
+      const res = await request(buildApp(member))
+        .post(`/api/groups/${group.id}/events/${event.id}/rsvp`)
+        .send({ directoryId: quietPerson, response: 'yes' });
+
+      expect(res.status).toBe(403);
+      expect(db.prepare('SELECT COUNT(*) AS n FROM group_event_rsvps').get().n).toBe(0);
+    });
+
+    test('nobody can be answered for who is not in the group', async () => {
+      const outsider = addPerson('Al Outsider');
+      const res = await request(buildApp(leader))
+        .post(`/api/groups/${group.id}/events/${event.id}/rsvp`)
+        .send({ directoryId: outsider, response: 'yes' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/not in this group/i);
+    });
+
+    test('correcting a written-down answer corrects it rather than adding a second', async () => {
+      await request(buildApp(leader))
+        .post(`/api/groups/${group.id}/events/${event.id}/rsvp`)
+        .send({ directoryId: quietPerson, response: 'yes' });
+      const res = await request(buildApp(leader))
+        .post(`/api/groups/${group.id}/events/${event.id}/rsvp`)
+        .send({ directoryId: quietPerson, response: 'no' });
+
+      expect(res.body.rsvps).toHaveLength(1);
+      expect(res.body.summary).toMatchObject({ yes: 0, no: 1 });
+    });
+
+    test('answering for yourself replaces the one written down for you', async () => {
+      // Ada is written down as coming, then signs in for the first time and
+      // says she cannot after all. She must be counted once, not twice.
+      await request(buildApp(leader))
+        .post(`/api/groups/${group.id}/events/${event.id}/rsvp`)
+        .send({ directoryId: quietPerson, response: 'yes', guests: 2 });
+
+      const ada = addAccount('Ada Quiet', { directoryId: quietPerson });
+      const res = await request(buildApp(ada))
+        .post(`/api/groups/${group.id}/events/${event.id}/rsvp`)
+        .send({ response: 'no' });
+
+      expect(res.body.rsvps).toHaveLength(1);
+      expect(res.body.summary).toMatchObject({ yes: 0, no: 1, attending: 0 });
+      expect(res.body.rsvp).toMatchObject({ response: 'no', recorded: false });
+    });
+
+    test('somebody signing in for the first time sees the answer held for them', async () => {
+      await request(buildApp(leader))
+        .post(`/api/groups/${group.id}/events/${event.id}/rsvp`)
+        .send({ directoryId: quietPerson, response: 'maybe' });
+
+      const ada = addAccount('Ada Quiet', { directoryId: quietPerson });
+      const res = await request(buildApp(ada)).get(`/api/groups/${group.id}/events/${event.id}`);
+
+      expect(res.body.event.rsvp).toMatchObject({ response: 'maybe', recorded: true });
+    });
+  });
+
   // ─── The sign-up list ───────────────────────────────────────────────────────
 
   describe('the sign-up list', () => {
@@ -465,6 +556,61 @@ describe('a group meeting', () => {
         .delete(`/api/groups/${group.id}/events/${event.id}/signups/${claimed.id}`);
       expect(mine.status).toBe(200);
       expect(mine.body.signups[0].claims).toEqual([]);
+    });
+
+    test('a leader can sign somebody up, and that person may drop it themselves', async () => {
+      const quietPerson = addPerson('Ada Quiet');
+      groups.addMember(group.id, { directoryId: quietPerson, role: 'member' });
+
+      const items = (await request(buildApp(leader)).get(`/api/groups/${group.id}/events/${event.id}`)).body.event.signups;
+      const dessert = items.find(i => i.label === 'Dessert');
+
+      const signed = await request(buildApp(leader))
+        .post(`/api/groups/${group.id}/events/${event.id}/signups`)
+        .send({ itemId: dessert.id, directoryId: quietPerson, detail: 'a pecan pie' });
+
+      expect(signed.status).toBe(200);
+      const claim = signed.body.signups.find(i => i.label === 'Dessert').claims[0];
+      expect(claim).toMatchObject({ name: 'Ada Quiet', detail: 'a pecan pie', recorded: true });
+
+      // Ada signs in later: the claim is hers, so hers is the button to drop it.
+      const ada = addAccount('Ada Quiet', { directoryId: quietPerson });
+      const seen = await request(buildApp(ada)).get(`/api/groups/${group.id}/events/${event.id}`);
+      expect(seen.body.event.signups.find(i => i.label === 'Dessert').claims[0].mine).toBe(true);
+
+      const dropped = await request(buildApp(ada))
+        .delete(`/api/groups/${group.id}/events/${event.id}/signups/${claim.id}`);
+      expect(dropped.status).toBe(200);
+      expect(dropped.body.signups.find(i => i.label === 'Dessert').claims).toEqual([]);
+    });
+
+    test('a member cannot sign anybody else up', async () => {
+      const quietPerson = addPerson('Ada Quiet');
+      groups.addMember(group.id, { directoryId: quietPerson, role: 'member' });
+      const items = (await request(buildApp(member)).get(`/api/groups/${group.id}/events/${event.id}`)).body.event.signups;
+
+      const res = await request(buildApp(member))
+        .post(`/api/groups/${group.id}/events/${event.id}/signups`)
+        .send({ itemId: items[0].id, directoryId: quietPerson });
+
+      expect(res.status).toBe(403);
+    });
+
+    test('somebody already down for a thing is not put down for it twice', async () => {
+      const quietPerson = addPerson('Ada Quiet');
+      groups.addMember(group.id, { directoryId: quietPerson, role: 'member' });
+      const items = (await request(buildApp(leader)).get(`/api/groups/${group.id}/events/${event.id}`)).body.event.signups;
+      const main = items.find(i => i.label === 'Main dish');
+
+      await request(buildApp(leader))
+        .post(`/api/groups/${group.id}/events/${event.id}/signups`)
+        .send({ itemId: main.id, directoryId: quietPerson });
+      const again = await request(buildApp(leader))
+        .post(`/api/groups/${group.id}/events/${event.id}/signups`)
+        .send({ itemId: main.id, directoryId: quietPerson });
+
+      expect(again.status).toBe(400);
+      expect(again.body.error).toMatch(/already down for that/i);
     });
 
     test('editing the wording of an item keeps the claim under it', async () => {

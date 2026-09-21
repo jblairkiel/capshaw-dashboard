@@ -484,6 +484,9 @@ function GroupDetail({ groupId, onBack }) {
                   groupId={group.id}
                   event={event}
                   canManage={perms.leads}
+                  // The roll, so a leader can write down an answer for
+                  // somebody who will never open the portal to give one.
+                  members={members}
                   onChanged={load}
                   onEdit={setWriting}
                 />

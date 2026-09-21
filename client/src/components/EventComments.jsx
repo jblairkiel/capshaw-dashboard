@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { call, timeAgo } from '../lib/groups';
 
 // ─── The thread under an event ────────────────────────────────────────────────
@@ -24,13 +24,38 @@ export default function EventComments({ subjectType, subjectId, autoLoad = true,
   const [busy,        setBusy]        = useState(false);
   const [error,       setError]       = useState('');
 
+  // ─── Reporting the count back, without chasing our own tail ────────────────
+  //
+  // A parent hands this a callback so its card can show "💬 3", and the
+  // obvious way to write that — calling it from `apply`, with `apply` listing
+  // it as a dependency — is a loop with no floor:
+  //
+  //     parent renders → a fresh arrow for onCountChange → a fresh `apply` →
+  //     a fresh `load` → the effect fires → fetch → apply → onCountChange →
+  //     the parent reloads and renders → a fresh arrow → …
+  //
+  // which is one comment thread issuing hundreds of requests a second until
+  // the rate limiter cuts it off. So the callback is held in a ref and never
+  // named as a dependency: its identity cannot restart anything.
+  const report    = useRef(onCountChange);
+  const reported  = useRef(null);
+  useEffect(() => { report.current = onCountChange; });
+
   const apply = useCallback(json => {
-    setComments(json.comments ?? []);
+    const list = json.comments ?? [];
+    setComments(list);
     if (json.canReply    !== undefined) setCanReply(json.canReply);
     if (json.canModerate !== undefined) setCanModerate(json.canModerate);
     if (json.maxLength) setMaxLength(json.maxLength);
-    onCountChange?.((json.comments ?? []).filter(c => !c.deleted).length);
-  }, [onCountChange]);
+
+    // Only a count that has actually moved is worth telling anybody about.
+    // The first load is not news: whatever listed this event already counted
+    // its comments, so telling the parent then would only make it reload the
+    // page to learn what it just said.
+    const count = list.filter(c => !c.deleted).length;
+    if (reported.current !== null && reported.current !== count) report.current?.(count);
+    reported.current = count;
+  }, []);
 
   const load = useCallback(() => {
     setLoading(true);

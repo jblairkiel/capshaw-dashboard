@@ -558,7 +558,15 @@ function initSchema(db) {
   CREATE TABLE IF NOT EXISTS group_event_rsvps (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id     INTEGER NOT NULL REFERENCES group_events(id) ON DELETE CASCADE,
-    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    -- The account that answered, when the answer came through the portal.
+    -- Empty for one a leader wrote down for somebody: plenty of the
+    -- congregation will never sign in, and they still say whether they are
+    -- coming — to their leader, at church, on the way out.
+    user_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    -- Who the answer is *about*, which is a directory person either way. The
+    -- roll is kept in directory people (see church_group_members), so this is
+    -- what ties an answer to somebody on it.
+    directory_id INTEGER REFERENCES directory(id) ON DELETE CASCADE,
     person_name  TEXT    NOT NULL DEFAULT '',
     response     TEXT    NOT NULL DEFAULT 'yes',   -- yes | no | maybe
     -- People they are bringing beyond themselves, so a head count is the
@@ -566,6 +574,10 @@ function initSchema(db) {
     guests       INTEGER NOT NULL DEFAULT 0,
     note         TEXT    NOT NULL DEFAULT '',
     responded_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    -- One answer per account. Rows a leader wrote down carry no account at
+    -- all, and SQLite counts each NULL as distinct, so they are not caught by
+    -- this — one answer per *person* is kept by server/lib/groupEvents.js,
+    -- which looks for an existing answer before writing one.
     UNIQUE(event_id, user_id)
   );
 
@@ -589,13 +601,16 @@ function initSchema(db) {
   -- there is no unique constraint across the item — only one claim per person
   -- per item, which the route enforces.
   CREATE TABLE IF NOT EXISTS group_event_signups (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    item_id    INTEGER NOT NULL REFERENCES group_event_signup_items(id) ON DELETE CASCADE,
-    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    user_name  TEXT    NOT NULL DEFAULT '',
-    detail     TEXT    NOT NULL DEFAULT '',   -- 'a pan of lasagne'
-    quantity   INTEGER NOT NULL DEFAULT 1,
-    claimed_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    item_id      INTEGER NOT NULL REFERENCES group_event_signup_items(id) ON DELETE CASCADE,
+    -- Same pair as an answer above: the account if it came through the portal,
+    -- and the directory person it is really about.
+    user_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    directory_id INTEGER REFERENCES directory(id) ON DELETE CASCADE,
+    user_name    TEXT    NOT NULL DEFAULT '',
+    detail       TEXT    NOT NULL DEFAULT '',   -- 'a pan of lasagne'
+    quantity     INTEGER NOT NULL DEFAULT 1,
+    claimed_at   TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE(item_id, user_id)
   );
 
@@ -740,6 +755,99 @@ function initSchema(db) {
   // ordinary change, which is what makes the ones that are not stand out.
   addColumn('action_log', 'acting_user_id', 'INTEGER REFERENCES users(id) ON DELETE SET NULL');
   addColumn('action_log', 'acting_user_name', "TEXT NOT NULL DEFAULT ''");
+
+  // ── An answer belongs to a person, not only to an account ───────────────────
+  //
+  // group_event_rsvps and group_event_signups first shipped with a NOT NULL
+  // user_id, which quietly said that only somebody with a sign-in can be
+  // counted as coming or as bringing the pudding. That is not this
+  // congregation: plenty of the roll will never sign in, and their leader
+  // still needs to write them down.
+  //
+  // CREATE TABLE IF NOT EXISTS leaves an existing table alone and SQLite
+  // cannot relax a NOT NULL in place, so the table is rebuilt: a new one
+  // beside it, the rows copied across, then the swap. Rebuilt only when it is
+  // still the old shape, so this is a no-op on every start after the first.
+
+  function participantColumnIsRequired(table) {
+    const column = db.prepare(`PRAGMA table_info(${table})`).all().find(c => c.name === 'user_id');
+    return !!column && column.notnull === 1;
+  }
+
+  if (participantColumnIsRequired('group_event_rsvps')) {
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE group_event_rsvps__rebuilt (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          event_id     INTEGER NOT NULL REFERENCES group_events(id) ON DELETE CASCADE,
+          user_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
+          directory_id INTEGER REFERENCES directory(id) ON DELETE CASCADE,
+          person_name  TEXT    NOT NULL DEFAULT '',
+          response     TEXT    NOT NULL DEFAULT 'yes',
+          guests       INTEGER NOT NULL DEFAULT 0,
+          note         TEXT    NOT NULL DEFAULT '',
+          responded_at TEXT    NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(event_id, user_id)
+        );
+
+        -- Everybody who has already answered is carried over with the
+        -- directory person their account belongs to filled in, so an answer
+        -- given before this and one written down after it are the same thing.
+        INSERT INTO group_event_rsvps__rebuilt
+          (id, event_id, user_id, directory_id, person_name, response, guests, note, responded_at)
+        SELECT r.id, r.event_id, r.user_id,
+               (SELECT u.directory_id FROM users u WHERE u.id = r.user_id),
+               r.person_name, r.response, r.guests, r.note, r.responded_at
+          FROM group_event_rsvps r;
+
+        DROP TABLE group_event_rsvps;
+        ALTER TABLE group_event_rsvps__rebuilt RENAME TO group_event_rsvps;
+
+        CREATE INDEX IF NOT EXISTS idx_group_event_rsvps_event  ON group_event_rsvps(event_id);
+        CREATE INDEX IF NOT EXISTS idx_group_event_rsvps_person ON group_event_rsvps(event_id, directory_id);
+      `);
+    })();
+  }
+
+  if (participantColumnIsRequired('group_event_signups')) {
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE group_event_signups__rebuilt (
+          id           INTEGER PRIMARY KEY AUTOINCREMENT,
+          item_id      INTEGER NOT NULL REFERENCES group_event_signup_items(id) ON DELETE CASCADE,
+          user_id      INTEGER REFERENCES users(id) ON DELETE CASCADE,
+          directory_id INTEGER REFERENCES directory(id) ON DELETE CASCADE,
+          user_name    TEXT    NOT NULL DEFAULT '',
+          detail       TEXT    NOT NULL DEFAULT '',
+          quantity     INTEGER NOT NULL DEFAULT 1,
+          claimed_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+          UNIQUE(item_id, user_id)
+        );
+
+        INSERT INTO group_event_signups__rebuilt
+          (id, item_id, user_id, directory_id, user_name, detail, quantity, claimed_at)
+        SELECT s.id, s.item_id, s.user_id,
+               (SELECT u.directory_id FROM users u WHERE u.id = s.user_id),
+               s.user_name, s.detail, s.quantity, s.claimed_at
+          FROM group_event_signups s;
+
+        DROP TABLE group_event_signups;
+        ALTER TABLE group_event_signups__rebuilt RENAME TO group_event_signups;
+
+        CREATE INDEX IF NOT EXISTS idx_group_signups_item   ON group_event_signups(item_id);
+        CREATE INDEX IF NOT EXISTS idx_group_signups_person ON group_event_signups(item_id, directory_id);
+      `);
+    })();
+  }
+
+  // Only now, below the rebuild, is directory_id certain to exist: on an
+  // install still carrying the first shape, an index naming it up in the
+  // declarative block above would fail on a column that is not there yet and
+  // take the whole start-up with it.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_group_event_rsvps_person ON group_event_rsvps(event_id, directory_id);
+    CREATE INDEX IF NOT EXISTS idx_group_signups_person     ON group_event_signups(item_id, directory_id);
+  `);
 
   db.exec(`CREATE INDEX IF NOT EXISTS idx_users_directory ON users(directory_id);`);
   // Sign-in looks an account up by address, and two accounts must never share
