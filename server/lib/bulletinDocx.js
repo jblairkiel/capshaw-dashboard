@@ -182,7 +182,7 @@ const heading = (text, { size = 12, plain = false, after = 40, rule = false } = 
   [P(run(text, { bold: true, italic: !plain, size, color: NAVY }),
      { before: rule ? 120 : 40, after, keepNext: true, ruleAbove: rule ? RULE : undefined })];
 
-function bullets(items, { size = 8.5 } = {}) {
+function bullets(items, { size } = {}) {
   if (!items.length) return [P(run('—', { size, color: '888888' }), { indent: 220, after: 20 })];
   return items.map(item => {
     const sub  = typeof item === 'object' && item.level;
@@ -192,7 +192,7 @@ function bullets(items, { size = 8.5 } = {}) {
 }
 
 // A running paragraph whose names are bold and whose remainders are not.
-const segments = (segs, { size = 9 } = {}) =>
+const segments = (segs, { size } = {}) =>
   [P(segs.map(s => run(s.text, { size, bold: s.bold })), { after: 40 })];
 
 function lastWeekLines(b) {
@@ -208,7 +208,7 @@ function lastWeekLines(b) {
 // The banner: the artwork anchored behind the text, then the title over it.
 // Fixed size, so floating it carries none of the risk that floating the content
 // would. rId3 is the image relationship declared in DOC_RELS below.
-function mastheadXml(b, hasImage) {
+function mastheadXml(b, hasImage, t) {
   const drawing = hasImage ? `<w:r><w:drawing>
 <wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="1" behindDoc="1" locked="0" layoutInCell="1" allowOverlap="1">
 <wp:simplePos x="0" y="0"/>
@@ -233,20 +233,20 @@ function mastheadXml(b, hasImage) {
     // The anchor rides on the title paragraph so the picture cannot be orphaned
     // onto a page of its own.
     `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:before="${tw(14)}" w:after="0"/></w:pPr>` +
-      drawing + run(b.masthead, { bold: true, size: 25, color: NAVY }) + '</w:p>',
-    para(run(b.sundayLabel, { bold: true, size: 12, color: NAVY }),
+      drawing + run(b.masthead, { bold: true, size: t.banner, color: NAVY }) + '</w:p>',
+    para(run(b.sundayLabel, { bold: true, size: t.date, color: NAVY }),
       { align: 'center', before: tw(22), after: tw(14) }),
   ].join('');
 }
 
 // ─── Page one ─────────────────────────────────────────────────────────────────
 
-function pageOne(b, hasImage) {
-  const parts = [mastheadXml(b, hasImage)];
+function pageOne(b, hasImage, t, large) {
+  const parts = [mastheadXml(b, hasImage, t)];
 
   if (b.quote) {
     const text = b.quoteRef ? `“${b.quote}” – ${b.quoteRef}` : `“${b.quote}”`;
-    parts.push(para(run(text, { bold: true, italic: true, size: 9.5, color: NAVY }),
+    parts.push(para(run(text, { bold: true, italic: true, size: t.quote, color: NAVY }),
       { align: 'center', after: 100 }));
   }
 
@@ -267,16 +267,16 @@ function pageOne(b, hasImage) {
   // late. A single row of plain cells is the one arrangement every reader
   // agrees on, so the sections are divided by their headings instead.
   const leftColumn = card([
-    ...heading('Reminders:', { size: 11, plain: true }),
-    ...bullets(b.reminders),
-    ...heading('Last Week\u2019s Data:', { size: 11, plain: true, rule: true }),
-    ...bullets(lastWeekLines(b)),
-    ...heading('Anniversaries:', { size: 11, plain: true, rule: true }),
-    ...bullets(b.anniversaries),
-    ...heading('Birthdays:', { size: 11, plain: true, rule: true }),
-    ...bullets(b.birthdays),
-    ...heading('Groups:', { size: 11, plain: true, rule: true }),
-    ...bullets(groupItems),
+    ...heading('Reminders:', { size: t.cardHead, plain: true }),
+    ...bullets(b.reminders, { size: t.small }),
+    ...heading('Last Week\u2019s Data:', { size: t.cardHead, plain: true, rule: true }),
+    ...bullets(lastWeekLines(b), { size: t.small }),
+    ...heading('Anniversaries:', { size: t.cardHead, plain: true, rule: true }),
+    ...bullets(b.anniversaries, { size: t.small }),
+    ...heading('Birthdays:', { size: t.cardHead, plain: true, rule: true }),
+    ...bullets(b.birthdays, { size: t.small }),
+    ...heading('Groups:', { size: t.cardHead, plain: true, rule: true }),
+    ...bullets(groupItems, { size: t.small }),
   ]);
 
   // ── Right column: the prayer panel ──
@@ -285,36 +285,49 @@ function pageOne(b, hasImage) {
     // An empty heading in a printed newsletter reads as a mistake rather than
     // as good news, so a block with nothing in it is left out entirely.
     if (!items.length) return;
-    prayer.push(...heading(title, { size: 13 }), ...bullets(items, { size: 10 }));
+    prayer.push(...heading(title, { size: t.section }), ...bullets(items, { size: t.body }));
   };
   add('Updates',     b.prayer.updates);
   add('Ongoing',     b.prayer.ongoing);
   add('Shut-Ins',    b.prayer.shutIns);
   add('Pregnancies', b.prayer.pregnancies);
   if (b.prayer.evangelists.length) {
-    prayer.push(...heading('Evangelists We Support', { size: 13 }),
-                ...segments(b.prayer.evangelists, { size: 10 }));
+    prayer.push(...heading('Evangelists We Support', { size: t.section }),
+                ...segments(b.prayer.evangelists, { size: t.body }));
   }
   if (!prayer.length) prayer.push(P(run('\u2014', { color: '888888' })));
 
   const rightColumn =
-    para(run('Prayer Requests', { bold: true, size: 20, color: WHITE }),
+    para(run('Prayer Requests', { bold: true, size: t.panelTitle, color: WHITE }),
       { shade: NAVY, before: 0, after: 80 }) +
     card(prayer);
 
-  // ── The body: one row, five plain cells ──
-  parts.push(table(
-    [row([
-      cell(EMPTY,       GRID.spine, { shade: NAVY, margin: 0 }),
-      cell(EMPTY,       GRID.gap1,  { margin: 0 }),
-      cell(leftColumn,  GRID.left,  { shade: CARD, bordered: true, margin: 90 }),
-      cell(EMPTY,       GRID.gap2,  { margin: 0 }),
-      cell(rightColumn, GRID.right, { bordered: true, margin: 90 }),
-    ])],
-    [GRID.spine, GRID.gap1, GRID.left, GRID.gap2, GRID.right],
-  ));
+  // ── The body ──
+  //
+  // Two columns normally. The large-print edition runs down the page instead:
+  // at 16pt the narrow column would hold about a dozen characters a line, so
+  // the columns are stacked and the newsletter is longer for it.
+  if (large) {
+    parts.push(table(
+      [row([cell(leftColumn, CONTENT, { shade: CARD, bordered: true, margin: 120 })])],
+      [CONTENT],
+    ));
+    parts.push(EMPTY);
+    parts.push(table([row([cell(rightColumn, CONTENT, { bordered: true, margin: 120 })])], [CONTENT]));
+  } else {
+    parts.push(table(
+      [row([
+        cell(EMPTY,       GRID.spine, { shade: NAVY, margin: 0 }),
+        cell(EMPTY,       GRID.gap1,  { margin: 0 }),
+        cell(leftColumn,  GRID.left,  { shade: CARD, bordered: true, margin: 90 }),
+        cell(EMPTY,       GRID.gap2,  { margin: 0 }),
+        cell(rightColumn, GRID.right, { bordered: true, margin: 90 }),
+      ])],
+      [GRID.spine, GRID.gap1, GRID.left, GRID.gap2, GRID.right],
+    ));
+  }
 
-  parts.push(para(run(b.serviceTimes, { bold: true, italic: true, size: 9.5, color: NAVY }),
+  parts.push(para(run(b.serviceTimes, { bold: true, italic: true, size: t.times, color: NAVY }),
     { align: 'center', shade: PEACH, border: NAVY, before: 120, after: 0 }));
 
   return parts.join('');
@@ -330,32 +343,32 @@ function longLabel(iso) {
   return m ? `${MONTHS[Number(m[2]) - 1]} ${Number(m[3])}, ${m[1]}` : '';
 }
 
-function rosterTable(b) {
-  const labelW = 200;
+function rosterTable(b, t, large) {
+  const labelW = large ? 240 : 200;
   const colW   = (CONTENT - labelW) / 2;
   const widths = [labelW, colW, colW];
 
   const rows = [
     row([cell(
-      para(run('Duty Roster', { bold: true, italic: true, size: 10, color: NAVY }), { align: 'center', after: 0 }),
+      para(run('Duty Roster', { bold: true, italic: true, size: t.rosterTitle, color: NAVY }), { align: 'center', after: 0 }),
       CONTENT, { shade: RULE, span: 3 },
     )]),
   ];
 
   const section = (label, part) => {
     rows.push(row([
-      cell(para(run(label, { bold: true, size: 9, color: NAVY }), { after: 0 }), labelW, { shade: CARD }),
+      cell(para(run(label, { bold: true, size: t.roster, color: NAVY }), { after: 0 }), labelW, { shade: CARD }),
       ...part.dates.map(d => cell(
-        para(run(longLabel(d), { bold: true, size: 9, color: NAVY }), { align: 'center', after: 0 }),
+        para(run(longLabel(d), { bold: true, size: t.roster, color: NAVY }), { align: 'center', after: 0 }),
         colW, { shade: CARD },
       )),
     ], { header: true }));
 
     for (const job of part.jobs) {
       rows.push(row([
-        cell(para(run(job.job, { size: 9 }), { after: 0 }), labelW),
+        cell(para(run(job.job, { size: t.roster }), { after: 0 }), labelW),
         ...job.names.map(n => cell(
-          para(run(n || '', { size: 9 }), { align: 'center', after: 0 }), colW,
+          para(run(n || '', { size: t.roster }), { align: 'center', after: 0 }), colW,
         )),
       ], { height: 13 }));
     }
@@ -367,45 +380,45 @@ function rosterTable(b) {
   return table(rows, widths, { kind: 'single', color: '000000', sz: 4 });
 }
 
-function pageTwo(b) {
-  const parts = [rosterTable(b), EMPTY];
+function pageTwo(b, t, large) {
+  const parts = [rosterTable(b, t, large), EMPTY];
 
   const leftW  = 331;
   const gap    = 8;
   const rightW = CONTENT - leftW - gap;
 
   // ── Leadership ──
-  const leadership = [...heading('Elders', { size: 12 })];
+  const leadership = [...heading('Elders', { size: t.section })];
   leadership.push(...(b.leadership.elders.length
-    ? segments(b.leadership.elders)
+    ? segments(b.leadership.elders, { size: t.lead })
     : [P(run('\u2014', { color: '888888' }))]));
 
   if (b.leadership.evangelist?.name) {
-    leadership.push(...heading('Evangelist', { size: 12 }), ...segments([
+    leadership.push(...heading('Evangelist', { size: t.section }), ...segments([
       { text: b.leadership.evangelist.name, bold: true },
       { text: ` ${b.leadership.evangelist.phone}` },
-    ]));
+    ], { size: t.lead }));
   }
 
-  leadership.push(...heading('Deacons', { size: 12 }));
+  leadership.push(...heading('Deacons', { size: t.section }));
   leadership.push(...(b.leadership.deacons.length
-    ? segments(b.leadership.deacons)
+    ? segments(b.leadership.deacons, { size: t.lead })
     : [P(run('\u2014', { color: '888888' }))]));
 
   // ── Contacts ──
-  const contacts = [...heading('Key Email Contacts', { size: 12 })];
+  const contacts = [...heading('Key Email Contacts', { size: t.section })];
   for (const c of b.contacts.groups) {
     contacts.push(
-      P(run(`${c.label}:`, { bold: true, size: 9 }), { after: 20 }),
-      P(run(c.email, { size: 9, color: LINK, underline: true }), { after: 60 }),
+      P(run(`${c.label}:`, { bold: true, size: t.lead }), { after: 20 }),
+      P(run(c.email, { size: t.lead, color: LINK, underline: true }), { after: 60 }),
     );
   }
   if (b.contacts.admins.length) {
-    contacts.push(P(run('Website Admins', { bold: true, size: 9 }), { after: 40 }));
+    contacts.push(P(run('Website Admins', { bold: true, size: t.lead }), { after: 40 }));
     for (const a of b.contacts.admins) {
       contacts.push(P([
-        run(`${a.name} - `, { size: 9 }),
-        run(a.email, { size: 9, color: LINK, underline: true }),
+        run(`${a.name} - `, { size: t.lead }),
+        run(a.email, { size: t.lead, color: LINK, underline: true }),
       ], { after: 20 }));
     }
   }
@@ -417,13 +430,13 @@ function pageTwo(b) {
   // vertical merge, and that is what lost this card its sides and bottom in
   // Word and pushed the rest of the newsletter a page late.
   const findUs = [
-    P(run('FIND US:', { bold: true, size: 11, color: NAVY }),
+    P(run('FIND US:', { bold: true, size: t.cardHead, color: NAVY }),
       { align: 'center', shade: CARD, after: 80 }),
-    ...b.footer.address.map(l => P(run(l, { size: 9, color: WHITE }), { align: 'center', after: 40 })),
-    P(run(b.footer.phone,   { size: 9, color: WHITE }), { align: 'center', after: 40 }),
-    P(run(b.footer.website, { size: 9, color: WHITE }), { align: 'center', after: 60 }),
+    ...b.footer.address.map(l => P(run(l, { size: t.lead, color: WHITE }), { align: 'center', after: 40 })),
+    P(run(b.footer.phone,   { size: t.lead, color: WHITE }), { align: 'center', after: 40 }),
+    P(run(b.footer.website, { size: t.lead, color: WHITE }), { align: 'center', after: 60 }),
     ...b.footer.social.map(([k, v]) =>
-      P(run(`${k}: ${v}`, { size: 8.5, color: WHITE }), { after: 20 })),
+      P(run(`${k}: ${v}`, { size: t.small, color: WHITE }), { after: 20 })),
   ];
 
   // Leadership spans the width on its own row, then the contacts and the
@@ -434,18 +447,24 @@ function pageTwo(b) {
   ));
   parts.push(EMPTY);
 
-  const halfGap = 10;
-  const halfL   = 300;
-  const halfR   = CONTENT - halfL - halfGap;
+  if (large) {
+    parts.push(table([row([cell(card(contacts), CONTENT, { bordered: true, margin: 120 })])], [CONTENT]));
+    parts.push(EMPTY);
+    parts.push(table([row([cell(card(findUs), CONTENT, { shade: NAVY, bordered: true, margin: 120 })])], [CONTENT]));
+  } else {
+    const halfGap = 10;
+    const halfL   = 300;
+    const halfR   = CONTENT - halfL - halfGap;
 
-  parts.push(table(
-    [row([
-      cell(card(contacts), halfL, { bordered: true, margin: 90 }),
-      cell(EMPTY, halfGap, { margin: 0 }),
-      cell(card(findUs), halfR, { shade: NAVY, bordered: true, margin: 90 }),
-    ])],
-    [halfL, halfGap, halfR],
-  ));
+    parts.push(table(
+      [row([
+        cell(card(contacts), halfL, { bordered: true, margin: 90 }),
+        cell(EMPTY, halfGap, { margin: 0 }),
+        cell(card(findUs), halfR, { shade: NAVY, bordered: true, margin: 90 }),
+      ])],
+      [halfL, halfGap, halfR],
+    ));
+  }
 
   return parts.join('');
 }
@@ -520,12 +539,20 @@ const NS = [
   'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"',
 ].join(' ');
 
-function body(b, hasImage) {
-  return pageOne(b, hasImage) + pageBreak() + pageTwo(b);
+// 'normal' or 'large'. An unknown name falls back rather than throwing: an
+// export is not worth failing over a query string.
+function typeFor(edition) {
+  return config.type[edition] || config.type.normal;
+}
+
+function body(b, hasImage, edition = 'normal') {
+  const t     = typeFor(edition);
+  const large = edition === 'large';
+  return pageOne(b, hasImage, t, large) + pageBreak() + pageTwo(b, t, large);
 }
 
 // A .docx of the composed newsletter, as a Buffer.
-async function render(bulletin) {
+async function render(bulletin, { edition = 'normal' } = {}) {
   let image = null;
   try {
     if (fs.existsSync(config.mastheadImage)) image = await fs.promises.readFile(config.mastheadImage);
@@ -536,7 +563,7 @@ async function render(bulletin) {
   const hasImage = !!image;
 
   const document = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document ${NS}><w:body>${body(bulletin, hasImage)}${SECTION}</w:body></w:document>`;
+<w:document ${NS}><w:body>${body(bulletin, hasImage, edition)}${SECTION}</w:body></w:document>`;
 
   const zip = new JSZip();
   zip.file('[Content_Types].xml', CONTENT_TYPES);
@@ -552,8 +579,9 @@ async function render(bulletin) {
   return zip.generateAsync({ type: 'nodebuffer' });
 }
 
-function filename(bulletin) {
-  return `capshaw-newsletter-${bulletin.sunday}.docx`;
+function filename(bulletin, { edition = 'normal' } = {}) {
+  const suffix = edition === 'large' ? '-large-print' : '';
+  return `capshaw-newsletter-${bulletin.sunday}${suffix}.docx`;
 }
 
 module.exports = { render, filename, esc, body };

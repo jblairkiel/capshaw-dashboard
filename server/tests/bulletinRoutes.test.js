@@ -338,6 +338,71 @@ describe('the exports', () => {
     expect(res.body.length).toBeGreaterThan(1000);
   });
 
+  test('?size=large is the same newsletter in a bigger face', async () => {
+    const fetchDocx = size => request(buildApp(ADMIN))
+      .get(`/api/bulletin/${SUNDAY}/export.docx${size}`)
+      .buffer().parse((r, cb) => {
+        const chunks = [];
+        r.on('data', c => chunks.push(c));
+        r.on('end', () => cb(null, Buffer.concat(chunks)));
+      });
+
+    const normal = await fetchDocx('');
+    const large  = await fetchDocx('?size=large');
+
+    expect(large.status).toBe(200);
+    // A separate name, so the two do not overwrite each other in a downloads
+    // folder and nobody has to open one to tell which it is.
+    expect(large.headers['content-disposition'])
+      .toContain('capshaw-newsletter-2026-05-03-large-print.docx');
+
+    const { value: html, messages } = await mammoth.convertToHtml({ buffer: large.body });
+    expect(messages).toEqual([]);
+    // Same newsletter: every section the ordinary one carries.
+    expect(html).toContain('Capshaw Church of Christ Newsletter');
+    expect(html).toContain('Gal. 6:9');
+    expect(html).toContain('Sunday attendance: 250');
+    expect(html).toContain('Barry Britnell');
+    expect(html).toContain('Duty Roster');
+    expect(html).toContain('FIND US:');
+
+    // Bigger type, stated in half-points. The ordinary edition sets the body
+    // at 10pt and the large one at 16pt.
+    const zip   = await JSZip.loadAsync(large.body);
+    const document = await zip.file('word/document.xml').async('string');
+    expect(document).toContain('<w:sz w:val="32"/>');
+    expect(document).not.toContain('<w:vMerge');
+
+    const normalZip = await JSZip.loadAsync(normal.body);
+    const normalDoc = await normalZip.file('word/document.xml').async('string');
+    expect(normalDoc).not.toContain('<w:sz w:val="32"/>');
+  });
+
+  test('the large-print .pdf is its own file', async () => {
+    const res = await request(buildApp(ADMIN))
+      .get(`/api/bulletin/${SUNDAY}/export.pdf?size=large`)
+      .buffer().parse((r, cb) => {
+        const chunks = [];
+        r.on('data', c => chunks.push(c));
+        r.on('end', () => cb(null, Buffer.concat(chunks)));
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toBe('application/pdf');
+    expect(res.headers['content-disposition'])
+      .toContain('capshaw-newsletter-2026-05-03-large-print.pdf');
+    expect(res.body.slice(0, 5).toString()).toBe('%PDF-');
+  });
+
+  test('an unknown size is the ordinary newsletter rather than an error', async () => {
+    const res = await request(buildApp(ADMIN))
+      .get(`/api/bulletin/${SUNDAY}/export.pdf?size=enormous`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers['content-disposition'])
+      .toContain('capshaw-newsletter-2026-05-03.pdf');
+  });
+
   test('an empty week still exports rather than failing', async () => {
     db.prepare('DELETE FROM bulletin_issues').run();
     db.prepare('DELETE FROM attendance').run();
@@ -361,6 +426,13 @@ describe('the exports', () => {
     const log = db.prepare("SELECT * FROM action_log WHERE area = 'bulletin' AND action = 'other' ORDER BY id DESC").all();
     expect(log[0].summary).toBe('Exported the newsletter for May 3, 2026 as PDF');
     expect(JSON.parse(log[0].details).format).toBe('PDF');
+  });
+
+  test('the history says which edition went out', async () => {
+    await request(buildApp(ADMIN)).get(`/api/bulletin/${SUNDAY}/export.pdf?size=large`);
+    const log = db.prepare("SELECT * FROM action_log WHERE area = 'bulletin' AND action = 'other' ORDER BY id DESC").all();
+    expect(log[0].summary).toBe('Exported the large-print newsletter for May 3, 2026 as PDF');
+    expect(JSON.parse(log[0].details).edition).toBe('large');
   });
 });
 

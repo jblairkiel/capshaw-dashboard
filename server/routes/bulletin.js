@@ -72,6 +72,13 @@ router.put('/:week', requireBulletin, (req, res) => {
   res.json({ success: true, bulletin: issues.compose(sunday) });
 });
 
+// Which printing of the week is wanted. Both renderers take the same two
+// editions, and anything else is the ordinary one: a mistyped ?size= should
+// hand somebody a newsletter, not an error.
+function editionOf(value) {
+  return String(value || '').toLowerCase() === 'large' ? 'large' : 'normal';
+}
+
 // The two exports differ only in which renderer they call, so they share
 // everything else — including the guarantee that they render the same compose()
 // a read would have returned.
@@ -80,10 +87,12 @@ function exportAs(renderer, contentType) {
     const sunday = weekOf(req.params.week);
     if (!sunday) return badWeek(res);
 
+    const edition = editionOf(req.query.size);
+
     try {
       const bulletin = issues.compose(sunday);
-      const buffer   = await renderer.render(bulletin);
-      const name     = renderer.filename(bulletin);
+      const buffer   = await renderer.render(bulletin, { edition });
+      const name     = renderer.filename(bulletin, { edition });
 
       const format = name.split('.').pop().toUpperCase();
       // 'other' rather than 'export': the history's vocabulary is create,
@@ -95,8 +104,8 @@ function exportAs(renderer, contentType) {
         action:   'other',
         entity:   'newsletter',
         entityId: sunday,
-        summary:  `Exported the newsletter for ${data.longDate(sunday)} as ${format}`,
-        details:  { format },
+        summary:  `Exported the ${edition === 'large' ? 'large-print ' : ''}newsletter for ${data.longDate(sunday)} as ${format}`,
+        details:  { format, edition },
       });
 
       res.setHeader('Content-Type', contentType);

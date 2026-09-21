@@ -91,6 +91,30 @@ module.exports = {
     ['Facebook',  'Capshaw church of Christ'],
   ],
 
+  // ─── Type sizes, per edition ────────────────────────────────────────────────
+  //
+  // The newsletter is set small so that a week fits on two pages, which does
+  // not suit everybody who has to read it. The large-print edition is the same
+  // newsletter at a size the RNIB would recognise — 16pt body text rather than
+  // 9 — and it is longer for it.
+  //
+  // Sizes are named by the job they do rather than scaled by a single factor:
+  // the masthead is already large and does not want multiplying, while the body
+  // text has to nearly double. Both renderers read these, so the .docx and the
+  // .pdf cannot drift apart.
+  type: {
+    normal: {
+      banner: 25, date: 12, quote:  9.5, panelTitle: 20,
+      section: 13, cardHead: 11, body: 10, small: 8.5, lead: 9,
+      times: 9.5, roster: 9, rosterTitle: 10,
+    },
+    large: {
+      banner: 26, date: 17, quote: 14, panelTitle: 22,
+      section: 19, cardHead: 18, body: 16, small: 15, lead: 16,
+      times: 15, roster: 16, rosterTitle: 17,
+    },
+  },
+
   // ─── The palette the printed newsletter uses ────────────────────────────────
   // Sampled from it, and shared by both renderers so the two files match.
   colors: {

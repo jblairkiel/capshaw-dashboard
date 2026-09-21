@@ -148,6 +148,25 @@ describe('the weekly newsletter screen', () => {
     expect(screen.getByRole('button', { name: 'Export Word' })).toBeInTheDocument();
   });
 
+  test('large print asks the server for the bigger edition', async () => {
+    mockApi();
+    // jsdom refuses an assignment to window.location.href, so the export is
+    // watched where the component writes it.
+    const location = { href: '' };
+    delete window.location;
+    window.location = location;
+
+    render(<WeeklyBulletinView canWrite={false} />);
+    await screen.findByText('May 3, 2026');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Export PDF' }));
+    await waitFor(() => expect(location.href).toMatch(/\/export\.pdf$/));
+
+    fireEvent.click(screen.getByLabelText('Large print'));
+    fireEvent.click(screen.getByRole('button', { name: 'Export Word' }));
+    await waitFor(() => expect(location.href).toMatch(/\/export\.docx\?size=large$/));
+  });
+
   test('an error from the server is shown rather than swallowed', async () => {
     vi.stubGlobal('fetch', vi.fn(() =>
       Promise.resolve({ ok: false, json: () => Promise.resolve({ success: false, error: 'Nope' }) })

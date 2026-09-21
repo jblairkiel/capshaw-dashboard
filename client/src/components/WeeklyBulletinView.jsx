@@ -121,6 +121,7 @@ export default function WeeklyBulletinView({ canWrite = false }) {
   const [error,    setError]    = useState('');
   const [busy,     setBusy]     = useState(false);
   const [saved,    setSaved]    = useState(false);
+  const [largePrint, setLargePrint] = useState(false);
 
   // The composed week, and the typed half pulled back out of it so the form has
   // something to bind to. Reading a week never writes one, so moving around the
@@ -182,7 +183,8 @@ export default function WeeklyBulletinView({ canWrite = false }) {
     setBusy(true); setError('');
     try {
       if (canWrite && !saved) await save();
-      window.location.href = `${API}/${sunday}/export.${format}`;
+      const size = largePrint ? '?size=large' : '';
+      window.location.href = `${API}/${sunday}/export.${format}${size}`;
     } catch (e) { setError(e.message); }
     finally { setBusy(false); }
   }
@@ -284,6 +286,18 @@ export default function WeeklyBulletinView({ canWrite = false }) {
             disabled={busy}
             className="px-3 py-1.5 text-sm rounded border border-church-navy text-church-navy hover:bg-church-cream disabled:opacity-50"
           >Export PDF</button>
+          {/* The same newsletter set in a bigger face, for anybody who cannot
+              read the ordinary one. It runs to more pages, which is the price
+              of the type rather than a different newsletter. */}
+          <label className="flex items-center gap-2 px-1 text-sm text-gray-600">
+            <input
+              type="checkbox"
+              checked={largePrint}
+              onChange={e => setLargePrint(e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            Large print
+          </label>
         </div>
       </div>
 

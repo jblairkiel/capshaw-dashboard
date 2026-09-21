@@ -196,10 +196,68 @@ function panel(doc, { x, y, width, blocks, fill = '#FFFFFF', border = navy, padd
   return y + height;
 }
 
+// A panel that may not fit on one page.
+//
+// The large-print edition sets the body at 16pt, so a prayer list runs past the
+// foot of the page and the box holding it has to continue on the next. pdfkit
+// draws rather than flows, and a box's fill has to go down before the text on
+// top of it, so the blocks are measured first and dealt onto pages; only then
+// is each page's box drawn and filled.
+function flowPanel(doc, { x, y, width, blocks, fill = '#FFFFFF', border = navy, padding = 8 }) {
+  const inner  = width - padding * 2;
+  const bottom = PAGE.height - M;
+
+  // Deal the blocks onto pages, keeping each block whole.
+  const pages = [];
+  let current = { blocks: [], height: 0 };
+  let room    = bottom - y - padding * 2;
+
+  // A panel with no room left for even its first block belongs at the top of
+  // the next page, not hanging off the bottom of this one.
+  let fresh = blocks.length > 0 && measure([blocks[0]], inner) > room;
+  if (fresh) room = bottom - M - padding * 2;
+
+  for (const block of blocks) {
+    const h = measure([block], inner);
+    if (current.blocks.length && current.height + h > room) {
+      pages.push(current);
+      current = { blocks: [], height: 0 };
+      // Every page after the first starts at the top margin.
+      room = bottom - M - padding * 2;
+    }
+    current.blocks.push(block);
+    current.height += h;
+  }
+  pages.push(current);
+
+  let top = y;
+  pages.forEach((page, i) => {
+    if (i || fresh) { doc.addPage(); top = M; }
+    const height = page.height + padding * 2;
+    doc.rect(x, top, width, height).fill(fill);
+    doc.rect(x, top, width, height).lineWidth(0.8).stroke(border);
+    drawBlocks(doc, page.blocks, x + padding, top + padding, inner);
+    top += height;
+  });
+
+  return top;
+}
+
 // A full-width band of colour with one centred line on it.
-function band(doc, { x, y, width, text, fill, color, size, italic = true, border = null, padding = 6, align = 'center' }) {
+// Where something of a known height can start without running off the page.
+// Only the large-print editions run long enough to need it: at 16pt a heading
+// can land in the last few points of a page, and pdfkit would print it there
+// rather than move it.
+function roomFor(doc, y, height) {
+  if (y + height <= PAGE.height - M) return y;
+  doc.addPage();
+  return M;
+}
+
+function band(doc, { x, y, width, text, fill, color, size, italic = true, border = null, padding = 6, align = 'center', flow = false }) {
   doc.font(italic ? FONT_BI : FONT_B).fontSize(size);
   const height = doc.heightOfString(text, { width: width - padding * 2, align }) + padding * 2;
+  if (flow) y = roomFor(doc, y, height);
 
   doc.rect(x, y, width, height).fill(fill);
   if (border) doc.rect(x, y, width, height).lineWidth(0.8).stroke(border);
@@ -211,7 +269,7 @@ function band(doc, { x, y, width, text, fill, color, size, italic = true, border
 
 // ─── Page one ─────────────────────────────────────────────────────────────────
 
-function masthead(doc, b) {
+function masthead(doc, b, t) {
   const y = 6, height = 101;
 
   // The banner artwork, cropped to the box by a clipped draw so an image of a
@@ -232,22 +290,22 @@ function masthead(doc, b) {
 
   doc.rect(M, y, W, height).lineWidth(0.8).stroke(navy);
 
-  doc.font(FONT_B).fontSize(29).fillColor(navy);
+  doc.font(FONT_B).fontSize(t.banner * 1.16).fillColor(navy);
   doc.text(b.masthead, M + 10, y + 16, { width: W - 20, align: 'center' });
 
-  doc.font(FONT_B).fontSize(14).fillColor(navy);
+  doc.font(FONT_B).fontSize(t.date).fillColor(navy);
   doc.text(b.sundayLabel, M + 10, y + 70, { width: W - 20, align: 'center' });
 
   return y + height;
 }
 
-function pageOne(doc, b) {
-  let y = masthead(doc, b) + 3;
+function pageOne(doc, b, t, large) {
+  let y = masthead(doc, b, t) + 3;
 
   // ── The verse, across the full width ──
   if (b.quote) {
     const text = b.quoteRef ? `“${b.quote}” – ${b.quoteRef}` : `“${b.quote}”`;
-    doc.font(FONT_BI).fontSize(9.5).fillColor(navy);
+    doc.font(FONT_BI).fontSize(t.quote).fillColor(navy);
     doc.text(text, M, y, { width: W, align: 'center' });
     y = doc.y + 6;
   }
@@ -266,35 +324,26 @@ function pageOne(doc, b) {
     if (g.note) groupItems.push({ text: g.note, level: 1 });
   }
 
-  const ly = panel(doc, {
-    x: LEFT_X, y: bodyTop, width: LEFT_W, fill: card,
-    blocks: [
-      B.heading('Reminders:', { size: 11, plain: true }),
-      B.bullets(b.reminders.length ? b.reminders : ['—'], { size: 8.5 }),
-      B.heading('Last Week\u2019s Data:', { size: 11, plain: true, rule: true }),
-      B.bullets(lastWeekLines(b), { size: 8.5 }),
-      B.heading('Anniversaries:', { size: 11, plain: true, rule: true }),
-      B.bullets(b.anniversaries.length ? b.anniversaries : ['—'], { size: 8.5 }),
-      B.heading('Birthdays:', { size: 11, plain: true, rule: true }),
-      B.bullets(b.birthdays.length ? b.birthdays : ['—'], { size: 8.5 }),
-      B.heading('Groups:', { size: 11, plain: true, rule: true }),
-      B.bullets(groupItems.length ? groupItems : ['—'], { size: 8.5 }),
-    ],
-  });
+  const leftBlocks = [
+      B.heading('Reminders:', { size: t.cardHead, plain: true }),
+      B.bullets(b.reminders.length ? b.reminders : ['—'], { size: t.small }),
+      B.heading('Last Week\u2019s Data:', { size: t.cardHead, plain: true, rule: true }),
+      B.bullets(lastWeekLines(b), { size: t.small }),
+      B.heading('Anniversaries:', { size: t.cardHead, plain: true, rule: true }),
+      B.bullets(b.anniversaries.length ? b.anniversaries : ['—'], { size: t.small }),
+      B.heading('Birthdays:', { size: t.cardHead, plain: true, rule: true }),
+      B.bullets(b.birthdays.length ? b.birthdays : ['—'], { size: t.small }),
+      B.heading('Groups:', { size: t.cardHead, plain: true, rule: true }),
+      B.bullets(groupItems.length ? groupItems : ['—'], { size: t.small }),
+  ];
 
-  // ── Right column: the prayer panel ──
-  let ry = band(doc, {
-    x: RIGHT_X, y: bodyTop, width: RIGHT_W,
-    text: 'Prayer Requests', fill: navy, color: '#FFFFFF',
-    size: 21, italic: false, align: 'left', padding: 9, border: navy,
-  }) + 5;
-
+  // ── The prayer panel ──
   const prayerBlocks = [];
   const add = (title, items) => {
     // An empty heading in a printed newsletter reads as a mistake rather than
     // as good news, so a block with nothing in it is left out entirely.
     if (!items.length) return;
-    prayerBlocks.push(B.heading(title, { size: 13 }), B.bullets(items, { size: 10, spacing: 3 }), B.gap(3));
+    prayerBlocks.push(B.heading(title, { size: t.section }), B.bullets(items, { size: t.body, spacing: 3 }), B.gap(3));
   };
   add('Updates',     b.prayer.updates);
   add('Ongoing',     b.prayer.ongoing);
@@ -302,11 +351,42 @@ function pageOne(doc, b) {
   add('Pregnancies', b.prayer.pregnancies);
   if (b.prayer.evangelists.length) {
     prayerBlocks.push(
-      B.heading('Evangelists We Support', { size: 13 }),
-      B.para(b.prayer.evangelists, { size: 10 }),
+      B.heading('Evangelists We Support', { size: t.section }),
+      B.para(b.prayer.evangelists, { size: t.body }),
     );
   }
-  if (!prayerBlocks.length) prayerBlocks.push(B.lines(['—'], { color: '#888888' }));
+  if (!prayerBlocks.length) prayerBlocks.push(B.lines(['\u2014'], { color: '#888888' }));
+
+  if (large) {
+    // One column down the page. At 16pt the narrow column would hold about a
+    // dozen characters a line, so the two are stacked and the panels flow onto
+    // as many pages as they need.
+    let ly = flowPanel(doc, { x: M, y: bodyTop, width: W, blocks: leftBlocks, fill: card });
+
+    ly = band(doc, {
+      x: M, y: ly + 10, width: W, flow: true,
+      text: 'Prayer Requests', fill: navy, color: '#FFFFFF',
+      size: t.panelTitle, italic: false, align: 'left', padding: 9, border: navy,
+    }) + 5;
+
+    ly = flowPanel(doc, { x: M, y: ly, width: W, blocks: prayerBlocks });
+
+    // Service times follow the prayer list rather than sitting at the foot of
+    // the page: there is no single foot to pin them to once page one runs on.
+    band(doc, {
+      x: M, y: ly + 10, width: W, flow: true,
+      text: b.serviceTimes, fill: peach, color: navy, size: t.times, border: navy,
+    });
+    return;
+  }
+
+  const ly = panel(doc, { x: LEFT_X, y: bodyTop, width: LEFT_W, blocks: leftBlocks, fill: card });
+
+  let ry = band(doc, {
+    x: RIGHT_X, y: bodyTop, width: RIGHT_W,
+    text: 'Prayer Requests', fill: navy, color: '#FFFFFF',
+    size: t.panelTitle, italic: false, align: 'left', padding: 9, border: navy,
+  }) + 5;
 
   ry = panel(doc, { x: RIGHT_X, y: ry, width: RIGHT_W, blocks: prayerBlocks });
 
@@ -318,7 +398,7 @@ function pageOne(doc, b) {
   // ── Service times, along the foot ──
   band(doc, {
     x: M, y: PAGE.height - 36, width: W,
-    text: b.serviceTimes, fill: peach, color: navy, size: 9.5, border: navy,
+    text: b.serviceTimes, fill: peach, color: navy, size: t.times, border: navy,
   });
 }
 
@@ -340,8 +420,8 @@ function lastWeekLines(b) {
 // Drawn in two passes. A row's fill is opaque, so painting each row's rules as
 // it went meant the next row's fill covered half of them and the grid came out
 // broken; every fill is laid down first and the whole grid ruled over the top.
-function roster(doc, b, top) {
-  const labelW = 200;
+function roster(doc, b, top, t, large) {
+  const labelW = large ? 240 : 200;
   const colW   = (W - labelW) / 2;
   const cols   = [M, M + labelW, M + labelW + colW];
   const widths = [labelW, colW, colW];
@@ -351,7 +431,7 @@ function roster(doc, b, top) {
   let y = top;
 
   function push(cells, opts = {}) {
-    const { fill = '#FFFFFF', bold = false, size = 9, italic = false,
+    const { fill = '#FFFFFF', bold = false, size = t.roster, italic = false,
             align = ['left', 'center', 'center'], span = false } = opts;
 
     doc.font(bold ? (italic ? FONT_BI : FONT_B) : FONT).fontSize(size);
@@ -366,7 +446,7 @@ function roster(doc, b, top) {
     y += height;
   }
 
-  push(['Duty Roster'], { fill: rule, bold: true, italic: true, size: 10, span: true });
+  push(['Duty Roster'], { fill: rule, bold: true, italic: true, size: t.rosterTitle, span: true });
 
   const section = (label, part) => {
     push([label, ...part.dates.map(longLabel)], { fill: card, bold: true });
@@ -415,32 +495,32 @@ function longLabel(iso) {
   return m ? `${MONTHS[Number(m[2]) - 1]} ${Number(m[3])}, ${m[1]}` : '';
 }
 
-function pageTwo(doc, b) {
-  let y = roster(doc, b, 18) + 8;
+function pageTwo(doc, b, t, large) {
+  let y = roster(doc, b, 18, t, large) + 8;
 
   // ── Leadership, across the width ──
   //
   // Full width rather than beside the contacts, matching the .docx: putting a
   // tall panel next to a stack of short ones needs a vertical merge there, and
   // Word renders that badly enough to lose the card's borders.
-  const leadership = [B.heading('Elders', { size: 12 })];
+  const leadership = [B.heading('Elders', { size: t.section })];
   leadership.push(b.leadership.elders.length
-    ? B.para(b.leadership.elders, { size: 9 })
+    ? B.para(b.leadership.elders, { size: t.lead })
     : B.lines(['\u2014'], { color: '#888888' }));
 
   if (b.leadership.evangelist?.name) {
-    leadership.push(B.gap(4), B.heading('Evangelist', { size: 12 }), B.para([
+    leadership.push(B.gap(4), B.heading('Evangelist', { size: t.section }), B.para([
       { text: b.leadership.evangelist.name, bold: true },
       { text: ` ${b.leadership.evangelist.phone}` },
-    ], { size: 9 }));
+    ], { size: t.lead }));
   }
 
-  leadership.push(B.gap(4), B.heading('Deacons', { size: 12 }));
+  leadership.push(B.gap(4), B.heading('Deacons', { size: t.section }));
   leadership.push(b.leadership.deacons.length
-    ? B.para(b.leadership.deacons, { size: 9 })
+    ? B.para(b.leadership.deacons, { size: t.lead })
     : B.lines(['\u2014'], { color: '#888888' }));
 
-  y = panel(doc, { x: M, y, width: W, blocks: leadership, shadow: false }) + 10;
+  y = flowPanel(doc, { x: M, y, width: W, blocks: leadership }) + 10;
 
   // ── Contacts beside the address ──
   const gap    = 10;
@@ -448,19 +528,36 @@ function pageTwo(doc, b) {
   const halfR  = W - halfL - gap;
   const rightX = M + halfL + gap;
 
-  const contacts = [B.heading('Key Email Contacts', { size: 12 })];
+  const contacts = [B.heading('Key Email Contacts', { size: t.section })];
   for (const c of b.contacts.groups) {
     contacts.push(
-      B.lines([`${c.label}:`], { size: 9, bold: true }),
-      B.lines([c.email], { size: 9, color: link }),
+      B.lines([`${c.label}:`], { size: t.lead, bold: true }),
+      B.lines([c.email], { size: t.lead, color: link }),
       B.gap(3),
     );
   }
   if (b.contacts.admins.length) {
-    contacts.push(B.lines(['Website Admins'], { size: 9, bold: true }), B.gap(2));
+    contacts.push(B.lines(['Website Admins'], { size: t.lead, bold: true }), B.gap(2));
     for (const a of b.contacts.admins) {
-      contacts.push(B.para([{ text: `${a.name} - ` }, { text: a.email }], { size: 9 }));
+      contacts.push(B.para([{ text: `${a.name} - ` }, { text: a.email }], { size: t.lead }));
     }
+  }
+
+  const findUs = [
+    B.lines(b.footer.address, { size: t.lead, color: '#FFFFFF', spacing: 4 }),
+    B.gap(3),
+    B.lines([b.footer.phone, b.footer.website], { size: t.lead, color: '#FFFFFF', spacing: 4 }),
+    B.gap(3),
+    B.lines(b.footer.social.map(([k, v]) => `${k}: ${v}`), { size: t.small, color: '#FFFFFF', spacing: 3 }),
+  ];
+
+  if (large) {
+    let ly = flowPanel(doc, { x: M, y, width: W, blocks: contacts });
+    ly = band(doc, {
+      x: M, y: ly + 10, width: W, flow: true,
+      text: 'FIND US:', fill: card, color: navy, size: t.cardHead, italic: false, border: navy,
+    });
+    return flowPanel(doc, { x: M, y: ly, width: W, blocks: findUs, fill: navy, border: navy });
   }
 
   const contactsBottom = panel(doc, { x: M, y, width: halfL, blocks: contacts, shadow: false });
@@ -468,16 +565,9 @@ function pageTwo(doc, b) {
   // The grey heading sits inside the navy card, as it does in the .docx.
   const findUsTop = band(doc, {
     x: rightX, y, width: halfR,
-    text: 'FIND US:', fill: card, color: navy, size: 11, italic: false, border: navy,
+    text: 'FIND US:', fill: card, color: navy, size: t.cardHead, italic: false, border: navy,
   });
 
-  const findUs = [
-    B.lines(b.footer.address, { size: 9, color: '#FFFFFF', spacing: 4 }),
-    B.gap(3),
-    B.lines([b.footer.phone, b.footer.website], { size: 9, color: '#FFFFFF', spacing: 4 }),
-    B.gap(3),
-    B.lines(b.footer.social.map(([k, v]) => `${k}: ${v}`), { size: 8.5, color: '#FFFFFF', spacing: 3 }),
-  ];
   const findUsBottom = panel(doc, {
     x: rightX, y: findUsTop, width: halfR, blocks: findUs,
     fill: navy, border: navy, shadow: false,
@@ -488,13 +578,21 @@ function pageTwo(doc, b) {
 
 // ─── The document ─────────────────────────────────────────────────────────────
 
-function draw(doc, b) {
-  pageOne(doc, b);
-  doc.addPage();
-  pageTwo(doc, b);
+// 'normal' or 'large'. An unknown name falls back rather than throwing: an
+// export is not worth failing over a query string.
+function typeFor(edition) {
+  return config.type[edition] || config.type.normal;
 }
 
-function render(bulletin) {
+function draw(doc, b, edition) {
+  const t     = typeFor(edition);
+  const large = edition === 'large';
+  pageOne(doc, b, t, large);
+  doc.addPage();
+  pageTwo(doc, b, t, large);
+}
+
+function render(bulletin, { edition = 'normal' } = {}) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'LETTER', margin: M, autoFirstPage: true });
     const chunks = [];
@@ -503,7 +601,7 @@ function render(bulletin) {
     doc.on('error', reject);
 
     try {
-      draw(doc, bulletin);
+      draw(doc, bulletin, edition);
     } catch (err) {
       return reject(err);
     }
@@ -512,8 +610,9 @@ function render(bulletin) {
   });
 }
 
-function filename(bulletin) {
-  return `capshaw-newsletter-${bulletin.sunday}.pdf`;
+function filename(bulletin, { edition = 'normal' } = {}) {
+  const suffix = edition === 'large' ? '-large-print' : '';
+  return `capshaw-newsletter-${bulletin.sunday}${suffix}.pdf`;
 }
 
 module.exports = { render, filename };

@@ -175,7 +175,7 @@ implicitly, and nobody else holds one until an admin grants it.
 | `calendar` | Church Calendar | Add and edit dated events |
 | `directory` | Member Directory | Edit anybody's directory entry, and add people who are not in it yet |
 | `mail-groups` | Email Groups | Decide who is in each distribution group, and send to them |
-| `bulletin` | Weekly Newsletter | Write each week's prayer lists and offering, and export the newsletter as Word or PDF |
+| `bulletin` | Weekly Newsletter | Write each week's prayer lists and offering, and export the newsletter as Word or PDF, in ordinary or large print |
 
 Everything else stays read-only for everyone signed in: the pages are all
 visible to the whole church family, and only the area holder sees the buttons.
@@ -823,6 +823,25 @@ Exporting saves first, so what is on the screen is what is in the file.
 Reading a week is open to anybody signed in. Writing and exporting need the
 `bulletin` area: an export goes out to the congregation under the church's
 name, rather than being another view of records the portal already shows.
+
+### Large print
+
+**Large print** on the compose screen exports the same newsletter in a bigger
+face, for anybody who cannot read the ordinary one. It adds `?size=large` to
+either export, and the file is named `…-large-print.docx` / `.pdf` so the two
+editions do not overwrite each other in a downloads folder.
+
+Both editions are the same composed object and print the same sections; only
+the type scale differs, and the scales are named by the job each size does
+rather than multiplied by a single factor — the masthead is already large and
+does not want doubling, while the body text does. They are `type.normal` and
+`type.large` in `server/lib/bulletinConfig.js`, read by both renderers so the
+`.docx` and the `.pdf` cannot drift apart.
+
+The large edition runs to more pages, and it sets everything in one column
+down the page rather than two: at 16pt the newsletter's narrow column holds
+about a dozen characters a line. That is a consequence of the type, not a
+different newsletter.
 
 ### Changing the parts that are not records
 
