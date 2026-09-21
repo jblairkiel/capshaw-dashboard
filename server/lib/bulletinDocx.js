@@ -72,6 +72,7 @@ function run(text, { bold, italic, size = 10, color, underline } = {}) {
 
 function para(runs, {
   align, shade, before = 0, after = 40, bullet, indent, hanging, rightIndent, keepNext, border,
+  ruleAbove,
 } = {}) {
   const props = [
     bullet !== undefined ? `<w:numPr><w:ilvl w:val="${bullet}"/><w:numId w:val="1"/></w:numPr>` : '',
@@ -82,7 +83,8 @@ function para(runs, {
     align  ? `<w:jc w:val="${align}"/>` : '',
     shade  ? `<w:shd w:val="clear" w:color="auto" w:fill="${shade}"/>` : '',
     border ? `<w:pBdr>${['top', 'left', 'bottom', 'right']
-      .map(s => `<w:${s} w:val="single" w:sz="6" w:space="6" w:color="${border}"/>`).join('')}</w:pBdr>` : '',
+      .map(s => `<w:${s} w:val="single" w:sz="6" w:space="6" w:color="${border}"/>`).join('')}</w:pBdr>`
+      : ruleAbove ? `<w:pBdr><w:top w:val="single" w:sz="4" w:space="4" w:color="${ruleAbove}"/></w:pBdr>` : '',
     keepNext ? '<w:keepNext/>' : '',
     `<w:spacing w:before="${before}" w:after="${after}"/>`,
   ].join('');
@@ -114,7 +116,10 @@ const renderParas = (items, style = {}) =>
 // sides. A cell border is drawn by everything.
 const card = items => renderParas([...items, P('', { after: 0 })]);
 
-const pageBreak = () => '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
+const pageBreak = () =>
+  '<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/>' +
+  '<w:rPr><w:sz w:val="2"/></w:rPr></w:pPr>' +
+  '<w:r><w:rPr><w:sz w:val="2"/></w:rPr><w:br w:type="page"/></w:r></w:p>';
 
 // ─── Tables ───────────────────────────────────────────────────────────────────
 
@@ -132,11 +137,15 @@ function cellBorder(color = NAVY, sz = 8) {
     .map(side => `<w:${side} w:val="single" w:sz="${sz}" w:space="0" w:color="${color}"/>`).join('')}</w:tcBorders>`;
 }
 
-function cell(xml, widthPt, { shade, span, valign, margin = 60, bordered, vMerge } = {}) {
+// Note there is deliberately no vertical merge here. Spanning a cell down
+// several rows is the obvious way to put one tall panel beside a stack of
+// short ones, and Word renders it differently enough from everything else to
+// drop the merged cell's sides and bottom and to push the following page's
+// content a page late. Every table in this file is a single row.
+function cell(xml, widthPt, { shade, span, valign, margin = 60, bordered } = {}) {
   const props = [
     `<w:tcW w:w="${tw(widthPt)}" w:type="dxa"/>`,
     span ? `<w:gridSpan w:val="${span}"/>` : '',
-    vMerge ? `<w:vMerge${vMerge === 'restart' ? ' w:val="restart"' : ''}/>` : '',
     bordered ? cellBorder() : '',
     shade ? `<w:shd w:val="clear" w:color="auto" w:fill="${shade}"/>` : '',
     valign ? `<w:vAlign w:val="${valign}"/>` : '',
@@ -169,8 +178,9 @@ const row = (cells, { header = false, height = 0 } = {}) =>
 
 // These three return paragraph descriptors rather than XML, because a card
 // decides its own fill and border and applies them to every paragraph it holds.
-const heading = (text, { size = 12, plain = false, after = 40 } = {}) =>
-  [P(run(text, { bold: true, italic: !plain, size, color: NAVY }), { before: 40, after, keepNext: true })];
+const heading = (text, { size = 12, plain = false, after = 40, rule = false } = {}) =>
+  [P(run(text, { bold: true, italic: !plain, size, color: NAVY }),
+     { before: rule ? 120 : 40, after, keepNext: true, ruleAbove: rule ? RULE : undefined })];
 
 function bullets(items, { size = 8.5 } = {}) {
   if (!items.length) return [P(run('—', { size, color: '888888' }), { indent: 220, after: 20 })];
@@ -240,31 +250,34 @@ function pageOne(b, hasImage) {
       { align: 'center', after: 100 }));
   }
 
-  // ── Left column: three grey cards ──
+  // ── Left column ──
   const groupItems = [];
   for (const g of b.groups) {
     groupItems.push(g.leader ? `${g.name} \u2013 Leader: ${g.leader}` : g.name);
     if (g.note) groupItems.push({ text: g.note, level: 1 });
   }
 
-  const leftCards = [
-    card([
-      ...heading('Reminders:', { size: 11, plain: true }),
-      ...bullets(b.reminders),
-    ]),
-    card([
-      ...heading('Last Week\u2019s Data:', { size: 11, plain: true }),
-      ...bullets(lastWeekLines(b)),
-      ...heading('Anniversaries:', { size: 11, plain: true }),
-      ...bullets(b.anniversaries),
-      ...heading('Birthdays:', { size: 11, plain: true }),
-      ...bullets(b.birthdays),
-    ]),
-    card([
-      ...heading('Groups:', { size: 11, plain: true }),
-      ...bullets(groupItems),
-    ]),
-  ];
+  // One grey card holding all three sections, rather than three boxes.
+  //
+  // Three separate boxes beside one tall prayer panel needs either a table
+  // nested in a cell or a vertical merge, and both are unsafe: a nested table
+  // makes Word re-fit the outer grid and throws the columns across the page,
+  // and a vertical merge renders differently enough in Word to lose a cell's
+  // side and bottom borders and to push the rest of the newsletter a page
+  // late. A single row of plain cells is the one arrangement every reader
+  // agrees on, so the sections are divided by their headings instead.
+  const leftColumn = card([
+    ...heading('Reminders:', { size: 11, plain: true }),
+    ...bullets(b.reminders),
+    ...heading('Last Week\u2019s Data:', { size: 11, plain: true, rule: true }),
+    ...bullets(lastWeekLines(b)),
+    ...heading('Anniversaries:', { size: 11, plain: true, rule: true }),
+    ...bullets(b.anniversaries),
+    ...heading('Birthdays:', { size: 11, plain: true, rule: true }),
+    ...bullets(b.birthdays),
+    ...heading('Groups:', { size: 11, plain: true, rule: true }),
+    ...bullets(groupItems),
+  ]);
 
   // ── Right column: the prayer panel ──
   const prayer = [];
@@ -284,53 +297,22 @@ function pageOne(b, hasImage) {
   }
   if (!prayer.length) prayer.push(P(run('\u2014', { color: '888888' })));
 
-  // The heading band sits inside the panel rather than above it, because the
-  // right column is one merged cell: a second cell for it would have to share a
-  // row boundary with the left column, and the two columns do not divide at the
-  // same heights.
   const rightColumn =
     para(run('Prayer Requests', { bold: true, size: 20, color: WHITE }),
       { shade: NAVY, before: 0, after: 80 }) +
     card(prayer);
 
-  // ── The body ──
-  //
-  // One table, no nesting. Each grey card is a cell of its own so that its box
-  // is a cell border, which every reader draws; the spine and the prayer panel
-  // are merged down the whole height beside them. Nesting a table inside a cell
-  // was the alternative and it makes Word re-fit the outer grid, which threw
-  // the columns across the page.
-  const GAP_ROW = 6;
-  const widths  = [GRID.spine, GRID.gap1, GRID.left, GRID.gap2, GRID.right];
-
-  const bodyRows = [];
-  leftCards.forEach((xml, i) => {
-    const first = i === 0;
-    const merge = first ? 'restart' : 'continue';
-
-    if (!first) {
-      // A blank row between two cards, so their boxes do not touch.
-      bodyRows.push(row([
-        cell(EMPTY, GRID.spine, { shade: NAVY, margin: 0, vMerge: 'continue' }),
-        cell(EMPTY, GRID.gap1,  { margin: 0, vMerge: 'continue' }),
-        cell(EMPTY, GRID.left,  { margin: 0 }),
-        cell(EMPTY, GRID.gap2,  { margin: 0, vMerge: 'continue' }),
-        cell(EMPTY, GRID.right, { margin: 0, vMerge: 'continue' }),
-      ], { height: GAP_ROW }));
-    }
-
-    bodyRows.push(row([
-      cell(EMPTY, GRID.spine, { shade: NAVY, margin: 0, vMerge: merge }),
-      cell(EMPTY, GRID.gap1,  { margin: 0, vMerge: merge }),
-      cell(xml,   GRID.left,  { shade: CARD, bordered: true, margin: 90 }),
-      cell(EMPTY, GRID.gap2,  { margin: 0, vMerge: merge }),
-      first
-        ? cell(rightColumn, GRID.right, { bordered: true, margin: 90, vMerge: 'restart' })
-        : cell(EMPTY, GRID.right, { margin: 0, vMerge: 'continue' }),
-    ]));
-  });
-
-  parts.push(table(bodyRows, widths));
+  // ── The body: one row, five plain cells ──
+  parts.push(table(
+    [row([
+      cell(EMPTY,       GRID.spine, { shade: NAVY, margin: 0 }),
+      cell(EMPTY,       GRID.gap1,  { margin: 0 }),
+      cell(leftColumn,  GRID.left,  { shade: CARD, bordered: true, margin: 90 }),
+      cell(EMPTY,       GRID.gap2,  { margin: 0 }),
+      cell(rightColumn, GRID.right, { bordered: true, margin: 90 }),
+    ])],
+    [GRID.spine, GRID.gap1, GRID.left, GRID.gap2, GRID.right],
+  ));
 
   parts.push(para(run(b.serviceTimes, { bold: true, italic: true, size: 9.5, color: NAVY }),
     { align: 'center', shade: PEACH, border: NAVY, before: 120, after: 0 }));
@@ -429,7 +411,14 @@ function pageTwo(b) {
   }
 
   // ── Find us ──
-  const findUsLines = [
+  //
+  // The grey heading is a shaded paragraph inside the navy cell rather than a
+  // cell of its own: two stacked cells beside the leadership panel would need a
+  // vertical merge, and that is what lost this card its sides and bottom in
+  // Word and pushed the rest of the newsletter a page late.
+  const findUs = [
+    P(run('FIND US:', { bold: true, size: 11, color: NAVY }),
+      { align: 'center', shade: CARD, after: 80 }),
     ...b.footer.address.map(l => P(run(l, { size: 9, color: WHITE }), { align: 'center', after: 40 })),
     P(run(b.footer.phone,   { size: 9, color: WHITE }), { align: 'center', after: 40 }),
     P(run(b.footer.website, { size: 9, color: WHITE }), { align: 'center', after: 60 }),
@@ -437,25 +426,26 @@ function pageTwo(b) {
       P(run(`${k}: ${v}`, { size: 8.5, color: WHITE }), { after: 20 })),
   ];
 
-  // The same shape as page one's body: every box is a cell, and the leadership
-  // panel is merged down beside the three stacked on the right.
-  const rightStack = [
-    { xml: card(contacts),      shade: WHITE, bordered: true },
-    { xml: EMPTY,               spacer: true },
-    { xml: para(run('FIND US:', { bold: true, size: 11, color: NAVY }), { align: 'center', after: 0 }),
-      shade: CARD, bordered: true },
-    { xml: card(findUsLines),   shade: NAVY, bordered: true },
-  ];
+  // Leadership spans the width on its own row, then the contacts and the
+  // address sit beside each other. Every cell is plain — one row, no merges.
+  parts.push(table(
+    [row([cell(card(leadership), CONTENT, { bordered: true, margin: 90 })])],
+    [CONTENT],
+  ));
+  parts.push(EMPTY);
 
-  parts.push(table(rightStack.map((entry, i) => row([
-    i === 0
-      ? cell(card(leadership), leftW, { bordered: true, margin: 90, vMerge: 'restart' })
-      : cell(EMPTY, leftW, { margin: 0, vMerge: 'continue' }),
-    cell(EMPTY, gap, { margin: 0, vMerge: i === 0 ? 'restart' : 'continue' }),
-    entry.spacer
-      ? cell(EMPTY, rightW, { margin: 0 })
-      : cell(entry.xml, rightW, { shade: entry.shade, bordered: entry.bordered, margin: 90 }),
-  ], entry.spacer ? { height: 6 } : {})), [leftW, gap, rightW]));
+  const halfGap = 10;
+  const halfL   = 300;
+  const halfR   = CONTENT - halfL - halfGap;
+
+  parts.push(table(
+    [row([
+      cell(card(contacts), halfL, { bordered: true, margin: 90 }),
+      cell(EMPTY, halfGap, { margin: 0 }),
+      cell(card(findUs), halfR, { shade: NAVY, bordered: true, margin: 90 }),
+    ])],
+    [halfL, halfGap, halfR],
+  ));
 
   return parts.join('');
 }

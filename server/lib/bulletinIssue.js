@@ -175,6 +175,18 @@ function clip(text, max) {
   return `${kept.replace(/[\s/,&-]+$/, '')}\u2026`;
 }
 
+// A deacon's primary responsibility.
+//
+// The Elders & Deacons page takes responsibilities one to a line, so the first
+// line is the primary one. Plenty of them are written as one line with several
+// packed into it — 'Treasurer & Finance / New Building' — so the first of those
+// counts too. The split needs a space on one side of the slash or the other:
+// without that rule 'Audio/Video & Sound Booth' would come out as 'Audio'.
+function primaryDuty(duties) {
+  const first = String((duties || [])[0] || '').trim();
+  return first.split(/\s\/\s*|\s*\/\s/)[0].trim();
+}
+
 // Joins people into one paragraph: bold name, plain remainder, separated.
 function nameParagraph(entries, { separator = ', ', wrap = null, joiner = ' ' } = {}) {
   const out = [];
@@ -249,10 +261,13 @@ function compose(sunday) {
         auto.elders.map(e => ({ name: e.name, rest: e.phone })),
       ),
       evangelist: config.evangelist,
+      // Only the primary responsibility. A deacon may look after several
+      // things and the Elders & Deacons page lists them all; the newsletter
+      // has room for one, and the first is the one that page puts first.
       deacons: nameParagraph(
         auto.deacons.map(d => ({
           name: d.name,
-          rest: clip(d.duties.join(' / '), config.deaconDutyMaxLength),
+          rest: clip(primaryDuty(d.duties), config.deaconDutyMaxLength),
         })),
         { wrap: ['(', ')'] },
       ),
@@ -272,4 +287,4 @@ function compose(sunday) {
   };
 }
 
-module.exports = { TEXT_FIELDS, blank, find, previous, draftFor, save, list, compose, lines, nameParagraph, splitName, clip };
+module.exports = { TEXT_FIELDS, blank, find, previous, draftFor, save, list, compose, lines, nameParagraph, splitName, clip, primaryDuty };

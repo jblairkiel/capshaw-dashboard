@@ -805,7 +805,7 @@ built, so a correction on the page that owns it is a correction in the export:
 | Last Week's Data | Attendance — last week's Sunday morning worship and Wednesday counts |
 | Anniversaries, Birthdays | Birthdays & Anniversaries |
 | Duty Roster | Serving Schedule — this Sunday and next, and the Wednesday after each |
-| Elders (with telephone numbers), Deacons (with responsibilities) | Elders & Deacons |
+| Elders (with telephone numbers), Deacons (with their primary responsibility) | Elders & Deacons |
 | Groups, Key Email Contacts | Email Groups |
 
 **What nobody else keeps** is typed on the page and stored per week in
@@ -825,6 +825,13 @@ Reading a week is open to anybody signed in. Writing and exporting need the
 name, rather than being another view of records the portal already shows.
 
 ### Changing the parts that are not records
+
+Both lists are ordered by surname, not by the name as typed — `ORDER BY name`
+would open the deacons with Adam Mowrer. A deacon may look after several
+things and the Elders & Deacons page lists them all; the newsletter has room
+for one, so it prints the first, and takes the first of a line that packs
+several together ('Treasurer & Finance / New Building'). What is left is
+clipped at `deaconDutyMaxLength`.
 
 The masthead, its banner artwork, the service times, the congregation's
 evangelist, the website admins, the duty roster's job list, the reminder
@@ -856,8 +863,14 @@ Three things about the layout are worth knowing before changing it:
   cards with a rule above and below and no sides.
 
 - Nesting a table inside a cell makes Word re-fit the outer grid and throws the
-  columns across the page, so there is none. Page one is one table whose spine
-  and prayer panel are vertically merged down beside the stack of grey cards.
+  columns across the page, so there is none. **Neither is there a vertical
+  merge**: spanning a cell down several rows is the obvious way to put one tall
+  panel beside a stack of short ones, and Word renders it differently enough
+  from every other reader to drop the merged cell's sides and bottom and to
+  push the following page's content a page late — a newsletter with a blank
+  second page. Every table is a single row, which is why page one's left column
+  is one grey card divided by headings rather than three separate boxes, and
+  why page two stacks the leadership across the width above the contacts.
 
 Two quirks of the existing data also matter. The tables disagree about what a
 date is — `MM/DD/YY` in the scraped attendance, `June 2025` plus `June 7`
