@@ -156,7 +156,7 @@ Access is two separate questions, deliberately kept apart.
 |---|---|
 | `pending` | Waiting on an admin. An account registered with an email address and password cannot sign in at all while it is `pending`; one that came from Google or Facebook can look around the portal but cannot create or edit anything. |
 | `approved` (Member) | Bible class questions, the lesson planner, site updates, their own household's details and worship preferences, and signing up for serving jobs. |
-| `admin` | Everything, including every area below, the action history, who may sign in, and direct editing of every database table. |
+| `admin` | Everything, including every area below, the action history, bug report triage, who may sign in, and direct editing of every database table. |
 
 **What does this account look after?** — its *areas*, which are **not** a
 ladder. Each area is the Add, Edit and Delete buttons on one part of the site;
@@ -578,6 +578,8 @@ saved rather than when a mail server answers.
 | `group-event-comment` | The leaders, the poster, everybody who answered, and everybody who replied before |
 | `announcement-comment` | Whoever looks after the board, and everybody already in the thread |
 | `group-membership` | The person added to a group, or made its leader |
+| `bug-report-new` | Every admin, when somebody files a bug report |
+| `bug-report-status` | Whoever filed it, when an admin moves it through triage |
 
 Two things it deliberately does not do: nobody is ever notified about their own
 doing, and opening the panel does not mark everything read — reading a list is
@@ -587,6 +589,48 @@ opens the page it is about.
 Everything is scoped to the account asking. The user id comes from the session,
 and the ids a request names are matched against it in the `WHERE` clause, so
 there is no way to read or clear somebody else's bell.
+
+---
+
+## Bug Reports
+
+**Report a problem**, at the bottom of every page, is reachable whatever
+somebody is signed in as — a pending account included, since they can already
+look around the whole portal and are as likely as anybody to hit something
+broken. It opens a form rather than sending an email or leaving a comment
+somewhere, so a report always carries the same shape and the same context.
+
+Filing one asks for what a person actually knows — a short title, what
+happened, optional steps to reproduce, how much it is in their way (*just a
+little something*, *it's getting in my way*, *I can't get this done*), and
+an optional screenshot. Everything else is captured from the click itself and
+never typed in: which page they were on, the full URL, and their browser.
+
+Triage is admin-only. There is no area for it — it is not one part of the
+site to look after, it is the whole site, so it stays with whoever already
+holds everything else. **Church Office → Bug Reports** lists every report,
+filterable by status, each one opening to its full description, context and
+screenshot, with a status to move it through:
+
+| Status | Meaning |
+|---|---|
+| `open` | Filed, not yet looked at |
+| `in_progress` | Somebody is working on it |
+| `resolved` | Fixed |
+| `wont_fix` | Looked at, staying as it is |
+
+A status change tells the reporter through their own bell (see
+[Notifications](#notifications) above) — carrying the new status and whatever
+note the admin left, but never a link back to the triage page, since only an
+admin can open it. Filing a report and changing its status both land in the
+action history under `bug-reports`, the same as any other write.
+
+Screenshots are stored content-addressed, the same approach as directory
+photos (`server/lib/photoStore.js`) — but in their own directory
+(`CAPSHAW_BUG_SCREENSHOT_DIR`, see [Environment Variables](#environment-variables)),
+because the photo directory is pruned against the people the directory holds
+pictures of, and a screenshot referenced by nothing there would not survive
+the next sync.
 
 ---
 
@@ -1725,6 +1769,6 @@ pm2 restart capshaw-dashboard
 | `NODE_ENV` | Production only | Set to `production` to serve the React build |
 | `PORT` | No | API port (default `3001`) |
 | `SESSION_SECRET` | **Yes in production** | Signs the session cookie. The app refuses to start in production without it rather than using the development fallback |
-| `CAPSHAW_DATA_DIR` | No | Moves the database, photos and scrape cache together (default `server/data`). The image sets it to `/data` |
+| `CAPSHAW_DATA_DIR` | No | Moves the database, photos, scrape cache and bug-report screenshots together (default `server/data`). The image sets it to `/data` |
 | `CAPSHAW_UPLOAD_DIR` | No | Where uploaded orders of service go (default `server/uploads`) |
-| `CAPSHAW_DB_FILE` / `CAPSHAW_PHOTO_DIR` / `CAPSHAW_DATA_FILE` | No | Move one of those on its own, overriding `CAPSHAW_DATA_DIR` |
+| `CAPSHAW_DB_FILE` / `CAPSHAW_PHOTO_DIR` / `CAPSHAW_DATA_FILE` / `CAPSHAW_BUG_SCREENSHOT_DIR` | No | Move one of those on its own, overriding `CAPSHAW_DATA_DIR` |

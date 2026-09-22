@@ -1,12 +1,13 @@
 // ─── Where this installation keeps what it writes ─────────────────────────────
 //
-// Four things outlive a request: the database, the family photos, the cached
-// copy of the last scrape, and uploaded orders of service. On the droplet they
-// all sit under server/, which is fine when the app and its data share a disk.
+// Five things outlive a request: the database, the family photos, the cached
+// copy of the last scrape, uploaded orders of service, and screenshots attached
+// to bug reports. On the droplet they all sit under server/, which is fine when
+// the app and its data share a disk.
 //
-// A container's data has to outlive the container, so all four have to be
+// A container's data has to outlive the container, so all five have to be
 // movable — and movable together, since a deployment wants one volume, not
-// four. CAPSHAW_DATA_DIR relocates the lot; the individual variables are still
+// five. CAPSHAW_DATA_DIR relocates the lot; the individual variables are still
 // honoured for the cases that only want one moved (the test run redirects the
 // photo library and the scrape cache, and nothing else).
 //
@@ -32,6 +33,11 @@ const paths = {
   // they are working files rather than congregation records, and the droplet
   // has always kept them apart.
   uploads:   process.env.CAPSHAW_UPLOAD_DIR || path.join(SERVER_DIR, 'uploads'),
+  // Screenshots attached to bug reports. Deliberately its own directory rather
+  // than a corner of `photos`: a directory sync prunes that one against the
+  // people it holds pictures of, and a screenshot referenced by nothing in the
+  // directory would be deleted the next time somebody ran it.
+  screenshots: process.env.CAPSHAW_BUG_SCREENSHOT_DIR || path.join(DATA_DIR, 'bug-screenshots'),
 };
 
 // Creating a directory is idempotent and cheap, and a missing one is the
@@ -39,7 +45,7 @@ const paths = {
 // write. The file paths' parents count too — pointing the database at a fresh
 // volume should not require anybody to mkdir first.
 function ensure() {
-  for (const dir of [paths.dataDir, paths.photos, paths.uploads, path.dirname(paths.database), path.dirname(paths.scrapeCache)]) {
+  for (const dir of [paths.dataDir, paths.photos, paths.uploads, paths.screenshots, path.dirname(paths.database), path.dirname(paths.scrapeCache)]) {
     fs.mkdirSync(dir, { recursive: true });
   }
   return paths;

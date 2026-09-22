@@ -40,6 +40,7 @@ function areaLabel(area) {
   if (area === 'accounts')      return 'Members & Access';
   if (area === 'my-household')  return 'Their own household';
   if (area === 'impersonation') return 'Viewing as somebody';
+  if (area === 'bug-reports')   return 'Bug Reports';
   return areaInfo(area).label;
 }
 

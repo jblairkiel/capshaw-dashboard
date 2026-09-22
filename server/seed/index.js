@@ -61,6 +61,7 @@ const NOT_FILLED = {
   service_types: 'The list of services every attendance record agrees on. Seeded once at start-up and shared by real records, so a batch must not take it away.',
   workflow_participants: 'Who may see a workflow, which is earned by taking part. Sample follow-ups are not aimed at a real account, so nobody is a participant in one.',
   notifications: 'Somebody\'s bell. An entry here tells a real person about something, so sample data would be telling them about a meeting that was never called.',
+  bug_reports: 'A member saying something is actually broken. Inventing one would be reporting a bug that never happened, which is exactly what this feature exists to tell apart from a real one.',
   seed_batches: 'The record of what sample data made.',
   seed_records: 'The record of what sample data made.',
 };

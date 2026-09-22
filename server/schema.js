@@ -693,6 +693,43 @@ function initSchema(db) {
 
   CREATE INDEX IF NOT EXISTS idx_notifications_user
     ON notifications(user_id, read_at, id DESC);
+
+  -- ── Bug reports ─────────────────────────────────────────────────────────────
+  -- Reachable from a link at the bottom of every page. Anybody signed in —
+  -- pending accounts included, since they can already look around and are as
+  -- likely as anybody to hit something broken — can file one; only an admin
+  -- can see and triage the list.
+  --
+  -- page/url/user_agent are captured by the client at the moment somebody
+  -- clicks the link, not typed in, so a report says exactly where and on what
+  -- browser something went wrong without asking the reporter to remember.
+  -- page is the tab id (what a notification's page field opens); page_label
+  -- is what that tab is actually called, kept alongside it so the triage
+  -- list can read "Serving Schedule" rather than "assignments".
+  -- reporter_name is kept alongside reporter_id the way action_log keeps
+  -- actor_name: a report still reads properly after the account behind it is
+  -- gone.
+
+  CREATE TABLE IF NOT EXISTS bug_reports (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    reporter_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    reporter_name TEXT    NOT NULL DEFAULT '',
+    title         TEXT    NOT NULL,
+    description   TEXT    NOT NULL DEFAULT '',
+    steps         TEXT    NOT NULL DEFAULT '',
+    severity      TEXT    NOT NULL DEFAULT 'annoying',   -- see server/lib/bugReports.js
+    status        TEXT    NOT NULL DEFAULT 'open',
+    page          TEXT    NOT NULL DEFAULT '',
+    page_label    TEXT    NOT NULL DEFAULT '',
+    url           TEXT    NOT NULL DEFAULT '',
+    user_agent    TEXT    NOT NULL DEFAULT '',
+    screenshot    TEXT,                                  -- filename in the screenshot store, or null
+    admin_note    TEXT    NOT NULL DEFAULT '',
+    created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_bug_reports_status ON bug_reports(status, id DESC);
 `);
   // ─── Migrations ───────────────────────────────────────────────────────────────
   // CREATE TABLE IF NOT EXISTS leaves existing installs untouched, so columns
