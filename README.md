@@ -168,7 +168,7 @@ implicitly, and nobody else holds one until an admin grants it.
 | `worship-order` | This Sunday | Upload, replace and remove the order of service |
 | `songs` | Songs We Sing | Add songs, record what was sung, keep the song of the week |
 | `announcements` | Announcements | Write, edit and retire announcements and events |
-| `serving-schedule` | Serving Schedule, Service Roster, Member Jobs | Build a month of worship jobs, fill or clear any slot, record what each man will volunteer for and the days he is away, and decide which jobs each member may sign up for |
+| `serving-schedule` | Serving Schedule, Service Roster | Build a month of worship jobs, fill or clear any slot, and record what each man will volunteer for and the days he is away |
 | `attendance` | Attendance | Record attendance counts and correct earlier ones (the list of services they pick from is an admin's — see [Service types](#service-types)) |
 | `visitors` | Guests | Add guests, keep their details and comments, record their visits |
 | `leadership` | Elders & Deacons | Keep the elders and deacons, and what each looks after, up to date |
@@ -331,20 +331,13 @@ them yet — fill or clear any slot by hand, add a one-off job, and run the
 Monthly Worship Schedule workflow. Running the layout twice never doubles a
 month up: slots that already exist are left alone.
 
-**Every other member** sees the roster and, if they can, signs themselves up.
-Two things have to be true for that:
-
-1. Their directory entry says they are a man (chosen on **My Household &
-   Preferences**, never guessed from a name — this congregation rosters the
-   worship jobs among its men).
-2. The schedule keeper has signed them off for that particular job, on
-   **Church Office → Member Jobs**.
-
-That page lists every member with what they may sign up for, alongside what
-they said about each job themselves on their worship preferences, so nobody is
-signed off for something they asked not to do. Somebody may take their own name
-back off a slot; only the schedule keeper may take somebody else's off. Every
-sign-up and every clearing is recorded in the action history by name.
+**Every other member** sees the roster, and that is all they can do with it —
+there is no self sign-up. A slot gets a name in it two ways, and two ways
+only: the Monthly Worship Schedule workflow publishing a generated draft, or
+the schedule keeper filling it by hand. The one thing left that is a member's
+own to change is stepping down: they may take their own name back off a slot
+they are down for, however it got there. Only the schedule keeper may take
+somebody else's off. Every clearing is recorded in the action history by name.
 
 ### Time away
 
@@ -403,12 +396,12 @@ be scanned at once:
 | **Who is behind each job** | Every role, with how many of the men shown are glad to do it and how many are willing. A role with nobody behind it is called out — that is the gap a schedule keeper is looking for |
 | **Who to show** | Everyone, only those who have said something, or only those who have not — the last is the list to take round on a Sunday |
 | **Each row** | His name, a count of what he is glad to and willing to do (or "rather not"), the days he is away, and his turns on the roster so far |
-| **Details** | Opens a dialog with everything about him: the full preference editor, his time away (block out or clear a range, the same as the Serving Schedule page's own dialog), and which jobs he has been signed off for |
+| **Details** | Opens a dialog with everything about him: the full preference editor, and his time away (block out or clear a range, the same as the Serving Schedule page's own dialog) |
 
-The two pages are deliberately separate, because they are separate decisions:
-the Service Roster is **what somebody wants**, and Member Jobs is **what the
-schedule keeper has agreed to**. The roster page shows the sign-offs but does
-not change them.
+What this page shows is **what somebody wants**. Whether that turns into a
+slot with his name on it is the Monthly Worship Schedule workflow's to decide,
+or the schedule keeper's own — there is no separate "may sign up for" list to
+keep in step with it, because there is no self sign-up any more.
 
 The Monthly Worship Schedule workflow reads these preferences when it fills a
 month: it never schedules somebody who said *rather not* or who is away that
@@ -661,9 +654,8 @@ directory shows as a family. Someone with no address on file is a household of
 one, so a blank address never pulls in strangers.
 
 **Gender** is asked here because this congregation rosters the worship jobs
-among its men, so the serving schedule needs to know who may sign up. It is
-chosen by the person (or by the directory area on their behalf), never guessed
-from a name, and "prefer not to say" is a real answer.
+among its men. It is chosen by the person (or by the directory area on their
+behalf), never guessed from a name, and "prefer not to say" is a real answer.
 
 **Worship preferences** are per person, per role — `preferred` ("glad to"),
 `willing`, or `unavailable` ("rather not") — with a free-text note for the
@@ -1222,8 +1214,8 @@ eager song leader every Sunday in the month while a willing volunteer sat idle,
 which is not what anybody would do by hand.
 
 A role nobody can cover is **reported as unfilled** rather than left quietly
-blank, since an empty slot is the thing the schedule keeper most needs to see —
-and an unfilled slot is one a member can sign themselves up for.
+blank, since an empty slot is the thing the schedule keeper most needs to see
+— and, with no self sign-up, filling it by hand is the only way it gets one.
 
 ### Running it
 
@@ -1386,7 +1378,7 @@ capshaw-dashboard/
 │   ├── routes/
 │   │   ├── scraper.js       # Church website scraper + data endpoints
 │   │   ├── records.js       # Area-gated CRUD for the record tables
-│   │   ├── serving.js       # The roster, member jobs, preferences, and sign-ups
+│   │   ├── serving.js       # The roster, preferences, and time away — filled by hand or the workflow
 │   │   ├── visitors.js      # Guests, their details and their visits
 │   │   ├── leadership.js    # Elders and deacons, with their duties
 │   │   ├── groups.js        # Church groups, their rolls and their meetings

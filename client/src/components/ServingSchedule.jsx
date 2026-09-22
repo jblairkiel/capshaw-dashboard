@@ -6,9 +6,10 @@ import { describeRange, parseMonthLabel } from '../lib/timeAway';
 
 // The serving schedule, from both sides of it:
 //
-//   · Everybody sees the month, week by week, and the men of the congregation
-//     can sign themselves up for an empty job they have been signed off for —
-//     or take their own name back off one.
+//   · Everybody sees the month, week by week. Nobody can put their own name
+//     against an empty slot — a slot is only ever filled by the Monthly
+//     Worship Schedule workflow or by whoever looks after the schedule — but
+//     a member may still take their own name back off one they are down for.
 //   · Whoever looks after the schedule can lay out next month in one go, fill
 //     or clear any slot by hand, and add a one-off job.
 //   · Anybody linked to the directory blocks out the days they will be away,
@@ -281,18 +282,18 @@ export default function ServingSchedule() {
   const canManage = !!data?.canManage;
   const me        = data?.me ?? {};
 
-  // What this person may do with one row: sign up for it, or step down from it.
+  // The one thing left that is a member's own to change: stepping down from a
+  // slot they are down for. Nobody can put their own name against one — that
+  // is the Monthly Worship Schedule workflow's to generate, or the schedule
+  // keeper's to fill by hand.
   function mineAlready(row) {
     return !!me.name && row.name.trim().toLowerCase() === me.name.trim().toLowerCase();
   }
-  function canSignUpFor(row) {
-    return !row.name.trim() && me.canSignUp && (me.jobs || []).includes(row.job);
-  }
 
-  async function act(row, method) {
+  async function stepDown(row) {
     setBusyId(row.id); setNotice('');
     try {
-      await send(`${API}/assignments/${row.id}/signup`, { method });
+      await send(`${API}/assignments/${row.id}/signup`, { method: 'DELETE' });
       await load(month);
     } catch (err) {
       setNotice(err.message);
@@ -395,15 +396,11 @@ export default function ServingSchedule() {
       )}
 
       {/* What this person can do about it, said once rather than on every row. */}
-      {!canManage && !me.canSignUp && (
+      {!canManage && (
         <p className="text-xs text-gray-500">
-          The men of the congregation can sign up for the jobs nobody has taken yet. If that is
-          you, set it on <strong>My Household &amp; Preferences</strong>.
-        </p>
-      )}
-      {!canManage && me.canSignUp && (me.jobs || []).length === 0 && (
-        <p className="text-xs text-gray-500">
-          You have not been signed off for any jobs yet — ask whoever looks after the serving schedule.
+          Slots here are filled by the Monthly Worship Schedule workflow or by whoever looks after
+          the serving schedule. If you are down for one and cannot make it, you can take yourself
+          off below.
         </p>
       )}
 
@@ -419,7 +416,7 @@ export default function ServingSchedule() {
             <tr className="bg-church-navy text-left text-xs text-gray-300 uppercase tracking-wide">
               <th className="px-4 py-3 w-1/3">Job</th>
               <th className="px-4 py-3">Name</th>
-              <th className="px-4 py-3 text-right">{canManage ? 'Manage' : 'Sign up'}</th>
+              <th className="px-4 py-3 text-right">{canManage ? 'Manage' : ''}</th>
             </tr>
           </thead>
           <tbody>
@@ -439,18 +436,9 @@ export default function ServingSchedule() {
                 </td>
                 <td className="px-4 py-2 text-right">
                   <div className="flex items-center gap-1.5 justify-end flex-wrap">
-                    {canSignUpFor(r) && (
-                      <button
-                        onClick={() => act(r, 'POST')}
-                        disabled={busyId === r.id}
-                        className="text-xs px-2.5 py-1 rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors font-medium disabled:opacity-50"
-                      >
-                        Sign me up
-                      </button>
-                    )}
                     {mineAlready(r) && (
                       <button
-                        onClick={() => act(r, 'DELETE')}
+                        onClick={() => stepDown(r)}
                         disabled={busyId === r.id}
                         className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold transition-colors disabled:opacity-50"
                       >

@@ -2,11 +2,8 @@ import { render, screen, within, fireEvent, waitFor } from '@testing-library/rea
 import { describe, test, expect, vi, afterEach } from 'vitest';
 
 import { hasArea, hasAnyArea, areasOf, areaInfo, AREAS, isAdmin } from '../lib/roles';
-import ServingJobsView from '../components/ServingJobsView';
 import ActionHistoryView from '../components/ActionHistoryView';
 import UsersView from '../components/UsersView';
-
-const type = (input, value) => fireEvent.change(input, { target: { value } });
 
 // ─── The rules themselves ─────────────────────────────────────────────────────
 //
@@ -55,96 +52,6 @@ describe('areas', () => {
     }
     // Something that is not an area still renders rather than crashing.
     expect(areaInfo('nonsense').label).toBe('nonsense');
-  });
-});
-
-// ─── Member Jobs ──────────────────────────────────────────────────────────────
-
-describe('ServingJobsView', () => {
-  const MEMBERS = [
-    { id: 1, name: 'Joe Carter', gender: 'male',   email: '', assignments: 3, jobs: ['Song Leader'], preferences: { 'Song Leader': 'preferred' } },
-    { id: 2, name: 'Ned Poole',  gender: 'male',   email: '', assignments: 0, jobs: [],              preferences: {} },
-    { id: 3, name: 'Ruth Poole', gender: 'female', email: '', assignments: 0, jobs: [],              preferences: {} },
-  ];
-
-  const JOBS = ['Song Leader', 'Opening Prayer', 'Communion'];
-
-  function mockMembers(members = MEMBERS) {
-    const fetchMock = vi.fn((url, options) => {
-      if (options?.method === 'PUT') {
-        const id = Number(String(url).match(/members\/(\d+)/)[1]);
-        return Promise.resolve({
-          json: () => Promise.resolve({
-            success: true,
-            member: { id, name: '', jobs: JSON.parse(options.body).jobs },
-          }),
-        });
-      }
-      return Promise.resolve({ json: () => Promise.resolve({ success: true, members, jobs: JOBS }) });
-    });
-    vi.stubGlobal('fetch', fetchMock);
-    return fetchMock;
-  }
-
-  afterEach(() => { vi.unstubAllGlobals(); });
-
-  test('shows the men by default, with what each may sign up for', async () => {
-    mockMembers();
-    render(<ServingJobsView />);
-
-    expect(await screen.findByText('Joe Carter')).toBeInTheDocument();
-    expect(screen.getByText('Ned Poole')).toBeInTheDocument();
-    expect(screen.queryByText('Ruth Poole')).not.toBeInTheDocument();
-
-    const row = screen.getByText('Joe Carter').closest('div.border-b');
-    expect(within(row).getByRole('button', { name: /Song Leader/ })).toHaveAttribute('aria-pressed', 'true');
-    expect(within(row).getByRole('button', { name: /Communion/ })).toHaveAttribute('aria-pressed', 'false');
-  });
-
-  test('everybody can be shown, with a note about who can actually sign up', async () => {
-    mockMembers();
-    render(<ServingJobsView />);
-    await screen.findByText('Joe Carter');
-
-    fireEvent.click(screen.getByLabelText(/only show the men/i));
-    expect(screen.getByText('Ruth Poole')).toBeInTheDocument();
-    expect(screen.getByText(/Only the men can sign themselves up/i)).toBeInTheDocument();
-  });
-
-  test('what somebody said about a job is shown beside it', async () => {
-    mockMembers();
-    render(<ServingJobsView />);
-    await screen.findByText('Joe Carter');
-
-    const row = screen.getByText('Joe Carter').closest('div.border-b');
-    expect(within(row).getByRole('button', { name: /Song Leader · Glad to/ })).toBeInTheDocument();
-  });
-
-  test('saving sends the whole set of jobs for that one person', async () => {
-    const fetchMock = mockMembers();
-    render(<ServingJobsView />);
-    await screen.findByText('Ned Poole');
-
-    const row = screen.getByText('Ned Poole').closest('div.border-b');
-    expect(within(row).getByRole('button', { name: 'Save' })).toBeDisabled();
-
-    fireEvent.click(within(row).getByRole('button', { name: /Opening Prayer/ }));
-    fireEvent.click(within(row).getByRole('button', { name: 'Save' }));
-
-    await waitFor(() => {
-      const call = fetchMock.mock.calls.find(([url, o]) => String(url).includes('/members/2/jobs') && o?.method === 'PUT');
-      expect(JSON.parse(call[1].body)).toEqual({ jobs: ['Opening Prayer'] });
-    });
-  });
-
-  test('searching narrows the list', async () => {
-    mockMembers();
-    render(<ServingJobsView />);
-    await screen.findByText('Joe Carter');
-
-    type(screen.getByPlaceholderText(/search members/i), 'ned');
-    expect(screen.getByText('Ned Poole')).toBeInTheDocument();
-    expect(screen.queryByText('Joe Carter')).not.toBeInTheDocument();
   });
 });
 

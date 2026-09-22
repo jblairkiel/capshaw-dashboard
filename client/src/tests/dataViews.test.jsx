@@ -385,7 +385,7 @@ describe('ServingSchedule', () => {
       serviceJobs: {},
       canManage: false,
       blackouts: [],
-      me: { directoryId: null, name: '', gender: '', jobs: [], canSignUp: false, blackouts: [] },
+      me: { directoryId: null, name: '', gender: '', blackouts: [] },
       ...overrides,
     };
     const fetchMock = vi.fn(() => Promise.resolve({ json: () => Promise.resolve(body) }));
@@ -449,35 +449,22 @@ describe('ServingSchedule', () => {
     expect(screen.queryByRole('combobox', { name: 'Week' })).not.toBeInTheDocument();
   });
 
-  test('a member who may not sign up is told how to change that', async () => {
+  test('a member is told how a slot gets filled, and there is no sign-up button anywhere', async () => {
     mockSchedule();
     render(<ServingSchedule />);
-    expect(await screen.findByText(/men of the congregation can sign up/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Monthly Worship Schedule workflow or by whoever looks after/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /sign me up/i })).not.toBeInTheDocument();
   });
 
-  test('a man signed off for the job is offered the empty slot, and only that one', async () => {
-    mockSchedule({ me: { directoryId: 3, name: 'Ray Harris', gender: 'male', jobs: ['Opening Prayer'], canSignUp: true } });
+  test('the sign-up column header is blank for a member — there is nothing there to do', async () => {
+    mockSchedule();
     render(<ServingSchedule />);
-
-    expect(await screen.findByRole('button', { name: /sign me up/i })).toBeInTheDocument();
-    // Only the empty Opening Prayer slot — the filled Song Leader one is not offered.
-    expect(screen.getAllByRole('button', { name: /sign me up/i })).toHaveLength(1);
-  });
-
-  test('signing up asks the server, then reloads the month', async () => {
-    const fetchMock = mockSchedule({ me: { directoryId: 3, name: 'Ray Harris', gender: 'male', jobs: ['Opening Prayer'], canSignUp: true } });
-    render(<ServingSchedule />);
-    fireEvent.click(await screen.findByRole('button', { name: /sign me up/i }));
-
-    await waitFor(() => {
-      const call = fetchMock.mock.calls.find(([url]) => String(url).includes('/assignments/2/signup'));
-      expect(call[1].method).toBe('POST');
-    });
+    await screen.findByRole('combobox', { name: 'Week' });
+    expect(screen.queryByRole('columnheader', { name: /sign up/i })).not.toBeInTheDocument();
   });
 
   test('you can take your own name back off', async () => {
-    const fetchMock = mockSchedule({ me: { directoryId: 3, name: 'Tom Nelson', gender: 'male', jobs: ['Song Leader'], canSignUp: true } });
+    const fetchMock = mockSchedule({ me: { directoryId: 3, name: 'Tom Nelson', gender: 'male' } });
     render(<ServingSchedule />);
     fireEvent.click(await screen.findByRole('button', { name: /take me off/i }));
 
@@ -513,7 +500,7 @@ describe('ServingSchedule', () => {
   test('time away is nested behind its own button, not shown on the page itself', async () => {
     mockSchedule({
       me: {
-        directoryId: 3, name: 'Ray Harris', gender: 'male', jobs: [], canSignUp: true,
+        directoryId: 3, name: 'Ray Harris', gender: 'male',
         blackouts: [{ id: 7, startsOn: '2025-06-07', endsOn: '2025-06-21', reason: 'Away with family' }],
       },
     });
@@ -535,7 +522,7 @@ describe('ServingSchedule', () => {
 
   test('the time-away dialog opens on the button and closes again', async () => {
     mockSchedule({
-      me: { directoryId: 3, name: 'Ray Harris', gender: 'male', jobs: [], canSignUp: true, blackouts: [] },
+      me: { directoryId: 3, name: 'Ray Harris', gender: 'male', blackouts: [] },
     });
     render(<ServingSchedule />);
     fireEvent.click(await screen.findByRole('button', { name: 'Time away' }));
@@ -550,7 +537,7 @@ describe('ServingSchedule', () => {
   test('a member sees the days they have blocked out', async () => {
     mockSchedule({
       me: {
-        directoryId: 3, name: 'Ray Harris', gender: 'male', jobs: [], canSignUp: true,
+        directoryId: 3, name: 'Ray Harris', gender: 'male',
         blackouts: [{ id: 7, startsOn: '2025-06-07', endsOn: '2025-06-21', reason: 'Away with family' }],
       },
     });
@@ -563,7 +550,7 @@ describe('ServingSchedule', () => {
 
   test('blocking out days posts the range, and one day needs only a first day', async () => {
     const fetchMock = mockSchedule({
-      me: { directoryId: 3, name: 'Ray Harris', gender: 'male', jobs: [], canSignUp: true, blackouts: [] },
+      me: { directoryId: 3, name: 'Ray Harris', gender: 'male', blackouts: [] },
     });
     render(<ServingSchedule />);
     fireEvent.click(await screen.findByRole('button', { name: /^time away/i }));
@@ -580,7 +567,7 @@ describe('ServingSchedule', () => {
   test('clearing a range asks the server to drop it', async () => {
     const fetchMock = mockSchedule({
       me: {
-        directoryId: 3, name: 'Ray Harris', gender: 'male', jobs: [], canSignUp: true,
+        directoryId: 3, name: 'Ray Harris', gender: 'male',
         blackouts: [{ id: 7, startsOn: '2025-06-07', endsOn: '2025-06-07', reason: '' }],
       },
     });

@@ -22,7 +22,6 @@ import InboxView from './components/InboxView';
 import WorkflowDialogButton from './components/WorkflowDialogButton';
 import MailGroupsView from './components/MailGroupsView';
 import ServingSchedule from './components/ServingSchedule';
-import ServingJobsView from './components/ServingJobsView';
 import ServiceRosterView from './components/ServiceRosterView';
 import ActionHistoryView from './components/ActionHistoryView';
 import WeeklyBulletinView from './components/WeeklyBulletinView';
@@ -90,7 +89,6 @@ const OFFICE_ITEMS = [
   { id: 'action-history', label: 'Action History',    when: user => isAdmin(user) },
   { id: 'database',       label: 'Church Records',    when: user => isAdmin(user) },
   { id: 'service-roster', label: 'Service Roster',    when: user => hasArea(user, 'serving-schedule') },
-  { id: 'serving-jobs',   label: 'Member Jobs',       when: user => hasArea(user, 'serving-schedule') },
   { id: 'directory',      label: 'Member Directory',  when: user => hasArea(user, 'directory') },
   { id: 'mail-groups',    label: 'Email Groups',      when: user => hasArea(user, 'mail-groups') },
   { id: 'bulletin',       label: 'Weekly Newsletter', when: user => hasArea(user, 'bulletin') },
@@ -106,7 +104,7 @@ function officeGroupFor(user) {
 const STANDALONE_TABS = new Set([
   'bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database',
   'directory', 'profile', 'inbox', 'mail-groups', 'livestreams',
-  'assignments', 'visitors', 'leadership', 'serving-jobs', 'action-history','service-roster', 'bulletin',
+  'assignments', 'visitors', 'leadership', 'action-history','service-roster', 'bulletin',
   'groups', 'bug-reports',
 ]);
 
@@ -408,11 +406,6 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       {!updating && activeTab === 'service-roster' && hasArea(user, 'serving-schedule') && (
         <main className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
           <ServiceRosterView />
-        </main>
-      )}
-      {!updating && activeTab === 'serving-jobs' && hasArea(user, 'serving-schedule') && (
-        <main className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
-          <ServingJobsView />
         </main>
       )}
       {!updating && activeTab === 'action-history' && admin && (

@@ -3,10 +3,7 @@
 //
 // The month is laid out the way the Serving Schedule page lays one out, from
 // the same services and the same roles, so a sample month is the shape of a
-// real one rather than a lookalike. Who may sign up for what follows what each
-// man said on the Service Roster: nobody is signed off for a job they asked
-// not to do, and a few of them have blocked out days they will be away.
-const { WORSHIP_ROLES } = require('../../lib/people');
+// real one rather than a lookalike, and a few men are away.
 const { MARK } = require('../people');
 const { parseMonth, servicesIn } = require('../../workflows/scheduling');
 
@@ -31,8 +28,8 @@ module.exports = {
   area:  'serving-schedule',
   page:  'Serving Schedule',
   order: 50,
-  describe: 'A month of worship jobs, filled from the directory, with some slots left open — who may sign up for what, and a few men away.',
-  tables: ['job_assignments', 'job_eligibility', 'job_blackouts'],
+  describe: 'A month of worship jobs, filled from the directory, with some slots left open, and a few men away.',
+  tables: ['job_assignments', 'job_blackouts'],
 
   generate({ insert, random, scale, db }) {
     const men = db.prepare("SELECT id, name FROM directory WHERE gender = 'male' ORDER BY id DESC LIMIT 30").all();
@@ -56,20 +53,6 @@ module.exports = {
             name:    filled ? random.pick(names) : '',
           }, `${job} — ${occasion.dateLabel} ${occasion.service}`);
         }
-      }
-    }
-
-    // What each man has already said, so being signed off agrees with it.
-    const refused = new Map();
-    for (const row of db.prepare("SELECT directory_id, role FROM worship_preferences WHERE level = 'unavailable'").all()) {
-      if (!refused.has(row.directory_id)) refused.set(row.directory_id, new Set());
-      refused.get(row.directory_id).add(row.role);
-    }
-
-    for (const member of men.slice(0, 6 * scale)) {
-      const open = WORSHIP_ROLES.filter(role => !refused.get(member.id)?.has(role));
-      for (const job of random.some(open, random.int(1, 4))) {
-        insert('job_eligibility', { directory_id: member.id, job }, `${member.name} may do ${job}`);
       }
     }
 

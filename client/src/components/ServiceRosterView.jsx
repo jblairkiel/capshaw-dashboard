@@ -18,12 +18,11 @@ import { WORSHIP_ROLES, levelInfo } from '../lib/worship';
 // It is also where the schedule keeper writes down the days a man will be
 // away, for the same reason: he says "we are at the beach that fortnight" in
 // the foyer rather than typing it in. Blocked-out days keep him off the
-// schedule and out of the sign-up list until they pass.
+// schedule until they pass.
 //
-// What this page is *not* is who may sign themselves up: that is Member Jobs,
-// and it is a separate decision. A preference is what somebody wants; being
-// signed off is what the schedule keeper has agreed to. This page shows both,
-// and only edits the first.
+// What this page shows is what somebody wants. Whether that turns into a
+// slot with his name on it is the Monthly Worship Schedule workflow's to
+// decide, or the schedule keeper's own — this page does not fill anything.
 const API = '/api/serving';
 
 async function send(url, options = {}) {
@@ -238,17 +237,9 @@ function RosterDetailDialog({ member, onClose, onSaved, onTimeAwayChanged }) {
             onAdd={blockOut}
             onRemove={clearTimeAway}
             heading="Time away"
-            hint={`Days ${member.name} will not be here. The month builder skips them, and he cannot sign himself up for one.`}
+            hint={`Days ${member.name} will not be here. The month builder skips them when filling a slot.`}
             emptyText="Nothing blocked out — he is available for every service on the roster."
           />
-        </div>
-
-        <div className="text-xs text-gray-500 border-t border-gray-100 pt-3">
-          <span className="font-medium text-gray-600">Signed off to sign up for: </span>
-          {member.jobs.length
-            ? member.jobs.join(', ')
-            : 'nothing yet'}
-          <span className="text-gray-400"> — set on Church Office → Member Jobs.</span>
         </div>
       </div>
     </Dialog>

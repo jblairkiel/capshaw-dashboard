@@ -1,6 +1,9 @@
-// The serving schedule has two audiences: whoever builds it, and the men who
-// sign themselves up for what is left. These check that the line between them
-// holds from both sides.
+// A slot on the serving schedule gets a name in it two ways only: the
+// Monthly Worship Schedule workflow publishing a generated draft, or whoever
+// holds serving-schedule filling or changing one by hand. These check that
+// building a month, and both of those ways of filling a slot, hold — and that
+// the one thing left a member may do to a slot themselves, stepping down from
+// one they are down for, still works.
 jest.mock('../db', () => require('./helpers/memoryDb').createMemoryDb());
 
 const request = require('supertest');
@@ -30,11 +33,6 @@ function addUser(name, role, directoryId = null, areas = []) {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
 }
 
-function allow(directoryId, ...jobs) {
-  const ins = db.prepare('INSERT OR IGNORE INTO job_eligibility (directory_id, job) VALUES (?, ?)');
-  for (const job of jobs) ins.run(directoryId, job);
-}
-
 function slotsIn(month) {
   return db.prepare('SELECT * FROM job_assignments WHERE month = ? ORDER BY id').all(month);
 }
@@ -42,7 +40,7 @@ function slotsIn(month) {
 let KEEPER, MAN, OTHER_MAN, WOMAN, UNLINKED, man, otherMan, woman;
 
 beforeEach(() => {
-  for (const t of ['action_log', 'job_eligibility', 'job_assignments', 'worship_preferences', 'worship_profile', 'user_areas', 'users', 'directory']) {
+  for (const t of ['action_log', 'job_assignments', 'worship_preferences', 'worship_profile', 'user_areas', 'users', 'directory']) {
     db.prepare(`DELETE FROM ${t}`).run();
   }
 
@@ -99,66 +97,63 @@ describe('laying out next month', () => {
   });
 });
 
-// ─── Signing up ───────────────────────────────────────────────────────────────
+// ─── Filling a slot — the roster role's to do ──────────────────────────────────
 
-describe('signing up for a job', () => {
+describe('filling a slot by hand', () => {
+  test('there is no self sign-up any more — the route is gone', async () => {
+    await request(buildApp(KEEPER)).post('/api/serving/months').send({ month: 'June 2026', services: ['Sunday Worship'] });
+    const slot = slotsIn('June 2026').find(s => s.job === 'Song Leader');
+
+    const res = await request(buildApp(MAN)).post(`/api/serving/assignments/${slot.id}/signup`);
+    expect(res.status).toBe(404);
+    expect(db.prepare('SELECT name FROM job_assignments WHERE id = ?').get(slot.id).name).toBe('');
+  });
+
+  test('the schedule keeper can put a name in an empty slot', async () => {
+    await request(buildApp(KEEPER)).post('/api/serving/months').send({ month: 'June 2026', services: ['Sunday Worship'] });
+    const slot = slotsIn('June 2026').find(s => s.job === 'Song Leader');
+
+    const res = await request(buildApp(KEEPER))
+      .patch(`/api/serving/assignments/${slot.id}`)
+      .send({ name: 'Joe Carter' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.assignment.name).toBe('Joe Carter');
+  });
+
+  test('a member cannot put a name in an empty slot by editing it directly either', async () => {
+    await request(buildApp(KEEPER)).post('/api/serving/months').send({ month: 'June 2026', services: ['Sunday Worship'] });
+    const slot = slotsIn('June 2026').find(s => s.job === 'Song Leader');
+
+    const res = await request(buildApp(MAN))
+      .patch(`/api/serving/assignments/${slot.id}`)
+      .send({ name: 'Joe Carter' });
+
+    expect(res.status).toBe(403);
+    expect(db.prepare('SELECT name FROM job_assignments WHERE id = ?').get(slot.id).name).toBe('');
+  });
+});
+
+// ─── Taking your own name off ──────────────────────────────────────────────────
+
+describe('taking your own name off a slot', () => {
   let slot;
 
   beforeEach(async () => {
     await request(buildApp(KEEPER)).post('/api/serving/months').send({ month: 'June 2026', services: ['Sunday Worship'] });
     slot = slotsIn('June 2026').find(s => s.job === 'Song Leader');
-  });
-
-  test('a man who has been signed off for the job may take an empty slot', async () => {
-    allow(man.id, 'Song Leader');
-    const res = await request(buildApp(MAN)).post(`/api/serving/assignments/${slot.id}/signup`);
-    expect(res.status).toBe(200);
-    expect(res.body.assignment.name).toBe('Joe Carter');
-  });
-
-  test('a man who has not been signed off for that job may not', async () => {
-    allow(man.id, 'Usher');
-    const res = await request(buildApp(MAN)).post(`/api/serving/assignments/${slot.id}/signup`);
-    expect(res.status).toBe(403);
-    expect(res.body.error).toMatch(/signed off/i);
-  });
-
-  test('worship jobs are the men\'s, so a woman is told so rather than refused blankly', async () => {
-    allow(woman.id, 'Song Leader');
-    const res = await request(buildApp(WOMAN)).post(`/api/serving/assignments/${slot.id}/signup`);
-    expect(res.status).toBe(403);
-    expect(res.body.error).toMatch(/men of the congregation/i);
-  });
-
-  test('an account with no directory entry is told to get one linked', async () => {
-    const res = await request(buildApp(UNLINKED)).post(`/api/serving/assignments/${slot.id}/signup`);
-    expect(res.status).toBe(403);
-    expect(res.body.error).toMatch(/directory/i);
-  });
-
-  test('a slot somebody already has cannot be taken from under them', async () => {
-    allow(man.id, 'Song Leader');
-    allow(otherMan.id, 'Song Leader');
-    await request(buildApp(MAN)).post(`/api/serving/assignments/${slot.id}/signup`);
-
-    const res = await request(buildApp(OTHER_MAN)).post(`/api/serving/assignments/${slot.id}/signup`);
-    expect(res.status).toBe(409);
-    expect(db.prepare('SELECT name FROM job_assignments WHERE id = ?').get(slot.id).name).toBe('Joe Carter');
+    // Down for it the way a generated or hand-filled slot would be — nobody
+    // signs themselves up any more.
+    db.prepare('UPDATE job_assignments SET name = ? WHERE id = ?').run('Joe Carter', slot.id);
   });
 
   test('you may step back down from your own slot', async () => {
-    allow(man.id, 'Song Leader');
-    await request(buildApp(MAN)).post(`/api/serving/assignments/${slot.id}/signup`);
-
     const res = await request(buildApp(MAN)).delete(`/api/serving/assignments/${slot.id}/signup`);
     expect(res.status).toBe(200);
     expect(db.prepare('SELECT name FROM job_assignments WHERE id = ?').get(slot.id).name).toBe('');
   });
 
   test('you may not take somebody else off, but the schedule keeper may', async () => {
-    allow(man.id, 'Song Leader');
-    await request(buildApp(MAN)).post(`/api/serving/assignments/${slot.id}/signup`);
-
     const refused = await request(buildApp(OTHER_MAN)).delete(`/api/serving/assignments/${slot.id}/signup`);
     expect(refused.status).toBe(403);
     expect(db.prepare('SELECT name FROM job_assignments WHERE id = ?').get(slot.id).name).toBe('Joe Carter');
@@ -167,59 +162,18 @@ describe('signing up for a job', () => {
     expect(cleared.status).toBe(200);
   });
 
-  test('a sign-up is recorded in the action history by name', async () => {
-    allow(man.id, 'Song Leader');
-    await request(buildApp(MAN)).post(`/api/serving/assignments/${slot.id}/signup`);
+  test('an account with no directory entry cannot claim a slot is theirs', async () => {
+    const res = await request(buildApp(UNLINKED)).delete(`/api/serving/assignments/${slot.id}/signup`);
+    expect(res.status).toBe(403);
+    expect(db.prepare('SELECT name FROM job_assignments WHERE id = ?').get(slot.id).name).toBe('Joe Carter');
+  });
+
+  test('stepping down is recorded in the action history by name', async () => {
+    await request(buildApp(MAN)).delete(`/api/serving/assignments/${slot.id}/signup`);
 
     const entry = db.prepare('SELECT * FROM action_log ORDER BY id DESC').get();
     expect(entry).toMatchObject({ area: 'serving-schedule', user_id: MAN.id });
-    expect(entry.summary).toMatch(/Joe Carter signed up for Song Leader/);
-  });
-});
-
-// ─── The page behind the area ─────────────────────────────────────────────────
-
-describe('managing who may sign up for what', () => {
-  test('lists every member with their jobs, for the area only', async () => {
-    allow(man.id, 'Song Leader', 'Usher');
-
-    const refused = await request(buildApp(MAN)).get('/api/serving/members');
-    expect(refused.status).toBe(403);
-
-    const res = await request(buildApp(KEEPER)).get('/api/serving/members');
-    expect(res.status).toBe(200);
-    expect(res.body.members.find(m => m.name === 'Joe Carter').jobs.sort()).toEqual(['Song Leader', 'Usher']);
-    expect(res.body.members.find(m => m.name === 'Ruth Poole').jobs).toEqual([]);
-    expect(res.body.jobs).toContain('Communion');
-  });
-
-  test('setting somebody\'s jobs replaces what they had', async () => {
-    allow(man.id, 'Song Leader', 'Usher');
-    const res = await request(buildApp(KEEPER))
-      .put(`/api/serving/members/${man.id}/jobs`)
-      .send({ jobs: ['Communion'] });
-
-    expect(res.status).toBe(200);
-    expect(res.body.member.jobs).toEqual(['Communion']);
-  });
-
-  test('a job nobody has heard of is refused, and changes nothing', async () => {
-    allow(man.id, 'Song Leader');
-    const res = await request(buildApp(KEEPER))
-      .put(`/api/serving/members/${man.id}/jobs`)
-      .send({ jobs: ['Bell Ringer'] });
-
-    expect(res.status).toBe(400);
-    expect(db.prepare('SELECT job FROM job_eligibility WHERE directory_id = ?').all(man.id))
-      .toEqual([{ job: 'Song Leader' }]);
-  });
-
-  test('a member may not hand themselves a job', async () => {
-    const res = await request(buildApp(MAN))
-      .put(`/api/serving/members/${man.id}/jobs`)
-      .send({ jobs: ['Song Leader'] });
-    expect(res.status).toBe(403);
-    expect(db.prepare('SELECT COUNT(*) n FROM job_eligibility').get().n).toBe(0);
+    expect(entry.summary).toMatch(/Joe Carter stepped down from Song Leader/);
   });
 });
 
@@ -240,8 +194,12 @@ describe('recording what somebody will serve', () => {
     );
   }
 
-  test('the roster lists everyone with what they said and what they may sign up for', async () => {
-    allow(man.id, 'Song Leader');
+  test('only the schedule keeper may see the roster', async () => {
+    const res = await request(buildApp(MAN)).get('/api/serving/members');
+    expect(res.status).toBe(403);
+  });
+
+  test('the roster lists everyone with what they said', async () => {
     prefer(man.id, 'Song Leader', 'preferred');
     prefer(man.id, 'Usher', 'unavailable');
     db.prepare('INSERT INTO worship_profile (directory_id, notes) VALUES (?, ?)').run(man.id, 'Away in June');
@@ -252,7 +210,6 @@ describe('recording what somebody will serve', () => {
     const joe = res.body.members.find(m => m.name === 'Joe Carter');
     expect(joe.preferences).toEqual({ 'Song Leader': 'preferred', Usher: 'unavailable' });
     expect(joe.notes).toBe('Away in June');
-    expect(joe.jobs).toEqual(['Song Leader']);
 
     // Somebody who has said nothing reads as nothing, not as a refusal.
     expect(res.body.members.find(m => m.name === 'Ned Poole').preferences).toEqual({});
@@ -347,7 +304,6 @@ describe('recording what somebody will serve', () => {
 describe('GET /api/serving', () => {
   test('tells each person what they may do with the month', async () => {
     await request(buildApp(KEEPER)).post('/api/serving/months').send({ month: 'June 2026', services: ['Sunday Worship'] });
-    allow(man.id, 'Song Leader');
 
     const keeper = await request(buildApp(KEEPER)).get('/api/serving');
     expect(keeper.body.canManage).toBe(true);
@@ -356,9 +312,10 @@ describe('GET /api/serving', () => {
 
     const member = await request(buildApp(MAN)).get('/api/serving');
     expect(member.body.canManage).toBe(false);
-    expect(member.body.me).toMatchObject({ name: 'Joe Carter', canSignUp: true, jobs: ['Song Leader'] });
-
-    const she = await request(buildApp(WOMAN)).get('/api/serving');
-    expect(she.body.me.canSignUp).toBe(false);
+    expect(member.body.me).toMatchObject({ name: 'Joe Carter' });
+    // There is nothing left for a member to sign up for, so the page is not
+    // told anything about eligibility any more.
+    expect(member.body.me.jobs).toBeUndefined();
+    expect(member.body.me.canSignUp).toBeUndefined();
   });
 });

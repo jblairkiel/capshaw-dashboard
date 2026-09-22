@@ -422,17 +422,6 @@ function initSchema(db) {
 
   CREATE INDEX IF NOT EXISTS idx_elder_duties_elder ON elder_duties(elder_id);
 
-  -- ── Who may sign up for which serving job ───────────────────────────────────
-  -- A row means the Serving Schedule area has decided this person may put
-  -- their own name against that job. No row means they cannot.
-
-  CREATE TABLE IF NOT EXISTS job_eligibility (
-    directory_id INTEGER NOT NULL REFERENCES directory(id) ON DELETE CASCADE,
-    job          TEXT    NOT NULL,
-    updated_at   TEXT    NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (directory_id, job)
-  );
-
   -- ── Time away from the serving jobs ─────────────────────────────────────────
   -- A range of days somebody has blocked out: holidays, a hospital stay, a
   -- month with the grandchildren. Both ends are inclusive, and a single day is
@@ -908,6 +897,12 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_group_event_rsvps_person ON group_event_rsvps(event_id, directory_id);
     CREATE INDEX IF NOT EXISTS idx_group_signups_person     ON group_event_signups(item_id, directory_id);
   `);
+
+  // A member could once put their own name against a serving job they had
+  // been signed off for; a slot is now only ever filled by the Monthly
+  // Worship Schedule workflow or by hand, so which jobs somebody was signed
+  // off for is no longer a decision anything reads.
+  db.exec(`DROP TABLE IF EXISTS job_eligibility;`);
 
   db.exec(`CREATE INDEX IF NOT EXISTS idx_users_directory ON users(directory_id);`);
   // Sign-in looks an account up by address, and two accounts must never share

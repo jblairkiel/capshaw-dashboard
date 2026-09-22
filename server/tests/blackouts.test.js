@@ -43,7 +43,7 @@ function slotsIn(month) {
 let KEEPER, MAN, OTHER_MAN, UNLINKED, man, otherMan;
 
 beforeEach(() => {
-  for (const t of ['action_log', 'job_blackouts', 'job_eligibility', 'job_assignments', 'user_areas', 'users', 'directory']) {
+  for (const t of ['action_log', 'job_blackouts', 'job_assignments', 'user_areas', 'users', 'directory']) {
     db.prepare(`DELETE FROM ${t}`).run();
   }
 
@@ -216,36 +216,10 @@ describe('a day somebody is away', () => {
 
   beforeEach(async () => {
     await request(buildApp(KEEPER)).post('/api/serving/months').send({ month: 'June 2026', services: ['Sunday Worship'] });
-    db.prepare("INSERT OR IGNORE INTO job_eligibility (directory_id, job) VALUES (?, 'Song Leader')").run(man.id);
 
     const songLeading = slotsIn('June 2026').filter(s => s.job === 'Song Leader');
     slot        = songLeading.find(s => s.date === 'June 7');
     otherSunday = songLeading.find(s => s.date === 'June 14');
-  });
-
-  test('cannot be signed up for, and says which days are in the way', async () => {
-    block(man.id, '2026-06-01', '2026-06-10', 'Away with family');
-
-    const res = await request(buildApp(MAN)).post(`/api/serving/assignments/${slot.id}/signup`);
-    expect(res.status).toBe(409);
-    expect(res.body.error).toMatch(/June 1 – June 10, 2026/);
-    expect(db.prepare('SELECT name FROM job_assignments WHERE id = ?').get(slot.id).name).toBe('');
-  });
-
-  test('costs that day only — the rest of the month is still theirs to take', async () => {
-    block(man.id, '2026-06-07');
-
-    const res = await request(buildApp(MAN)).post(`/api/serving/assignments/${otherSunday.id}/signup`);
-    expect(res.status).toBe(200);
-    expect(res.body.assignment.name).toBe('Joe Carter');
-  });
-
-  test('once the range is cleared, the slot is theirs again', async () => {
-    const range = block(man.id, '2026-06-07');
-    await request(buildApp(MAN)).delete(`/api/serving/blackouts/${range.id}`);
-
-    const res = await request(buildApp(MAN)).post(`/api/serving/assignments/${slot.id}/signup`);
-    expect(res.status).toBe(200);
   });
 
   test('is still the keeper\'s call to write somebody into — but never silently', async () => {

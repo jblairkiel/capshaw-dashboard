@@ -9,18 +9,17 @@ import ServiceRosterView from '../components/ServiceRosterView';
 const MEMBERS = [
   {
     id: 1, name: 'Joe Carter', gender: 'male', email: 'joe@example.com', assignments: 3,
-    jobs: ['Song Leader'],
     preferences: { 'Song Leader': 'preferred', Usher: 'willing', Communion: 'unavailable' },
     notes: 'Away most of June',
     blackouts: [{ id: 5, directoryId: 1, startsOn: '2026-06-07', endsOn: '2026-06-21', reason: 'Away with family' }],
   },
   {
     id: 2, name: 'Ned Poole', gender: 'male', email: 'ned@example.com', assignments: 0,
-    jobs: [], preferences: {}, notes: '', blackouts: [],
+    preferences: {}, notes: '', blackouts: [],
   },
   {
     id: 3, name: 'Ruth Poole', gender: 'female', email: 'ruth@example.com', assignments: 0,
-    jobs: [], preferences: { Visuals: 'preferred' }, notes: '',
+    preferences: { Visuals: 'preferred' }, notes: '',
   },
 ];
 
@@ -170,14 +169,6 @@ describe('ServiceRosterView — the Details dialog', () => {
       const nedRow = screen.getByRole('button', { name: 'Details for Ned Poole' }).closest('tr');
       expect(within(nedRow).getByText('1 willing')).toBeInTheDocument();
     });
-  });
-
-  test('says which jobs he may sign himself up for, and whose decision that is', async () => {
-    await renderRoster();
-    await openDetails('Joe Carter');
-
-    expect(screen.getByText(/Signed off to sign up for:/)).toBeInTheDocument();
-    expect(screen.getByText(/Member Jobs/)).toBeInTheDocument();
   });
 
   test('opening a man shows the reason for his time away, not just the dates', async () => {
