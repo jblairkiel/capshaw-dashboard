@@ -12,20 +12,12 @@ const API = '/api/bug-reports';
 
 const MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024;
 
-// The preview is always one we minted ourselves with URL.createObjectURL —
-// never text from the network or typed by anybody — but the <img> below only
-// ever renders it once it is actually shaped like the blob URL that call
-// returns, rather than trusting the string on faith.
-function isBlobUrl(url) {
-  return typeof url === 'string' && /^blob:/.test(url);
-}
-
 export default function BugReportDialog({ pageId, pageLabel, onClose }) {
   const [title, setTitle]             = useState('');
   const [description, setDescription] = useState('');
   const [steps, setSteps]             = useState('');
   const [severity, setSeverity]       = useState('annoying');
-  const [screenshot, setScreenshot]   = useState(null);   // { file, previewUrl }
+  const [screenshot, setScreenshot]   = useState(null);   // the chosen File, or null
   const [busy, setBusy]     = useState(false);
   const [error, setError]   = useState('');
   const [filed, setFiled]   = useState(null);   // the report that came back, once sent
@@ -36,11 +28,10 @@ export default function BugReportDialog({ pageId, pageLabel, onClose }) {
     if (!file.type.startsWith('image/')) return setError('Please attach an image.');
     if (file.size > MAX_SCREENSHOT_BYTES) return setError('That screenshot is larger than 5 MB.');
     setError('');
-    setScreenshot({ file, previewUrl: URL.createObjectURL(file) });
+    setScreenshot(file);
   }
 
   function clearScreenshot() {
-    if (screenshot) URL.revokeObjectURL(screenshot.previewUrl);
     setScreenshot(null);
     if (fileInput.current) fileInput.current.value = '';
   }
@@ -61,7 +52,7 @@ export default function BugReportDialog({ pageId, pageLabel, onClose }) {
       body.set('pageLabel', pageLabel || '');
       body.set('url', window.location.href);
       body.set('userAgent', navigator.userAgent);
-      if (screenshot) body.set('screenshot', screenshot.file);
+      if (screenshot) body.set('screenshot', screenshot);
 
       const res  = await fetch(API, { method: 'POST', credentials: 'include', body });
       const json = await res.json().catch(() => ({}));
@@ -166,11 +157,16 @@ export default function BugReportDialog({ pageId, pageLabel, onClose }) {
             // Not a <label> here: a control nested inside one borrows the
             // label's text as its own accessible name, which would leave the
             // Remove button impossible to ask for by name.
-            <div className="mt-1 flex items-center gap-3">
-              {isBlobUrl(screenshot.previewUrl) && (
-                <img src={screenshot.previewUrl} alt="Screenshot to attach" className="h-16 w-16 object-cover rounded-lg border border-gray-200" />
-              )}
-              <button type="button" onClick={clearScreenshot} className="text-xs text-gray-500 hover:text-red-600 underline">
+            //
+            // No thumbnail: an <img> given a URL built from the chosen file
+            // would be the same file a CodeQL DOM-XSS query flagged before —
+            // the name is worth showing without going anywhere near that.
+            <div className="mt-1 flex items-center gap-3 text-sm text-gray-600">
+              <svg className="w-5 h-5 shrink-0 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14M14 8h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <span className="truncate">{screenshot.name}</span>
+              <button type="button" onClick={clearScreenshot} className="text-xs text-gray-500 hover:text-red-600 underline shrink-0">
                 Remove
               </button>
             </div>
