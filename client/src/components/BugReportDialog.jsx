@@ -12,6 +12,14 @@ const API = '/api/bug-reports';
 
 const MAX_SCREENSHOT_BYTES = 5 * 1024 * 1024;
 
+// The preview is always one we minted ourselves with URL.createObjectURL —
+// never text from the network or typed by anybody — but the <img> below only
+// ever renders it once it is actually shaped like the blob URL that call
+// returns, rather than trusting the string on faith.
+function isBlobUrl(url) {
+  return typeof url === 'string' && /^blob:/.test(url);
+}
+
 export default function BugReportDialog({ pageId, pageLabel, onClose }) {
   const [title, setTitle]             = useState('');
   const [description, setDescription] = useState('');
@@ -159,7 +167,9 @@ export default function BugReportDialog({ pageId, pageLabel, onClose }) {
             // label's text as its own accessible name, which would leave the
             // Remove button impossible to ask for by name.
             <div className="mt-1 flex items-center gap-3">
-              <img src={screenshot.previewUrl} alt="Screenshot to attach" className="h-16 w-16 object-cover rounded-lg border border-gray-200" />
+              {isBlobUrl(screenshot.previewUrl) && (
+                <img src={screenshot.previewUrl} alt="Screenshot to attach" className="h-16 w-16 object-cover rounded-lg border border-gray-200" />
+              )}
               <button type="button" onClick={clearScreenshot} className="text-xs text-gray-500 hover:text-red-600 underline">
                 Remove
               </button>
