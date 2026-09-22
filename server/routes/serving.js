@@ -1,16 +1,19 @@
 // ─── The serving schedule ─────────────────────────────────────────────────────
 //
-// Two different people use this page, and they can do different things:
+// A slot gets a name in it two ways, and two ways only: the Monthly Worship
+// Schedule workflow publishing a generated draft, or whoever holds
+// `serving-schedule` filling or changing one by hand. There is no self
+// sign-up — a member cannot put their own name against an empty slot.
 //
 //   · Whoever looks after the Serving Schedule builds next month's worship
-//     jobs, fills or clears any slot, records what each man will volunteer
-//     for, and decides which jobs each member may put their own name against.
-//   · Every other member sees the roster, and — if they are down as a man in
-//     the directory and have been allowed that job — can sign themselves up
-//     for an empty slot, or take their own name back off one.
+//     jobs, fills or clears any slot, and records what each man will
+//     volunteer for.
+//   · Every other member sees the roster, and may take their own name back
+//     off a slot they are down for — the one thing left that is theirs to
+//     change — but cannot put it there in the first place.
 //   · Anybody linked to the directory can block out the days they will be
-//     away, and the schedule keeper can do it for them. Nobody gets signed up
-//     for a day they have blocked out.
+//     away, and the schedule keeper can do it for them. The month builder
+//     skips those days for that person.
 //
 // Everything written here lands in the action history.
 const express = require('express');
@@ -45,28 +48,9 @@ function assignmentsIn(month) {
   return db.prepare('SELECT id, month, date, service, job, name FROM job_assignments WHERE month = ? ORDER BY id ASC').all(month);
 }
 
-function eligibilityFor(directoryId) {
-  if (!directoryId) return [];
-  return db.prepare('SELECT job FROM job_eligibility WHERE directory_id = ? ORDER BY job').all(directoryId).map(r => r.job);
-}
-
 function personFor(user) {
   if (!user?.directory_id) return null;
   return db.prepare('SELECT id, name, gender FROM directory WHERE id = ?').get(user.directory_id) || null;
-}
-
-// The two things that have to be true before somebody can put their own name
-// down: the congregation rosters men for these jobs, and the schedule keeper
-// has said this is one of theirs.
-function signupProblem(person, job) {
-  if (!person) return 'Your account is not linked to the member directory yet — ask an admin to link it.';
-  if ((person.gender || '').toLowerCase() !== 'male') {
-    return 'Worship jobs are filled by the men of the congregation. If that is you, set it on My Info.';
-  }
-  if (!eligibilityFor(person.id).includes(job)) {
-    return `You have not been signed off for ${job} yet. Ask whoever looks after the serving schedule.`;
-  }
-  return null;
 }
 
 // ─── Time away ────────────────────────────────────────────────────────────────
@@ -156,8 +140,6 @@ router.get('/', (req, res) => {
       directoryId: person?.id ?? null,
       name:        person?.name ?? '',
       gender:      person?.gender ?? '',
-      jobs:        person ? eligibilityFor(person.id) : [],
-      canSignUp:   !!person && (person.gender || '').toLowerCase() === 'male',
       blackouts:   person ? blackouts.forPerson(person.id) : [],
     },
   });
@@ -277,44 +259,12 @@ router.delete('/assignments/:id', requireApproved, manageOnly, (req, res) => {
   res.json({ success: true });
 });
 
-// ─── Signing yourself up ──────────────────────────────────────────────────────
-
-router.post('/assignments/:id/signup', requireApproved, (req, res) => {
-  const slot = db.prepare('SELECT * FROM job_assignments WHERE id = ?').get(req.params.id);
-  if (!slot) return res.status(404).json({ success: false, error: 'No such slot' });
-  if (slot.name.trim()) {
-    return res.status(409).json({ success: false, error: `${slot.name} already has that one.` });
-  }
-
-  const person  = personFor(req.user);
-  const problem = signupProblem(person, slot.job);
-  if (problem) return res.status(403).json({ success: false, error: problem });
-
-  const away = blackouts.personAwayOn(person.id, dayOf(slot));
-  if (away) {
-    return res.status(409).json({
-      success: false,
-      error:   `You have blocked out ${blackouts.describe(away)}. Take that off your time away first if you can serve after all.`,
-    });
-  }
-
-  db.prepare('UPDATE job_assignments SET name = ? WHERE id = ?').run(person.name, slot.id);
-  const after = db.prepare('SELECT * FROM job_assignments WHERE id = ?').get(slot.id);
-
-  actionLog.record(req.user, {
-    area:     AREA,
-    action:   'update',
-    entity:   'serving assignment',
-    entityId: slot.id,
-    summary:  `${person.name} signed up for ${slot.job} on ${slot.date || slot.month}`,
-    before:   slot,
-    after,
-  });
-  res.json({ success: true, assignment: after });
-});
-
-// Taking your name back off. The schedule keeper may clear anybody's; everyone
-// else may only clear their own, so nobody can quietly drop someone else.
+// ─── Taking your own name off ──────────────────────────────────────────────────
+// The one thing left that is a member's own to change: stepping down from a
+// slot they are down for, however it got their name — generated, put there by
+// the schedule keeper, or (from before this changed) signed up for
+// themselves. The schedule keeper may clear anybody's; everyone else may only
+// clear their own, so nobody can quietly drop someone else.
 router.delete('/assignments/:id/signup', requireApproved, (req, res) => {
   const slot = db.prepare('SELECT * FROM job_assignments WHERE id = ?').get(req.params.id);
   if (!slot) return res.status(404).json({ success: false, error: 'No such slot' });
@@ -404,14 +354,9 @@ router.delete('/blackouts/:id', requireApproved, (req, res) => {
   res.json({ success: true });
 });
 
-// ─── Who may sign up for what ─────────────────────────────────────────────────
-// What both office pages behind the Serving Schedule area are built from:
-// every member, whether they are down as a man, what they have said they will
-// volunteer for, and which jobs they may put their own name against.
-//
-// Member Jobs changes the last of those; the Service Roster changes the one
-// before it. They are separate decisions — what somebody wants is not what the
-// schedule keeper has agreed to — so they are separate endpoints.
+// ─── The service roster: what each man will volunteer for ─────────────────────
+// What the Service Roster page is built from: every member, whether they are
+// down as a man, and what they have said they will volunteer for.
 
 function rosterMembers() {
   const people = db.prepare(`
@@ -420,22 +365,16 @@ function rosterMembers() {
       FROM directory d ORDER BY d.name ASC
   `).all();
 
-  const eligibility = db.prepare('SELECT directory_id, job FROM job_eligibility').all();
   const preferences = worship.allPreferences();
   const notes       = worship.allNotes();
+  const away        = blackouts.byPerson();
 
-  const away = blackouts.byPerson();
-
-  const byPerson = new Map(people.map(p => [p.id, {
+  return people.map(p => ({
     ...p,
-    jobs:        [],
     preferences: preferences.get(p.id) ?? {},
     notes:       notes.get(p.id) ?? '',
     blackouts:   away.get(p.id) ?? [],
-  }]));
-  for (const row of eligibility) byPerson.get(row.directory_id)?.jobs.push(row.job);
-
-  return [...byPerson.values()];
+  }));
 }
 
 router.get('/members', requireApproved, manageOnly, (req, res) => {
@@ -447,46 +386,6 @@ router.get('/members', requireApproved, manageOnly, (req, res) => {
   });
 });
 
-const saveEligibility = db.transaction((directoryId, jobs) => {
-  db.prepare('DELETE FROM job_eligibility WHERE directory_id = ?').run(directoryId);
-  const ins = db.prepare("INSERT OR IGNORE INTO job_eligibility (directory_id, job, updated_at) VALUES (?, ?, datetime('now'))");
-  for (const job of jobs) ins.run(directoryId, job);
-});
-
-router.put('/members/:id/jobs', requireApproved, manageOnly, (req, res) => {
-  const person = db.prepare('SELECT id, name FROM directory WHERE id = ?').get(req.params.id);
-  if (!person) return res.status(404).json({ success: false, error: 'No such member' });
-
-  const wanted = req.body?.jobs;
-  if (!Array.isArray(wanted)) return res.status(400).json({ success: false, error: 'jobs must be an array' });
-
-  const unknown = wanted.filter(j => !WORSHIP_ROLES.includes(j));
-  if (unknown.length) return res.status(400).json({ success: false, error: `Unknown job: ${unknown.join(', ')}` });
-
-  const before = eligibilityFor(person.id);
-  saveEligibility(person.id, wanted);
-  const after = eligibilityFor(person.id);
-
-  const added   = after.filter(j => !before.includes(j));
-  const removed = before.filter(j => !after.includes(j));
-  if (added.length || removed.length) {
-    actionLog.record(req.user, {
-      area:     AREA,
-      action:   'update',
-      entity:   'member jobs',
-      entityId: person.id,
-      summary:  [
-        added.length   ? `${person.name} may now sign up for ${added.join(', ')}`   : '',
-        removed.length ? `${person.name} may no longer sign up for ${removed.join(', ')}` : '',
-      ].filter(Boolean).join('; '),
-      details:  { added, removed, jobs: after },
-    });
-  }
-
-  res.json({ success: true, member: { id: person.id, name: person.name, jobs: after } });
-});
-
-// ─── The service roster: what each man will volunteer for ─────────────────────
 // A man tells the portal himself on My Household & Preferences — but plenty of
 // them say it in the foyer instead, so whoever builds the roster can write it
 // down for them here. Same table, same vocabulary, and the action history says

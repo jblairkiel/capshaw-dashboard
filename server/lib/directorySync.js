@@ -80,16 +80,14 @@ function syncDirectory(db, people, options = {}) {
   }
 
   // Drop people the website no longer lists — but only pure scrape artifacts.
-  // Anything edited locally, linked to an account, carrying worship
-  // preferences, or signed off for a serving job is congregation data we did
-  // not create and must not delete.
+  // Anything edited locally, linked to an account, or carrying worship
+  // preferences is congregation data we did not create and must not delete.
   const removable = db.prepare(`
     SELECT d.id FROM directory d
     WHERE d.edited_fields = '[]'
       AND NOT EXISTS (SELECT 1 FROM users u              WHERE u.directory_id = d.id)
       AND NOT EXISTS (SELECT 1 FROM worship_preferences w WHERE w.directory_id = d.id)
       AND NOT EXISTS (SELECT 1 FROM worship_profile p     WHERE p.directory_id = d.id)
-      AND NOT EXISTS (SELECT 1 FROM job_eligibility e      WHERE e.directory_id = d.id)
   `).all().map(r => r.id).filter(id => !seen.has(id));
 
   const del = db.prepare('DELETE FROM directory WHERE id = ?');

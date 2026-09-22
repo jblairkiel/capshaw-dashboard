@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import Dialog from './Dialog';
 import WorshipPreferences from './WorshipPreferences';
 import TimeAway from './TimeAway';
 import { describeRange } from '../lib/timeAway';
@@ -17,12 +18,11 @@ import { WORSHIP_ROLES, levelInfo } from '../lib/worship';
 // It is also where the schedule keeper writes down the days a man will be
 // away, for the same reason: he says "we are at the beach that fortnight" in
 // the foyer rather than typing it in. Blocked-out days keep him off the
-// schedule and out of the sign-up list until they pass.
+// schedule until they pass.
 //
-// What this page is *not* is who may sign themselves up: that is Member Jobs,
-// and it is a separate decision. A preference is what somebody wants; being
-// signed off is what the schedule keeper has agreed to. This page shows both,
-// and only edits the first.
+// What this page shows is what somebody wants. Whether that turns into a
+// slot with his name on it is the Monthly Worship Schedule workflow's to
+// decide, or the schedule keeper's own — this page does not fill anything.
 const API = '/api/serving';
 
 async function send(url, options = {}) {
@@ -104,15 +104,87 @@ function Coverage({ members }) {
   );
 }
 
-// ─── One man's row ────────────────────────────────────────────────────────────
+// ─── A man's row in the grid ───────────────────────────────────────────────────
+// Just enough to scan a whole congregation at once — his name, whether he is
+// away, and how his preferences add up. Everything he actually said, and
+// editing it, lives behind Details rather than crowding the row.
 
-function RosterRow({ member, onSaved, onTimeAwayChanged }) {
-  const [open, setOpen] = useState(false);
+function rosterRowTone(member) {
+  if (member.gender !== 'male') return '';
+  if ((member.blackouts?.length ?? 0) > 0) return 'bg-amber-50/40';
+  if (!hasSpoken(member)) return 'bg-gray-50/60';
+  return '';
+}
 
+function RosterRow({ member, onOpen }) {
   const glad    = rolesAt(member, 'preferred');
   const willing = rolesAt(member, 'willing');
   const rather  = rolesAt(member, 'unavailable');
 
+  return (
+    <tr className={rosterRowTone(member)}>
+      <td className="px-4 py-2.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="font-medium text-church-navy">{member.name}</span>
+          <GenderBadge gender={member.gender} />
+        </div>
+      </td>
+      <td className="px-4 py-2.5">
+        {hasSpoken(member) ? (
+          <div className="flex flex-wrap items-center gap-1">
+            {glad.length > 0 && (
+              <span className={`text-xs px-2 py-0.5 rounded-full border ${levelInfo('preferred').tone}`}>
+                {glad.length} glad
+              </span>
+            )}
+            {willing.length > 0 && (
+              <span className={`text-xs px-2 py-0.5 rounded-full border ${levelInfo('willing').tone}`}>
+                {willing.length} willing
+              </span>
+            )}
+            {rather.length > 0 && (
+              <span className="text-xs text-gray-400">rather not: {rather.join(', ')}</span>
+            )}
+          </div>
+        ) : (
+          <span className="text-xs text-gray-400">Nothing said yet</span>
+        )}
+      </td>
+      <td className="px-4 py-2.5 text-sm">
+        {(member.blackouts?.length ?? 0) > 0 ? (
+          <span className="text-amber-700">
+            {describeRange(member.blackouts[0])}
+            {member.blackouts.length > 1 && (
+              <span className="text-gray-400"> +{member.blackouts.length - 1} more</span>
+            )}
+          </span>
+        ) : (
+          <span className="text-gray-300">—</span>
+        )}
+      </td>
+      <td className="px-4 py-2.5 text-sm text-gray-500">
+        {member.assignments > 0 ? member.assignments : <span className="text-gray-300">—</span>}
+      </td>
+      <td className="px-4 py-2.5 text-right">
+        <button
+          type="button"
+          onClick={onOpen}
+          aria-label={`Details for ${member.name}`}
+          className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold hover:text-church-navy transition-colors"
+        >
+          Details
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+// ─── One man, in full ──────────────────────────────────────────────────────────
+// What Details opens: everything he has said, and the two things kept second
+// hand for him — his time away, and his preferences when he told the office
+// rather than typing them in himself.
+
+function RosterDetailDialog({ member, onClose, onSaved, onTimeAwayChanged }) {
   async function save(body) {
     const json = await send(`${API}/members/${member.id}/preferences`, {
       method:  'PUT',
@@ -137,96 +209,40 @@ function RosterRow({ member, onSaved, onTimeAwayChanged }) {
   }
 
   return (
-    <div className="border-b border-gray-100 last:border-0">
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        aria-expanded={open}
-        aria-label={`Preferences for ${member.name}`}
-        className="w-full text-left px-4 py-3 flex items-start justify-between gap-3 hover:bg-gray-50 transition-colors"
-      >
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="font-medium text-church-navy">{member.name}</span>
-            <GenderBadge gender={member.gender} />
-            {member.assignments > 0 && (
-              <span className="text-xs text-gray-400">
-                {member.assignments} turn{member.assignments === 1 ? '' : 's'} on the roster
-              </span>
-            )}
-          </div>
+    <Dialog
+      title={member.name}
+      subtitle={`${member.assignments || 0} turn${member.assignments === 1 ? '' : 's'} on the roster`}
+      onClose={onClose}
+      width="max-w-lg"
+    >
+      <div className="space-y-4">
+        {member.gender !== 'male' && (
+          <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            This congregation rosters the worship jobs among its men, so nothing recorded here lets
+            them sign up until their directory entry says so.
+          </p>
+        )}
 
-          {(member.blackouts?.length ?? 0) > 0 && (
-            <p className="text-xs text-amber-700 mt-1">
-              Away {member.blackouts.map(describeRange).join(', ')}
-            </p>
-          )}
+        <WorshipPreferences
+          // Remounted whenever what is on file changes, so the editor is
+          // never left holding a set that has since been saved over.
+          key={JSON.stringify(member.preferences) + member.notes}
+          person={{ worship: { preferences: member.preferences, notes: member.notes } }}
+          onSave={save}
+        />
 
-          {hasSpoken(member) ? (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {glad.map(role => (
-                <span key={role} className={`text-xs px-2 py-0.5 rounded-full border ${levelInfo('preferred').tone}`}>{role}</span>
-              ))}
-              {willing.map(role => (
-                <span key={role} className={`text-xs px-2 py-0.5 rounded-full border ${levelInfo('willing').tone}`}>{role}</span>
-              ))}
-              {rather.length > 0 && (
-                <span className="text-xs text-gray-400 self-center">
-                  · rather not: {rather.join(', ')}
-                </span>
-              )}
-            </div>
-          ) : (
-            <p className="text-xs text-gray-400 mt-1">Nothing said yet — open this to write down what he told you.</p>
-          )}
-        </div>
-
-        <svg
-          className={`w-4 h-4 shrink-0 text-gray-400 mt-1 transition-transform ${open ? 'rotate-180' : ''}`}
-          fill="none" viewBox="0 0 24 24" stroke="currentColor"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-
-      {open && (
-        <div className="px-4 pb-4 space-y-4">
-          {member.gender !== 'male' && (
-            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-              This congregation rosters the worship jobs among its men, so nothing recorded here lets
-              them sign up until their directory entry says so.
-            </p>
-          )}
-
-          <WorshipPreferences
-            // Remounted whenever what is on file changes, so the editor is
-            // never left holding a set that has since been saved over.
-            key={JSON.stringify(member.preferences) + member.notes}
-            person={{ worship: { preferences: member.preferences, notes: member.notes } }}
-            onSave={save}
+        <div className="border-t border-gray-100 pt-3">
+          <TimeAway
+            blackouts={member.blackouts ?? []}
+            onAdd={blockOut}
+            onRemove={clearTimeAway}
+            heading="Time away"
+            hint={`Days ${member.name} will not be here. The month builder skips them when filling a slot.`}
+            emptyText="Nothing blocked out — he is available for every service on the roster."
           />
-
-          <div className="border-t border-gray-100 pt-3">
-            <TimeAway
-              blackouts={member.blackouts ?? []}
-              onAdd={blockOut}
-              onRemove={clearTimeAway}
-              heading="Time away"
-              hint={`Days ${member.name} will not be here. The month builder skips them, and he cannot sign himself up for one.`}
-              emptyText="Nothing blocked out — he is available for every service on the roster."
-            />
-          </div>
-
-          <div className="text-xs text-gray-500 border-t border-gray-100 pt-3">
-            <span className="font-medium text-gray-600">Signed off to sign up for: </span>
-            {member.jobs.length
-              ? member.jobs.join(', ')
-              : 'nothing yet'}
-            <span className="text-gray-400"> — set on Church Office → Member Jobs.</span>
-          </div>
         </div>
-      )}
-    </div>
+      </div>
+    </Dialog>
   );
 }
 
@@ -245,6 +261,7 @@ export default function ServiceRosterView() {
   const [search, setSearch]   = useState('');
   const [onlyMen, setOnlyMen] = useState(true);
   const [showing, setShowing] = useState('all');
+  const [editingId, setEditingId] = useState(null);   // whose Details dialog is open
 
   // `quiet` reloads without the spinner, for a change made inside an open row —
   // blocking out somebody's days should not fold the row back up under them.
@@ -278,6 +295,11 @@ export default function ServiceRosterView() {
 
   const pool   = useMemo(() => members.filter(m => !onlyMen || m.gender === 'male'), [members, onlyMen]);
   const spoken = pool.filter(hasSpoken).length;
+
+  // Looked up fresh each render rather than held in state, so a save made
+  // inside the dialog — or a quiet reload after blocking out a day — is
+  // reflected the moment it lands rather than needing the dialog reopened.
+  const editingMember = members.find(m => m.id === editingId) ?? null;
 
   if (loading) {
     return (
@@ -329,25 +351,44 @@ export default function ServiceRosterView() {
         <span className="text-xs text-gray-400">{shown.length} shown</span>
       </div>
 
-      <div className="card p-0 overflow-hidden">
-        {shown.map(member => (
-          <RosterRow
-            key={member.id}
-            member={member}
-            onSaved={updated => setMembers(prev => prev.map(m => (
-              m.id === updated.id
-                ? { ...m, preferences: updated.preferences, notes: updated.notes }
-                : m
-            )))}
-            onTimeAwayChanged={refresh}
-          />
-        ))}
-        {shown.length === 0 && (
-          <p className="px-4 py-12 text-center text-gray-400 text-sm">
-            Nobody matches. {onlyMen && 'Members show up here once their directory entry says they are a man.'}
-          </p>
-        )}
+      <div className="card p-0 overflow-hidden overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-church-navy text-left text-xs text-gray-300 uppercase tracking-wide">
+              <th className="px-4 py-3">Name</th>
+              <th className="px-4 py-3">Preferences</th>
+              <th className="px-4 py-3">Away</th>
+              <th className="px-4 py-3">Turns</th>
+              <th className="px-4 py-3 text-right">Details</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {shown.map(member => (
+              <RosterRow key={member.id} member={member} onOpen={() => setEditingId(member.id)} />
+            ))}
+            {shown.length === 0 && (
+              <tr>
+                <td colSpan={5} className="px-4 py-12 text-center text-gray-400 text-sm">
+                  Nobody matches. {onlyMen && 'Members show up here once their directory entry says they are a man.'}
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
+
+      {editingMember && (
+        <RosterDetailDialog
+          member={editingMember}
+          onClose={() => setEditingId(null)}
+          onSaved={updated => setMembers(prev => prev.map(m => (
+            m.id === updated.id
+              ? { ...m, preferences: updated.preferences, notes: updated.notes }
+              : m
+          )))}
+          onTimeAwayChanged={refresh}
+        />
+      )}
     </div>
   );
 }

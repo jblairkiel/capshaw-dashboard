@@ -22,12 +22,13 @@ import InboxView from './components/InboxView';
 import WorkflowDialogButton from './components/WorkflowDialogButton';
 import MailGroupsView from './components/MailGroupsView';
 import ServingSchedule from './components/ServingSchedule';
-import ServingJobsView from './components/ServingJobsView';
 import ServiceRosterView from './components/ServiceRosterView';
 import ActionHistoryView from './components/ActionHistoryView';
 import WeeklyBulletinView from './components/WeeklyBulletinView';
 import ImpersonationBanner from './components/ImpersonationBanner';
 import GroupsView from './components/GroupsView';
+import BugReportDialog from './components/BugReportDialog';
+import BugReportsView from './components/BugReportsView';
 import { hasWriteAccess, isAdmin, hasArea } from './lib/roles';
 
 const API = '/api/members';
@@ -84,10 +85,10 @@ const PROFILE_GROUP = {
 // worth showing.
 const OFFICE_ITEMS = [
   { id: 'users',          label: 'Members & Access',  when: user => isAdmin(user) },
+  { id: 'bug-reports',    label: 'Bug Reports',       when: user => isAdmin(user) },
   { id: 'action-history', label: 'Action History',    when: user => isAdmin(user) },
   { id: 'database',       label: 'Church Records',    when: user => isAdmin(user) },
   { id: 'service-roster', label: 'Service Roster',    when: user => hasArea(user, 'serving-schedule') },
-  { id: 'serving-jobs',   label: 'Member Jobs',       when: user => hasArea(user, 'serving-schedule') },
   { id: 'directory',      label: 'Member Directory',  when: user => hasArea(user, 'directory') },
   { id: 'mail-groups',    label: 'Email Groups',      when: user => hasArea(user, 'mail-groups') },
   { id: 'bulletin',       label: 'Weekly Newsletter', when: user => hasArea(user, 'bulletin') },
@@ -103,8 +104,8 @@ function officeGroupFor(user) {
 const STANDALONE_TABS = new Set([
   'bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database',
   'directory', 'profile', 'inbox', 'mail-groups', 'livestreams',
-  'assignments', 'visitors', 'leadership', 'serving-jobs', 'action-history','service-roster', 'bulletin',
-  'groups',
+  'assignments', 'visitors', 'leadership', 'action-history','service-roster', 'bulletin',
+  'groups', 'bug-reports',
 ]);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
@@ -172,6 +173,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
   const [updating,    setUpdating]    = useState(false);
   const [updateError,    setUpdateError]    = useState('');
   const [updateWarnings, setUpdateWarnings] = useState([]);
+  const [reportingBug,   setReportingBug]   = useState(false);
 
   // Load scraped data. Everyone here is signed in — the app root sees to that.
   useEffect(() => {
@@ -211,6 +213,10 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
   const lastUpdated = siteData?.lastUpdated
     ? new Date(siteData.lastUpdated).toLocaleString()
     : null;
+
+  // What a bug report should say it was filed from — read off the same list
+  // the nav is built from, so it always matches what the person actually sees.
+  const activeLabel = GROUPS.flatMap(g => g.items).find(i => i.id === activeTab)?.label || '';
 
   return (
     <div className="min-h-screen bg-church-cream flex flex-col">
@@ -402,14 +408,14 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
           <ServiceRosterView />
         </main>
       )}
-      {!updating && activeTab === 'serving-jobs' && hasArea(user, 'serving-schedule') && (
-        <main className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
-          <ServingJobsView />
-        </main>
-      )}
       {!updating && activeTab === 'action-history' && admin && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           <ActionHistoryView />
+        </main>
+      )}
+      {!updating && activeTab === 'bug-reports' && admin && (
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <BugReportsView />
         </main>
       )}
       {!updating && activeTab === 'inbox' && user && (
@@ -461,7 +467,21 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
         <p className="text-xs text-gray-400 mt-1">
           8941 Wall Triana Hwy &bull; Harvest, AL &mdash; for our church family
         </p>
+        <button
+          onClick={() => setReportingBug(true)}
+          className="text-xs text-gray-400 underline hover:text-church-navy mt-2"
+        >
+          Report a problem
+        </button>
       </footer>
+
+      {reportingBug && (
+        <BugReportDialog
+          pageId={activeTab}
+          pageLabel={activeLabel}
+          onClose={() => setReportingBug(false)}
+        />
+      )}
     </div>
   );
 }

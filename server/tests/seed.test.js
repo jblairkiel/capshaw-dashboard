@@ -177,26 +177,6 @@ describe('the words it writes', () => {
     expect(orphans).toBe(0);
   });
 
-  test('the jobs somebody is signed off for are jobs the roster has', () => {
-    seed.generate({ scale: 2 });
-
-    const jobs = db.prepare('SELECT DISTINCT job FROM job_eligibility').all().map(r => r.job);
-    expect(jobs.length).toBeGreaterThan(0);
-    expect(jobs.filter(job => !WORSHIP_ROLES.includes(job))).toEqual([]);
-  });
-
-  test('nobody is signed off for a job they said they would rather not do', () => {
-    seed.generate({ scale: 2 });
-
-    const contradictions = db.prepare(`
-      SELECT d.name, e.job FROM job_eligibility e
-        JOIN worship_preferences p ON p.directory_id = e.directory_id AND p.role = e.job
-        JOIN directory d ON d.id = e.directory_id
-       WHERE p.level = 'unavailable'
-    `).all();
-    expect(contradictions).toEqual([]);
-  });
-
   test('a sample month is laid out the way the page would lay one out', () => {
     seed.generate({ scale: 2 });
 

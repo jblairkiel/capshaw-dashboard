@@ -12,7 +12,7 @@ const SERVER_DIR = path.join(__dirname, '..');
 function pathsWith(env) {
   jest.resetModules();
   const before = { ...process.env };
-  for (const key of ['CAPSHAW_DATA_DIR', 'CAPSHAW_DB_FILE', 'CAPSHAW_PHOTO_DIR', 'CAPSHAW_DATA_FILE', 'CAPSHAW_UPLOAD_DIR']) {
+  for (const key of ['CAPSHAW_DATA_DIR', 'CAPSHAW_DB_FILE', 'CAPSHAW_PHOTO_DIR', 'CAPSHAW_DATA_FILE', 'CAPSHAW_UPLOAD_DIR', 'CAPSHAW_BUG_SCREENSHOT_DIR']) {
     delete process.env[key];
   }
   Object.assign(process.env, env);
@@ -31,6 +31,7 @@ describe('where this installation writes', () => {
     expect(paths.photos).toBe(path.join(SERVER_DIR, 'data', 'photos'));
     expect(paths.scrapeCache).toBe(path.join(SERVER_DIR, 'data', 'members.json'));
     expect(paths.uploads).toBe(path.join(SERVER_DIR, 'uploads'));
+    expect(paths.screenshots).toBe(path.join(SERVER_DIR, 'data', 'bug-screenshots'));
   });
 
   test('one variable moves the database, the photos and the scrape cache together', () => {
@@ -39,6 +40,15 @@ describe('where this installation writes', () => {
     expect(paths.database).toBe(path.join('/srv/capshaw/data', 'bible_questions.db'));
     expect(paths.photos).toBe(path.join('/srv/capshaw/data', 'photos'));
     expect(paths.scrapeCache).toBe(path.join('/srv/capshaw/data', 'members.json'));
+    expect(paths.screenshots).toBe(path.join('/srv/capshaw/data', 'bug-screenshots'));
+  });
+
+  test('bug screenshots are their own directory, kept apart from the family photos', () => {
+    const paths = pathsWith({ CAPSHAW_DATA_DIR: '/srv/capshaw/data' });
+    expect(paths.screenshots).not.toBe(paths.photos);
+
+    const moved = pathsWith({ CAPSHAW_DATA_DIR: '/srv/capshaw/data', CAPSHAW_BUG_SCREENSHOT_DIR: '/srv/capshaw/screenshots' });
+    expect(moved.screenshots).toBe('/srv/capshaw/screenshots');
   });
 
   test('uploads are separate, because they are working files rather than records', () => {
@@ -76,6 +86,7 @@ describe('where this installation writes', () => {
 
     expect(fs.existsSync(path.join(scratch, 'data'))).toBe(true);
     expect(fs.existsSync(path.join(scratch, 'data', 'photos'))).toBe(true);
+    expect(fs.existsSync(path.join(scratch, 'data', 'bug-screenshots'))).toBe(true);
     expect(fs.existsSync(path.join(scratch, 'uploads'))).toBe(true);
     // The database's own directory, which nothing else would have created.
     expect(fs.existsSync(path.join(scratch, 'db'))).toBe(true);

@@ -38,3 +38,6 @@ Thumbs.db
 
 # Scraped directory photos — congregation images, re-downloaded by the scraper
 server/data/photos/
+
+# Screenshots attached to bug reports
+server/data/bug-screenshots/

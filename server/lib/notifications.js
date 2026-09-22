@@ -25,6 +25,8 @@ const KINDS = {
   'group-event-comment':   'A reply on a meeting',
   'announcement-comment':  'A reply on a church event',
   'group-membership':      'You were added to a church group',
+  'bug-report-new':        'Somebody filed a bug report',
+  'bug-report-status':     'A bug report you filed has an update',
 };
 
 const KIND_IDS = Object.keys(KINDS);
