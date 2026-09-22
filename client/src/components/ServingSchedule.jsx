@@ -246,6 +246,7 @@ export default function ServingSchedule() {
   const [building, setBuilding] = useState(false);
   const [editing, setEditing] = useState(null);   // a slot, or {} for a new one
   const [awayView, setAwayView] = useState('list');   // 'list' or 'calendar', for the keeper's view of who is away
+  const [blockingOut, setBlockingOut] = useState(false);   // the member's own time-away dialog
 
   const load = useCallback(async (wanted = '') => {
     setLoading(true);
@@ -361,6 +362,15 @@ export default function ServingSchedule() {
             </label>
           )}
 
+          {me.directoryId && (
+            <button
+              onClick={() => setBlockingOut(true)}
+              className="text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold hover:text-church-navy transition-colors"
+            >
+              Time away{(me.blackouts?.length ?? 0) > 0 ? ` (${me.blackouts.length})` : ''}
+            </button>
+          )}
+
           {canManage && (
             <>
               <button onClick={() => setBuilding(true)} className="btn-primary text-sm">
@@ -473,18 +483,6 @@ export default function ServingSchedule() {
         </table>
       </div>
 
-      {/* Everybody keeps their own time away here; the schedule keeper sees the
-          congregation's, because it is why a slot is empty. */}
-      {me.directoryId && (
-        <div className="card p-4">
-          <TimeAway
-            blackouts={me.blackouts ?? []}
-            onAdd={addTimeAway}
-            onRemove={clearTimeAway}
-          />
-        </div>
-      )}
-
       {canManage && (
         <div className="card p-4 space-y-3">
           <div className="flex items-start justify-between flex-wrap gap-2">
@@ -550,6 +548,16 @@ export default function ServingSchedule() {
           onSaved={(saved, warning) => { setEditing(null); setNotice(warning || ''); load(saved?.month || month); }}
           onDeleted={() => { setEditing(null); load(month); }}
         />
+      )}
+
+      {blockingOut && (
+        <Dialog title="Time away" onClose={() => setBlockingOut(false)} width="max-w-md">
+          <TimeAway
+            blackouts={me.blackouts ?? []}
+            onAdd={addTimeAway}
+            onRemove={clearTimeAway}
+          />
+        </Dialog>
       )}
     </div>
   );

@@ -510,6 +510,43 @@ describe('ServingSchedule', () => {
     expect(screen.queryByText('Time away')).not.toBeInTheDocument();
   });
 
+  test('time away is nested behind its own button, not shown on the page itself', async () => {
+    mockSchedule({
+      me: {
+        directoryId: 3, name: 'Ray Harris', gender: 'male', jobs: [], canSignUp: true,
+        blackouts: [{ id: 7, startsOn: '2025-06-07', endsOn: '2025-06-21', reason: 'Away with family' }],
+      },
+    });
+    render(<ServingSchedule />);
+    await screen.findByRole('combobox', { name: 'Week' });
+
+    // Not open on load, and the button says how many days are already blocked out.
+    expect(screen.queryByText(/June 7 – June 21, 2025/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Time away (1)' })).toBeInTheDocument();
+  });
+
+  test('somebody not linked to the directory is not offered a time-away button', async () => {
+    mockSchedule();   // default me.directoryId is null
+    render(<ServingSchedule />);
+    await screen.findByRole('combobox', { name: 'Week' });
+    expect(screen.queryByRole('button', { name: /^time away/i })).not.toBeInTheDocument();
+  });
+
+  test('the time-away dialog opens on the button and closes again', async () => {
+    mockSchedule({
+      me: { directoryId: 3, name: 'Ray Harris', gender: 'male', jobs: [], canSignUp: true, blackouts: [] },
+    });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Time away' }));
+
+    const dialog = await screen.findByRole('dialog', { name: 'Time away' });
+    expect(dialog).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
   test('a member sees the days they have blocked out', async () => {
     mockSchedule({
       me: {
@@ -518,6 +555,7 @@ describe('ServingSchedule', () => {
       },
     });
     render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: /^time away/i }));
 
     expect(await screen.findByText(/June 7 – June 21, 2025/)).toBeInTheDocument();
     expect(screen.getByText(/Away with family/)).toBeInTheDocument();
@@ -528,6 +566,7 @@ describe('ServingSchedule', () => {
       me: { directoryId: 3, name: 'Ray Harris', gender: 'male', jobs: [], canSignUp: true, blackouts: [] },
     });
     render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: /^time away/i }));
 
     type(await screen.findByLabelText('First day away'), '2025-06-07');
     fireEvent.click(screen.getByRole('button', { name: /block out these days/i }));
@@ -546,6 +585,7 @@ describe('ServingSchedule', () => {
       },
     });
     render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: /^time away/i }));
     fireEvent.click(await screen.findByRole('button', { name: /clear time away/i }));
 
     await waitFor(() => {

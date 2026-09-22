@@ -353,12 +353,15 @@ be here at all — a holiday, a hospital stay, a fortnight with the
 grandchildren. It is a range of days, both ends included, and a single day away
 is a range whose ends are the same date.
 
-Anybody linked to the directory blocks out their own days from the bottom of
-the **Serving Schedule** page. The schedule keeper can block out anybody's from
+Anybody linked to the directory blocks out their own days from a **Time away**
+button on the **Serving Schedule** page, which opens a dialog rather than
+sitting permanently on the page — the button itself says how many days are
+already blocked out. The schedule keeper can block out anybody's from
 **Church Office → Service Roster**, because most people say *"we are at the
-beach that fortnight"* in the foyer rather than typing it in. Either way the
-action history records who wrote it down, so a range taken second-hand is never
-mistaken for one the member entered himself.
+beach that fortnight"* in the foyer rather than typing it in — see that page's
+**Details** dialog below. Either way the action history records who wrote it
+down, so a range taken second-hand is never mistaken for one the member
+entered himself.
 
 Once days are blocked out:
 
@@ -392,11 +395,15 @@ rows either way; the action history records who wrote each one down and what
 it changed, so a preference taken second-hand is never mistaken for one the
 man typed himself.
 
+The congregation is a grid, a row per man, summarised so the whole roster can
+be scanned at once:
+
 | | |
 |---|---|
 | **Who is behind each job** | Every role, with how many of the men shown are glad to do it and how many are willing. A role with nobody behind it is called out — that is the gap a schedule keeper is looking for |
 | **Who to show** | Everyone, only those who have said something, or only those who have not — the last is the list to take round on a Sunday |
-| **Per man** | What he has said, his scheduling note, the days he is away, his turns on the roster so far, and which jobs he has been signed off for |
+| **Each row** | His name, a count of what he is glad to and willing to do (or "rather not"), the days he is away, and his turns on the roster so far |
+| **Details** | Opens a dialog with everything about him: the full preference editor, his time away (block out or clear a range, the same as the Serving Schedule page's own dialog), and which jobs he has been signed off for |
 
 The two pages are deliberately separate, because they are separate decisions:
 the Service Roster is **what somebody wants**, and Member Jobs is **what the
