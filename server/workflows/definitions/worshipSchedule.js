@@ -12,11 +12,15 @@ const notify = require('../../mail/notify');
 function buildDraft(db, { month, services, attempt }) {
   const people = db.prepare('SELECT id, name FROM directory ORDER BY name ASC').all();
   const preferences = db.prepare('SELECT directory_id, role, level FROM worship_preferences').all();
+  // Days people have blocked out. Read with the preferences so a draft built
+  // today reflects the holiday somebody entered this morning.
+  const blackouts = db.prepare('SELECT directory_id, starts_on, ends_on FROM job_blackouts').all();
 
   return generateSchedule({
     month,
     people,
     preferences,
+    blackouts,
     services: services ? services.split(',').map(s => s.trim()).filter(Boolean) : SERVICES,
     attempt: Number(attempt) || 0,
   });

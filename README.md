@@ -168,7 +168,7 @@ implicitly, and nobody else holds one until an admin grants it.
 | `worship-order` | This Sunday | Upload, replace and remove the order of service |
 | `songs` | Songs We Sing | Add songs, record what was sung, keep the song of the week |
 | `announcements` | Announcements | Write, edit and retire announcements and events |
-| `serving-schedule` | Serving Schedule, Service Roster, Member Jobs | Build a month of worship jobs, fill or clear any slot, record what each man will volunteer for, and decide which jobs each member may sign up for |
+| `serving-schedule` | Serving Schedule, Service Roster, Member Jobs | Build a month of worship jobs, fill or clear any slot, record what each man will volunteer for and the days he is away, and decide which jobs each member may sign up for |
 | `attendance` | Attendance | Record attendance counts and correct earlier ones (the list of services they pick from is an admin's — see [Service types](#service-types)) |
 | `visitors` | Guests | Add guests, keep their details and comments, record their visits |
 | `leadership` | Elders & Deacons | Keep the elders and deacons, and what each looks after, up to date |
@@ -346,6 +346,33 @@ signed off for something they asked not to do. Somebody may take their own name
 back off a slot; only the schedule keeper may take somebody else's off. Every
 sign-up and every clearing is recorded in the action history by name.
 
+### Time away
+
+A preference says what somebody will do; **time away** says when they will not
+be here at all — a holiday, a hospital stay, a fortnight with the
+grandchildren. It is a range of days, both ends included, and a single day away
+is a range whose ends are the same date.
+
+Anybody linked to the directory blocks out their own days from the bottom of
+the **Serving Schedule** page. The schedule keeper can block out anybody's from
+**Church Office → Service Roster**, because most people say *"we are at the
+beach that fortnight"* in the foyer rather than typing it in. Either way the
+action history records who wrote it down, so a range taken second-hand is never
+mistaken for one the member entered himself.
+
+Once days are blocked out:
+
+| | |
+|---|---|
+| **The month builder** | Skips that man for the services falling inside the range, and still offers him every other Sunday — one week away never costs the whole month. A job nobody is left for is reported unfilled rather than quietly blank |
+| **Signing yourself up** | Is refused for a day you have blocked out, and the answer names the range so you know which days are in the way. Clear the range and the slot is yours again |
+| **The schedule keeper** | Can still write somebody into a day they are away — they may know something the range does not — but never silently: saving says so, and the roster marks the slot **away** |
+| **A job with no date** | The monthly visual preparation belongs to no particular day, so nobody is ever away for it |
+
+Time away is kept in `job_blackouts` and goes with the member if their
+directory entry does. It says nothing about *why* unless somebody writes a
+reason, which is shown to the schedule keeper beside the dates.
+
 ### Service Roster
 
 **Church Office → Service Roster** is the page for the question that comes
@@ -363,7 +390,7 @@ man typed himself.
 |---|---|
 | **Who is behind each job** | Every role, with how many of the men shown are glad to do it and how many are willing. A role with nobody behind it is called out — that is the gap a schedule keeper is looking for |
 | **Who to show** | Everyone, only those who have said something, or only those who have not — the last is the list to take round on a Sunday |
-| **Per man** | What he has said, his scheduling note, his turns on the roster so far, and which jobs he has been signed off for |
+| **Per man** | What he has said, his scheduling note, the days he is away, his turns on the roster so far, and which jobs he has been signed off for |
 
 The two pages are deliberately separate, because they are separate decisions:
 the Service Roster is **what somebody wants**, and Member Jobs is **what the
@@ -371,9 +398,9 @@ schedule keeper has agreed to**. The roster page shows the sign-offs but does
 not change them.
 
 The Monthly Worship Schedule workflow reads these preferences when it fills a
-month: it never schedules somebody who said *rather not*, and among people with
-equally few turns it takes the one who said *glad to* first. See
-[Monthly Worship Schedule](#monthly-worship-schedule).
+month: it never schedules somebody who said *rather not* or who is away that
+day, and among people with equally few turns it takes the one who said *glad
+to* first. See [Monthly Worship Schedule](#monthly-worship-schedule).
 
 ---
 
@@ -1125,7 +1152,8 @@ the names in for you.)
 `server/workflows/scheduling.js` is pure and deterministic — the same month and
 preferences always give the same schedule. Its rules, in order:
 
-1. Never schedule somebody who marked themselves **unavailable** for that role.
+1. Never schedule somebody who marked themselves **unavailable** for that role,
+   or who has blocked that day out as [time away](#time-away).
 2. Never schedule the same person twice in one service.
 3. **Spread the load** — whoever has had the fewest turns goes next.
 4. On equal turns, someone who said they are *glad to* goes ahead of someone

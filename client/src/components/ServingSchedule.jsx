@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Dialog from './Dialog';
+import TimeAway from './TimeAway';
+import { describeRange } from '../lib/timeAway';
 
 // The serving schedule, from both sides of it:
 //
@@ -8,6 +10,8 @@ import Dialog from './Dialog';
 //     or take their own name back off one.
 //   · Whoever looks after the schedule can lay out next month in one go, fill
 //     or clear any slot by hand, and add a one-off job.
+//   · Anybody linked to the directory blocks out the days they will be away,
+//     and the schedule leaves those days alone.
 //
 // The server decides all of that; `canManage` and `me` come back from it and
 // only say which buttons to draw.
@@ -144,7 +148,9 @@ function SlotDialog({ slot, month, jobs, services, onClose, onSaved, onDeleted }
         isNew ? `${API}/assignments` : `${API}/assignments/${slot.id}`,
         { method: isNew ? 'POST' : 'PATCH', ...jsonBody(form) },
       );
-      onSaved(json.assignment);
+      // Writing somebody into a day they are away for is allowed — the keeper
+      // may know something the range does not — but it is never silent.
+      onSaved(json.assignment, json.warning);
     } catch (err) {
       setError(err.message);
       setBusy(false);
@@ -292,6 +298,18 @@ export default function ServingSchedule() {
     }
   }
 
+  // Blocking out days, and taking a block back off. Both reload the month,
+  // because a range that has just been cleared may free a slot on the table.
+  async function addTimeAway(range) {
+    await send(`${API}/blackouts`, { method: 'POST', ...jsonBody(range) });
+    await load(month);
+  }
+
+  async function clearTimeAway(id) {
+    await send(`${API}/blackouts/${id}`, { method: 'DELETE' });
+    await load(month);
+  }
+
   if (loading && !data) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -398,6 +416,14 @@ export default function ServingSchedule() {
                 <td className="px-4 py-2 font-medium text-church-navy">{r.job}</td>
                 <td className="px-4 py-2">
                   {r.name || <span className="text-gray-400">Nobody yet</span>}
+                  {r.away && (
+                    <span
+                      title={`Away ${describeRange(r.away)}${r.away.reason ? ` · ${r.away.reason}` : ''}`}
+                      className="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 align-middle"
+                    >
+                      away
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-2 text-right">
                   <div className="flex items-center gap-1.5 justify-end flex-wrap">
@@ -445,6 +471,39 @@ export default function ServingSchedule() {
         </table>
       </div>
 
+      {/* Everybody keeps their own time away here; the schedule keeper sees the
+          congregation's, because it is why a slot is empty. */}
+      {me.directoryId && (
+        <div className="card p-4">
+          <TimeAway
+            blackouts={me.blackouts ?? []}
+            onAdd={addTimeAway}
+            onRemove={clearTimeAway}
+          />
+        </div>
+      )}
+
+      {canManage && (data?.blackouts?.length ?? 0) > 0 && (
+        <div className="card p-4 space-y-2">
+          <div>
+            <h4 className="text-sm font-semibold text-church-navy">Who is away</h4>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Blocked out across the congregation. Change one of them from
+              <strong> Church Office → Service Roster</strong>.
+            </p>
+          </div>
+          <ul className="text-sm text-gray-700 space-y-1">
+            {data.blackouts.map(range => (
+              <li key={range.id} className="flex flex-wrap gap-x-2">
+                <span className="font-medium text-church-navy">{range.name}</span>
+                <span className="text-gray-500">{describeRange(range)}</span>
+                {range.reason && <span className="text-xs text-gray-400 self-center">{range.reason}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {building && (
         <BuildMonthDialog
           services={data?.services ?? []}
@@ -460,7 +519,7 @@ export default function ServingSchedule() {
           jobs={data?.jobs ?? []}
           services={data?.services ?? []}
           onClose={() => setEditing(null)}
-          onSaved={saved => { setEditing(null); load(saved?.month || month); }}
+          onSaved={(saved, warning) => { setEditing(null); setNotice(warning || ''); load(saved?.month || month); }}
           onDeleted={() => { setEditing(null); load(month); }}
         />
       )}

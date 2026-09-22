@@ -8,6 +8,9 @@
 //   · Every other member sees the roster, and — if they are down as a man in
 //     the directory and have been allowed that job — can sign themselves up
 //     for an empty slot, or take their own name back off one.
+//   · Anybody linked to the directory can block out the days they will be
+//     away, and the schedule keeper can do it for them. Nobody gets signed up
+//     for a day they have blocked out.
 //
 // Everything written here lands in the action history.
 const express = require('express');
@@ -18,6 +21,7 @@ const { WORSHIP_ROLES, PREFERENCE_LEVELS } = require('../lib/people');
 const worship = require('../lib/worship');
 const { SERVICE_ROLES, SERVICES, parseMonth, servicesIn } = require('../workflows/scheduling');
 const actionLog = require('../lib/actionLog');
+const blackouts = require('../lib/blackouts');
 
 const AREA = 'serving-schedule';
 const manageOnly = requireArea(AREA);
@@ -65,6 +69,64 @@ function signupProblem(person, job) {
   return null;
 }
 
+// ─── Time away ────────────────────────────────────────────────────────────────
+
+// Which day a slot falls on, as a date a blocked-out range can be compared
+// against. A slot with no date of its own belongs to no particular day.
+function dayOf(slot) {
+  return blackouts.dateOf(slot.month, slot.date);
+}
+
+// The roster, with each filled slot told whether whoever is down for it has
+// blocked that day out. Worked out here rather than on the page, because the
+// page has names and the ranges have directory entries.
+function assignmentsWithConflicts(month) {
+  return assignmentsIn(month).map(slot => {
+    const away = slot.name.trim() ? blackouts.nameAwayOn(slot.name, dayOf(slot)) : null;
+    if (!away) return slot;
+
+    return {
+      ...slot,
+      away: {
+        startsOn: away.startsOn,
+        endsOn:   away.endsOn,
+        reason:   away.reason,
+        said:     blackouts.describe(away),
+      },
+    };
+  });
+}
+
+// Writing somebody into a slot they are away for is the schedule keeper's
+// call — they may know something the range does not — so it is said rather
+// than refused. Nothing is said when the day is clear.
+function awayWarning(slot) {
+  if (!slot?.name?.trim()) return null;
+  const away = blackouts.nameAwayOn(slot.name, dayOf(slot));
+  return away
+    ? `${slot.name} has blocked out ${blackouts.describe(away)}${away.reason ? ` (${away.reason})` : ''} — they are down for this one anyway.`
+    : null;
+}
+
+// Whose time away somebody may keep: their own, and — for the schedule keeper —
+// anybody's. Returns the directory entry, or the answer to refuse with.
+function personWhoseTimeOff(req, wantedId) {
+  const keeper = holdsArea(req.user, AREA);
+  // No id named means their own, which is how the Serving Schedule page sends it.
+  const own = wantedId === undefined || wantedId === null || wantedId === '';
+  const id  = own ? req.user?.directory_id : Number(wantedId);
+
+  if (!own && !Number.isInteger(id)) return { error: 'No such member', status: 404 };
+  if (!id) return { error: 'Your account is not linked to the member directory yet — ask an admin to link it.', status: 403 };
+  if (!keeper && id !== req.user?.directory_id) {
+    return { error: 'You can only block out your own days. Ask whoever looks after the serving schedule.', status: 403 };
+  }
+
+  const person = db.prepare('SELECT id, name FROM directory WHERE id = ?').get(id);
+  if (!person) return { error: 'No such member', status: 404 };
+  return { person };
+}
+
 // ─── GET /api/serving ─────────────────────────────────────────────────────────
 // Everything one page render needs: the months on record, the chosen month's
 // slots, and what this particular person may do with them.
@@ -76,21 +138,27 @@ router.get('/', (req, res) => {
     : months[0]?.month || '';
   const person  = personFor(req.user);
 
+  const canManage = holdsArea(req.user, AREA);
+
   res.json({
     success:     true,
     months,
     month:       wanted,
-    assignments: wanted ? assignmentsIn(wanted) : [],
+    assignments: wanted ? assignmentsWithConflicts(wanted) : [],
     jobs:        WORSHIP_ROLES,
     services:    SERVICES,
     serviceJobs: SERVICE_ROLES,
-    canManage:   holdsArea(req.user, AREA),
+    canManage,
+    // Everyone's time away is the schedule keeper's to see — it is why a slot
+    // is empty. Everybody else sees only their own.
+    blackouts:   canManage ? blackouts.all() : [],
     me: {
       directoryId: person?.id ?? null,
       name:        person?.name ?? '',
       gender:      person?.gender ?? '',
       jobs:        person ? eligibilityFor(person.id) : [],
       canSignUp:   !!person && (person.gender || '').toLowerCase() === 'male',
+      blackouts:   person ? blackouts.forPerson(person.id) : [],
     },
   });
 });
@@ -167,7 +235,7 @@ router.post('/assignments', requireApproved, manageOnly, (req, res) => {
     summary:  `Added ${job} on ${date || month}${name ? ` for ${name}` : ' (nobody yet)'}`,
     after:    row,
   });
-  res.json({ success: true, assignment: row });
+  res.json({ success: true, assignment: row, warning: awayWarning(row) });
 });
 
 router.patch('/assignments/:id', requireApproved, manageOnly, (req, res) => {
@@ -190,7 +258,7 @@ router.patch('/assignments/:id', requireApproved, manageOnly, (req, res) => {
     before,
     after,
   });
-  res.json({ success: true, assignment: after });
+  res.json({ success: true, assignment: after, warning: awayWarning(after) });
 });
 
 router.delete('/assignments/:id', requireApproved, manageOnly, (req, res) => {
@@ -221,6 +289,14 @@ router.post('/assignments/:id/signup', requireApproved, (req, res) => {
   const person  = personFor(req.user);
   const problem = signupProblem(person, slot.job);
   if (problem) return res.status(403).json({ success: false, error: problem });
+
+  const away = blackouts.personAwayOn(person.id, dayOf(slot));
+  if (away) {
+    return res.status(409).json({
+      success: false,
+      error:   `You have blocked out ${blackouts.describe(away)}. Take that off your time away first if you can serve after all.`,
+    });
+  }
 
   db.prepare('UPDATE job_assignments SET name = ? WHERE id = ?').run(person.name, slot.id);
   const after = db.prepare('SELECT * FROM job_assignments WHERE id = ?').get(slot.id);
@@ -264,6 +340,70 @@ router.delete('/assignments/:id/signup', requireApproved, (req, res) => {
   res.json({ success: true });
 });
 
+// ─── Time away ────────────────────────────────────────────────────────────────
+// A member blocks out their own days; the schedule keeper may block out
+// anybody's, because plenty of people say "we are away that fortnight" in the
+// foyer rather than typing it in. Every range lands in the action history under
+// whoever wrote it down, so one taken second-hand is never mistaken for one the
+// member entered themselves.
+
+router.get('/blackouts', requireApproved, (req, res) => {
+  const keeper = holdsArea(req.user, AREA);
+  res.json({
+    success:   true,
+    canManage: keeper,
+    blackouts: keeper ? blackouts.all() : blackouts.forPerson(req.user?.directory_id),
+  });
+});
+
+router.post('/blackouts', requireApproved, (req, res) => {
+  const { person, error, status } = personWhoseTimeOff(req, req.body?.directoryId);
+  if (error) return res.status(status).json({ success: false, error });
+
+  const { range, error: badRange } = blackouts.readRange(req.body);
+  if (badRange) return res.status(400).json({ success: false, error: badRange });
+
+  const saved = blackouts.add(person.id, range);
+  const mine  = person.id === req.user?.directory_id;
+
+  actionLog.record(req.user, {
+    area:     AREA,
+    action:   'create',
+    entity:   'time away',
+    entityId: saved.id,
+    summary:  mine
+      ? `Blocked out ${blackouts.describe(saved)} for the serving jobs`
+      : `Blocked out ${blackouts.describe(saved)} for ${person.name}`,
+    after:    saved,
+  });
+
+  res.json({ success: true, blackout: saved });
+});
+
+router.delete('/blackouts/:id', requireApproved, (req, res) => {
+  const existing = blackouts.get(req.params.id);
+  if (!existing) return res.status(404).json({ success: false, error: 'No such time away' });
+
+  const { error, status } = personWhoseTimeOff(req, existing.directoryId);
+  if (error) return res.status(status).json({ success: false, error });
+
+  blackouts.remove(existing.id);
+  const mine = existing.directoryId === req.user?.directory_id;
+
+  actionLog.record(req.user, {
+    area:     AREA,
+    action:   'delete',
+    entity:   'time away',
+    entityId: existing.id,
+    summary:  mine
+      ? `Cleared their time away for ${blackouts.describe(existing)}`
+      : `Cleared ${existing.name}'s time away for ${blackouts.describe(existing)}`,
+    before:   existing,
+  });
+
+  res.json({ success: true });
+});
+
 // ─── Who may sign up for what ─────────────────────────────────────────────────
 // What both office pages behind the Serving Schedule area are built from:
 // every member, whether they are down as a man, what they have said they will
@@ -284,11 +424,14 @@ function rosterMembers() {
   const preferences = worship.allPreferences();
   const notes       = worship.allNotes();
 
+  const away = blackouts.byPerson();
+
   const byPerson = new Map(people.map(p => [p.id, {
     ...p,
     jobs:        [],
     preferences: preferences.get(p.id) ?? {},
     notes:       notes.get(p.id) ?? '',
+    blackouts:   away.get(p.id) ?? [],
   }]));
   for (const row of eligibility) byPerson.get(row.directory_id)?.jobs.push(row.job);
 

@@ -4,7 +4,8 @@
 // (by asking for a different attempt) rather than by chance.
 //
 // The rules, in order of importance:
-//   1. Never schedule somebody who said they are unavailable for that role.
+//   1. Never schedule somebody who said they are unavailable for that role, or
+//      who has blocked that day out as time away.
 //   2. Never schedule the same person twice in one service.
 //   3. Spread the load — whoever has had the fewest turns goes next.
 //   4. Among people on equal turns, the one who said they are glad to do it
@@ -88,21 +89,48 @@ function candidatesByRole(people, preferences) {
   return byRole;
 }
 
+// Who has blocked out which days, keyed by directory id. The rows come from
+// job_blackouts as they are stored: inclusive YYYY-MM-DD ends, which compare as
+// plain strings against the day of a service.
+function awayByPerson(blackouts) {
+  const byPerson = new Map();
+  for (const row of blackouts) {
+    if (!byPerson.has(row.directory_id)) byPerson.set(row.directory_id, []);
+    byPerson.get(row.directory_id).push(row);
+  }
+  return byPerson;
+}
+
+function isAway(byPerson, id, day) {
+  return (byPerson.get(id) || []).some(range => range.starts_on <= day && day <= range.ends_on);
+}
+
+function dayOf(date) {
+  return date.toISOString().slice(0, 10);
+}
+
 /**
  * Builds a month of assignments.
  *
  * `attempt` shifts who gets first refusal, so asking again produces a genuinely
  * different-but-still-fair schedule rather than the same one.
  *
+ * `blackouts` are the days people have said they will be away: rows of
+ * `{ directory_id, starts_on, ends_on }`, both ends inclusive. Somebody away on
+ * the day of a service is no candidate for it, however keen they are the rest
+ * of the month — and is still a candidate for every other Sunday, so one week
+ * away does not cost them the whole month.
+ *
  * Returns the rows, plus any role nobody could be found for — reported rather
  * than quietly left blank, since an unfilled slot is the thing a coordinator
  * most needs to know about.
  */
-function generateSchedule({ month, people = [], preferences = [], services = SERVICES, attempt = 0 }) {
+function generateSchedule({ month, people = [], preferences = [], blackouts = [], services = SERVICES, attempt = 0 }) {
   const parsed = parseMonth(month);
   if (!parsed) return { error: `"${month}" is not a month I understand — try "June 2026"` };
 
   const byRole = candidatesByRole(people, preferences);
+  const away = awayByPerson(blackouts);
   const occasions = servicesIn(parsed, services);
 
   const turnsTaken = new Map();     // directory id → how many turns so far
@@ -111,9 +139,11 @@ function generateSchedule({ month, people = [], preferences = [], services = SER
 
   for (const occasion of occasions) {
     const usedToday = new Set();    // rule 2
+    const day       = dayOf(occasion.date);
 
     for (const role of occasion.roles) {
-      const candidates = (byRole.get(role) || []).filter(c => !usedToday.has(c.id));
+      const candidates = (byRole.get(role) || [])
+        .filter(c => !usedToday.has(c.id) && !isAway(away, c.id, day));   // rule 1
 
       if (!candidates.length) {
         unfilled.push({ date: occasion.dateLabel, service: occasion.service, role });
