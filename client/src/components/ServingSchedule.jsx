@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import Dialog from './Dialog';
 import TimeAway from './TimeAway';
-import { describeRange } from '../lib/timeAway';
+import BlackoutCalendar from './BlackoutCalendar';
+import { describeRange, parseMonthLabel } from '../lib/timeAway';
 
 // The serving schedule, from both sides of it:
 //
@@ -244,6 +245,7 @@ export default function ServingSchedule() {
   const [busyId, setBusyId]   = useState(null);
   const [building, setBuilding] = useState(false);
   const [editing, setEditing] = useState(null);   // a slot, or {} for a new one
+  const [awayView, setAwayView] = useState('list');   // 'list' or 'calendar', for the keeper's view of who is away
 
   const load = useCallback(async (wanted = '') => {
     setLoading(true);
@@ -483,24 +485,50 @@ export default function ServingSchedule() {
         </div>
       )}
 
-      {canManage && (data?.blackouts?.length ?? 0) > 0 && (
-        <div className="card p-4 space-y-2">
-          <div>
-            <h4 className="text-sm font-semibold text-church-navy">Who is away</h4>
-            <p className="text-xs text-gray-500 mt-0.5">
-              Blocked out across the congregation. Change one of them from
-              <strong> Church Office → Service Roster</strong>.
-            </p>
+      {canManage && (
+        <div className="card p-4 space-y-3">
+          <div className="flex items-start justify-between flex-wrap gap-2">
+            <div>
+              <h4 className="text-sm font-semibold text-church-navy">Who is away</h4>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Blocked out across the congregation. Change one of them from
+                <strong> Church Office → Service Roster</strong>.
+              </p>
+            </div>
+            {(data?.blackouts?.length ?? 0) > 0 && (
+              <div className="flex rounded-lg border border-gray-200 overflow-hidden shrink-0" role="group" aria-label="How to show who is away">
+                {[['list', 'List'], ['calendar', 'Calendar']].map(([id, label]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setAwayView(id)}
+                    aria-pressed={awayView === id}
+                    className={`text-xs px-3 py-1.5 transition-colors ${
+                      awayView === id ? 'bg-church-navy text-white' : 'bg-white text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-          <ul className="text-sm text-gray-700 space-y-1">
-            {data.blackouts.map(range => (
-              <li key={range.id} className="flex flex-wrap gap-x-2">
-                <span className="font-medium text-church-navy">{range.name}</span>
-                <span className="text-gray-500">{describeRange(range)}</span>
-                {range.reason && <span className="text-xs text-gray-400 self-center">{range.reason}</span>}
-              </li>
-            ))}
-          </ul>
+
+          {(data?.blackouts?.length ?? 0) === 0 ? (
+            <p className="text-xs text-gray-400">Nobody has blocked out any days right now.</p>
+          ) : awayView === 'calendar' ? (
+            <BlackoutCalendar blackouts={data.blackouts} initialMonth={parseMonthLabel(month)} />
+          ) : (
+            <ul className="text-sm text-gray-700 space-y-1">
+              {data.blackouts.map(range => (
+                <li key={range.id} className="flex flex-wrap gap-x-2">
+                  <span className="font-medium text-church-navy">{range.name}</span>
+                  <span className="text-gray-500">{describeRange(range)}</span>
+                  {range.reason && <span className="text-xs text-gray-400 self-center">{range.reason}</span>}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 

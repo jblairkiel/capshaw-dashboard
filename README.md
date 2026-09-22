@@ -373,6 +373,12 @@ Time away is kept in `job_blackouts` and goes with the member if their
 directory entry does. It says nothing about *why* unless somebody writes a
 reason, which is shown to the schedule keeper beside the dates.
 
+The schedule keeper can also see all of it laid out as a **calendar**, from the
+"Who is away" list on the Serving Schedule page — a month grid with everybody's
+name on every day their range covers, not just the day it starts. It pages
+independently of the roster's own month and opens on whichever one the roster
+is showing.
+
 ### Service Roster
 
 **Church Office → Service Roster** is the page for the question that comes

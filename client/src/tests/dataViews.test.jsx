@@ -567,12 +567,71 @@ describe('ServingSchedule', () => {
   test('the schedule keeper sees who is away across the congregation', async () => {
     mockSchedule({
       canManage: true,
-      blackouts: [{ id: 7, directoryId: 3, name: 'Tom Nelson', startsOn: '2025-04-06', endsOn: '2025-04-06', reason: '' }],
+      blackouts: [{ id: 7, directoryId: 3, name: 'Ray Harris', startsOn: '2025-04-06', endsOn: '2025-04-06', reason: '' }],
     });
     render(<ServingSchedule />);
 
     expect(await screen.findByText('Who is away')).toBeInTheDocument();
     expect(screen.getByText('April 6, 2025')).toBeInTheDocument();
+  });
+
+  test('a schedule keeper with nobody away yet sees an empty state, not an empty list', async () => {
+    mockSchedule({ canManage: true, blackouts: [] });
+    render(<ServingSchedule />);
+
+    expect(await screen.findByText('Who is away')).toBeInTheDocument();
+    expect(screen.getByText(/nobody has blocked out any days/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Calendar' })).not.toBeInTheDocument();
+  });
+
+  test('switching to the calendar plots each person on the day they are away', async () => {
+    mockSchedule({
+      canManage: true,
+      blackouts: [
+        { id: 7, directoryId: 3, name: 'Ray Harris', startsOn: '2025-04-06', endsOn: '2025-04-06', reason: '' },
+        { id: 8, directoryId: 4, name: 'Bill Shaw', startsOn: '2025-04-05', endsOn: '2025-04-08', reason: 'Away with family' },
+      ],
+    });
+    render(<ServingSchedule />);
+    await screen.findByText('Who is away');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Calendar' }));
+
+    // Opens on the month the roster is already showing, and shows a range on
+    // every day it covers, not only the day it starts.
+    const heading = await screen.findByRole('heading', { name: 'April 2025' });
+    expect(heading).toBeInTheDocument();
+    expect(screen.getByText('Ray Harris')).toBeInTheDocument();
+    expect(screen.getAllByText('Bill Shaw')).toHaveLength(4);
+  });
+
+  test('the calendar can be paged to another month', async () => {
+    mockSchedule({
+      canManage: true,
+      blackouts: [{ id: 7, directoryId: 3, name: 'Ray Harris', startsOn: '2025-04-06', endsOn: '2025-04-06', reason: '' }],
+    });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Calendar' }));
+    await screen.findByRole('heading', { name: 'April 2025' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next month' }));
+
+    expect(await screen.findByRole('heading', { name: 'May 2025' })).toBeInTheDocument();
+    expect(screen.queryByText('Ray Harris')).not.toBeInTheDocument();
+  });
+
+  test('switching back to the list keeps the same data', async () => {
+    mockSchedule({
+      canManage: true,
+      blackouts: [{ id: 7, directoryId: 3, name: 'Ray Harris', startsOn: '2025-04-06', endsOn: '2025-04-06', reason: '' }],
+    });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Calendar' }));
+    await screen.findByRole('heading', { name: 'April 2025' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'List' }));
+    expect(screen.getByText('April 6, 2025')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'April 2025' })).not.toBeInTheDocument();
   });
 
   test('building a month posts the month and the services chosen', async () => {

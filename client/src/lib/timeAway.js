@@ -27,3 +27,14 @@ export function describeRange({ startsOn, endsOn } = {}) {
   if (from.year === to.year) return `${from.text} – ${to.text}, ${to.year}`;
   return `${from.text}, ${from.year} – ${to.text}, ${to.year}`;
 }
+
+// "June 2026" → { year: 2026, month: 5 } (month is 0-indexed, for the
+// calendar view to open on the same month the roster is showing). Anything
+// it cannot read is left for the caller's own default.
+export function parseMonthLabel(label) {
+  const match = /^([A-Za-z]+)\s+(\d{4})$/.exec(String(label || '').trim());
+  if (!match) return null;
+  const month = MONTH_NAMES.findIndex(m => m.toLowerCase() === match[1].toLowerCase());
+  if (month < 0) return null;
+  return { year: Number(match[2]), month };
+}
