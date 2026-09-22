@@ -433,6 +433,29 @@ function initSchema(db) {
     PRIMARY KEY (directory_id, job)
   );
 
+  -- ── Time away from the serving jobs ─────────────────────────────────────────
+  -- A range of days somebody has blocked out: holidays, a hospital stay, a
+  -- month with the grandchildren. Both ends are inclusive, and a single day is
+  -- a range whose ends are the same date. Stored as YYYY-MM-DD so ranges sort
+  -- and compare as plain strings.
+  --
+  -- The schedule reads these rather than the roster reading around them: the
+  -- month builder never puts somebody down for a day they are away, and
+  -- neither the man himself nor the schedule keeper can sign him up for one by
+  -- accident.
+
+  CREATE TABLE IF NOT EXISTS job_blackouts (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    directory_id INTEGER NOT NULL REFERENCES directory(id) ON DELETE CASCADE,
+    starts_on    TEXT    NOT NULL,
+    ends_on      TEXT    NOT NULL,
+    reason       TEXT    NOT NULL DEFAULT '',
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_job_blackouts_person ON job_blackouts(directory_id, starts_on);
+
   CREATE INDEX IF NOT EXISTS idx_mail_members_group ON mail_group_members(group_id);
   CREATE INDEX IF NOT EXISTS idx_mail_outbox_status ON mail_outbox(status, id);
 

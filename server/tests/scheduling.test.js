@@ -13,6 +13,10 @@ function prefs(...entries) {
   return entries.map(([directory_id, role, level]) => ({ directory_id, role, level }));
 }
 
+function away(...entries) {
+  return entries.map(([directory_id, starts_on, ends_on]) => ({ directory_id, starts_on, ends_on: ends_on || starts_on }));
+}
+
 // June 2026 has Sundays on the 7th, 14th, 21st and 28th.
 const JUNE = 'June 2026';
 
@@ -105,6 +109,58 @@ describe('generateSchedule', () => {
       expect(namesThatDay).toEqual([...new Set(namesThatDay)]);
       expect(namesThatDay).toHaveLength(1);
     }
+  });
+
+  test('rule 1: nobody is scheduled for a day they have blocked out', () => {
+    const result = generateSchedule({
+      month: JUNE,
+      people: PEOPLE,
+      preferences: prefs([1, 'Song Leader', 'preferred'], [2, 'Song Leader', 'willing']),
+      // Ray is away the middle fortnight: the 14th and the 21st.
+      blackouts: away([1, '2026-06-10', '2026-06-24']),
+      services: ['Sunday Worship'],
+    });
+
+    expect(songLeaders(result)).toEqual(['Ray Harris', 'Sam Nolan', 'Sam Nolan', 'Ray Harris']);
+  });
+
+  test('a day away costs that day only, not the rest of the month', () => {
+    const result = generateSchedule({
+      month: JUNE,
+      people: PEOPLE,
+      preferences: prefs([1, 'Song Leader', 'preferred']),
+      blackouts: away([1, '2026-06-14']),
+      services: ['Sunday Worship'],
+    });
+
+    expect(result.rows.filter(r => r.job === 'Song Leader' && r.date === 'June 14')[0].name).toBe('');
+    expect(songLeaders(result)).toEqual(['Ray Harris', '', 'Ray Harris', 'Ray Harris']);
+  });
+
+  test('both ends of a range are away', () => {
+    const result = generateSchedule({
+      month: JUNE,
+      people: PEOPLE,
+      preferences: prefs([1, 'Song Leader', 'preferred']),
+      blackouts: away([1, '2026-06-07', '2026-06-28']),
+      services: ['Sunday Worship'],
+    });
+
+    expect(songLeaders(result)).toEqual(['', '', '', '']);
+    expect(result.unfilled.filter(u => u.role === 'Song Leader')).toHaveLength(4);
+  });
+
+  test('a job left empty because everyone is away is reported, not hidden', () => {
+    const result = generateSchedule({
+      month: JUNE,
+      people: PEOPLE,
+      preferences: prefs([1, 'Song Leader', 'willing'], [2, 'Song Leader', 'willing']),
+      blackouts: away([1, '2026-06-01', '2026-06-30'], [2, '2026-06-14']),
+      services: ['Sunday Worship'],
+    });
+
+    expect(result.unfilled).toContainEqual({ date: 'June 14', service: 'Sunday Worship', role: 'Song Leader' });
+    expect(songLeaders(result)).toEqual(['Sam Nolan', '', 'Sam Nolan', 'Sam Nolan']);
   });
 
   test('rule 3: spreads the load rather than giving one keen person every turn', () => {

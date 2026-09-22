@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import WorshipPreferences from './WorshipPreferences';
+import TimeAway from './TimeAway';
+import { describeRange } from '../lib/timeAway';
 import { WORSHIP_ROLES, levelInfo } from '../lib/worship';
 
 // ─── Service Roster ───────────────────────────────────────────────────────────
@@ -11,6 +13,11 @@ import { WORSHIP_ROLES, levelInfo } from '../lib/worship';
 // they say it in the foyer instead. So whoever builds the roster writes it down
 // here, against the same roles and the same three answers, and the action
 // history records who recorded it.
+//
+// It is also where the schedule keeper writes down the days a man will be
+// away, for the same reason: he says "we are at the beach that fortnight" in
+// the foyer rather than typing it in. Blocked-out days keep him off the
+// schedule and out of the sign-up list until they pass.
 //
 // What this page is *not* is who may sign themselves up: that is Member Jobs,
 // and it is a separate decision. A preference is what somebody wants; being
@@ -99,7 +106,7 @@ function Coverage({ members }) {
 
 // ─── One man's row ────────────────────────────────────────────────────────────
 
-function RosterRow({ member, onSaved }) {
+function RosterRow({ member, onSaved, onTimeAwayChanged }) {
   const [open, setOpen] = useState(false);
 
   const glad    = rolesAt(member, 'preferred');
@@ -113,6 +120,20 @@ function RosterRow({ member, onSaved }) {
       body:    JSON.stringify(body),
     });
     onSaved(json.member);
+  }
+
+  async function blockOut(range) {
+    await send(`${API}/blackouts`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ ...range, directoryId: member.id }),
+    });
+    await onTimeAwayChanged();
+  }
+
+  async function clearTimeAway(id) {
+    await send(`${API}/blackouts/${id}`, { method: 'DELETE' });
+    await onTimeAwayChanged();
   }
 
   return (
@@ -134,6 +155,12 @@ function RosterRow({ member, onSaved }) {
               </span>
             )}
           </div>
+
+          {(member.blackouts?.length ?? 0) > 0 && (
+            <p className="text-xs text-amber-700 mt-1">
+              Away {member.blackouts.map(describeRange).join(', ')}
+            </p>
+          )}
 
           {hasSpoken(member) ? (
             <div className="mt-1 flex flex-wrap gap-1">
@@ -179,6 +206,17 @@ function RosterRow({ member, onSaved }) {
             onSave={save}
           />
 
+          <div className="border-t border-gray-100 pt-3">
+            <TimeAway
+              blackouts={member.blackouts ?? []}
+              onAdd={blockOut}
+              onRemove={clearTimeAway}
+              heading="Time away"
+              hint={`Days ${member.name} will not be here. The month builder skips them, and he cannot sign himself up for one.`}
+              emptyText="Nothing blocked out — he is available for every service on the roster."
+            />
+          </div>
+
           <div className="text-xs text-gray-500 border-t border-gray-100 pt-3">
             <span className="font-medium text-gray-600">Signed off to sign up for: </span>
             {member.jobs.length
@@ -208,8 +246,10 @@ export default function ServiceRosterView() {
   const [onlyMen, setOnlyMen] = useState(true);
   const [showing, setShowing] = useState('all');
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // `quiet` reloads without the spinner, for a change made inside an open row —
+  // blocking out somebody's days should not fold the row back up under them.
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     try {
       const json = await send(`${API}/members`);
       setMembers(json.members);
@@ -217,11 +257,13 @@ export default function ServiceRosterView() {
     } catch (err) {
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (!quiet) setLoading(false);
     }
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const refresh = useCallback(() => load(true), [load]);
 
   // The men are who the roster is built from, so the coverage counts follow the
   // same filter the list does rather than the whole directory.
@@ -297,6 +339,7 @@ export default function ServiceRosterView() {
                 ? { ...m, preferences: updated.preferences, notes: updated.notes }
                 : m
             )))}
+            onTimeAwayChanged={refresh}
           />
         ))}
         {shown.length === 0 && (

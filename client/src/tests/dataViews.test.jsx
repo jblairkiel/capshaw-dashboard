@@ -384,7 +384,8 @@ describe('ServingSchedule', () => {
       services: ['Sunday Worship', 'Sunday Evening', 'Wednesday'],
       serviceJobs: {},
       canManage: false,
-      me: { directoryId: null, name: '', gender: '', jobs: [], canSignUp: false },
+      blackouts: [],
+      me: { directoryId: null, name: '', gender: '', jobs: [], canSignUp: false, blackouts: [] },
       ...overrides,
     };
     const fetchMock = vi.fn(() => Promise.resolve({ json: () => Promise.resolve(body) }));
@@ -498,6 +499,139 @@ describe('ServingSchedule', () => {
     render(<ServingSchedule />);
     expect(await screen.findByRole('button', { name: /build next month/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /edit song leader/i })).toBeInTheDocument();
+  });
+
+  // ─── Time away ──────────────────────────────────────────────────────────────
+
+  test('somebody not in the directory yet is not offered time away', async () => {
+    mockSchedule();
+    render(<ServingSchedule />);
+    await screen.findByRole('combobox', { name: 'Week' });
+    expect(screen.queryByText('Time away')).not.toBeInTheDocument();
+  });
+
+  test('a member sees the days they have blocked out', async () => {
+    mockSchedule({
+      me: {
+        directoryId: 3, name: 'Ray Harris', gender: 'male', jobs: [], canSignUp: true,
+        blackouts: [{ id: 7, startsOn: '2025-06-07', endsOn: '2025-06-21', reason: 'Away with family' }],
+      },
+    });
+    render(<ServingSchedule />);
+
+    expect(await screen.findByText(/June 7 – June 21, 2025/)).toBeInTheDocument();
+    expect(screen.getByText(/Away with family/)).toBeInTheDocument();
+  });
+
+  test('blocking out days posts the range, and one day needs only a first day', async () => {
+    const fetchMock = mockSchedule({
+      me: { directoryId: 3, name: 'Ray Harris', gender: 'male', jobs: [], canSignUp: true, blackouts: [] },
+    });
+    render(<ServingSchedule />);
+
+    type(await screen.findByLabelText('First day away'), '2025-06-07');
+    fireEvent.click(screen.getByRole('button', { name: /block out these days/i }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, opts]) => String(url).endsWith('/blackouts') && opts?.method === 'POST');
+      expect(JSON.parse(call[1].body)).toMatchObject({ startsOn: '2025-06-07', endsOn: '2025-06-07' });
+    });
+  });
+
+  test('clearing a range asks the server to drop it', async () => {
+    const fetchMock = mockSchedule({
+      me: {
+        directoryId: 3, name: 'Ray Harris', gender: 'male', jobs: [], canSignUp: true,
+        blackouts: [{ id: 7, startsOn: '2025-06-07', endsOn: '2025-06-07', reason: '' }],
+      },
+    });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: /clear time away/i }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, opts]) => String(url).includes('/blackouts/7') && opts?.method === 'DELETE');
+      expect(call).toBeTruthy();
+    });
+  });
+
+  test('a man down for a day he is away is flagged on the roster', async () => {
+    mockSchedule({
+      assignments: ASSIGNMENTS.map(a => (a.id === 1
+        ? { ...a, away: { startsOn: '2025-04-05', endsOn: '2025-04-07', reason: 'Away with family' } }
+        : a)),
+    });
+    render(<ServingSchedule />);
+    expect(await screen.findByText('away')).toBeInTheDocument();
+  });
+
+  test('the schedule keeper sees who is away across the congregation', async () => {
+    mockSchedule({
+      canManage: true,
+      blackouts: [{ id: 7, directoryId: 3, name: 'Ray Harris', startsOn: '2025-04-06', endsOn: '2025-04-06', reason: '' }],
+    });
+    render(<ServingSchedule />);
+
+    expect(await screen.findByText('Who is away')).toBeInTheDocument();
+    expect(screen.getByText('April 6, 2025')).toBeInTheDocument();
+  });
+
+  test('a schedule keeper with nobody away yet sees an empty state, not an empty list', async () => {
+    mockSchedule({ canManage: true, blackouts: [] });
+    render(<ServingSchedule />);
+
+    expect(await screen.findByText('Who is away')).toBeInTheDocument();
+    expect(screen.getByText(/nobody has blocked out any days/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Calendar' })).not.toBeInTheDocument();
+  });
+
+  test('switching to the calendar plots each person on the day they are away', async () => {
+    mockSchedule({
+      canManage: true,
+      blackouts: [
+        { id: 7, directoryId: 3, name: 'Ray Harris', startsOn: '2025-04-06', endsOn: '2025-04-06', reason: '' },
+        { id: 8, directoryId: 4, name: 'Bill Shaw', startsOn: '2025-04-05', endsOn: '2025-04-08', reason: 'Away with family' },
+      ],
+    });
+    render(<ServingSchedule />);
+    await screen.findByText('Who is away');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Calendar' }));
+
+    // Opens on the month the roster is already showing, and shows a range on
+    // every day it covers, not only the day it starts.
+    const heading = await screen.findByRole('heading', { name: 'April 2025' });
+    expect(heading).toBeInTheDocument();
+    expect(screen.getByText('Ray Harris')).toBeInTheDocument();
+    expect(screen.getAllByText('Bill Shaw')).toHaveLength(4);
+  });
+
+  test('the calendar can be paged to another month', async () => {
+    mockSchedule({
+      canManage: true,
+      blackouts: [{ id: 7, directoryId: 3, name: 'Ray Harris', startsOn: '2025-04-06', endsOn: '2025-04-06', reason: '' }],
+    });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Calendar' }));
+    await screen.findByRole('heading', { name: 'April 2025' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next month' }));
+
+    expect(await screen.findByRole('heading', { name: 'May 2025' })).toBeInTheDocument();
+    expect(screen.queryByText('Ray Harris')).not.toBeInTheDocument();
+  });
+
+  test('switching back to the list keeps the same data', async () => {
+    mockSchedule({
+      canManage: true,
+      blackouts: [{ id: 7, directoryId: 3, name: 'Ray Harris', startsOn: '2025-04-06', endsOn: '2025-04-06', reason: '' }],
+    });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Calendar' }));
+    await screen.findByRole('heading', { name: 'April 2025' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'List' }));
+    expect(screen.getByText('April 6, 2025')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'April 2025' })).not.toBeInTheDocument();
   });
 
   test('building a month posts the month and the services chosen', async () => {

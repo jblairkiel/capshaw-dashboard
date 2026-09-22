@@ -12,10 +12,11 @@ const MEMBERS = [
     jobs: ['Song Leader'],
     preferences: { 'Song Leader': 'preferred', Usher: 'willing', Communion: 'unavailable' },
     notes: 'Away most of June',
+    blackouts: [{ id: 5, directoryId: 1, startsOn: '2026-06-07', endsOn: '2026-06-21', reason: 'Away with family' }],
   },
   {
     id: 2, name: 'Ned Poole', gender: 'male', email: 'ned@example.com', assignments: 0,
-    jobs: [], preferences: {}, notes: '',
+    jobs: [], preferences: {}, notes: '', blackouts: [],
   },
   {
     id: 3, name: 'Ruth Poole', gender: 'female', email: 'ruth@example.com', assignments: 0,
@@ -154,6 +155,35 @@ describe('ServiceRosterView — writing down what he said', () => {
 
     expect(screen.getByText(/Signed off to sign up for:/)).toBeInTheDocument();
     expect(screen.getByText(/Member Jobs/)).toBeInTheDocument();
+  });
+
+  test('shows the days he is away on his row, closed and open', async () => {
+    await renderRoster();
+    expect(screen.getByText(/Away June 7 – June 21, 2026/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Preferences for Joe Carter' }));
+    expect(screen.getByText(/Away with family/)).toBeInTheDocument();
+  });
+
+  test('blocking out days for a man posts them against him', async () => {
+    const fetchMock = mockRoster();
+    render(<ServiceRosterView />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Preferences for Ned Poole' }));
+
+    fireEvent.change(screen.getByLabelText('First day away'), { target: { value: '2026-07-05' } });
+    fireEvent.change(screen.getByLabelText('Last day away'),  { target: { value: '2026-07-12' } });
+    fireEvent.click(screen.getByRole('button', { name: /block out these days/i }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, o]) => String(url).endsWith('/blackouts') && o?.method === 'POST');
+      expect(JSON.parse(call[1].body)).toMatchObject({ directoryId: 2, startsOn: '2026-07-05', endsOn: '2026-07-12' });
+    });
+  });
+
+  test('a man with nothing blocked out is said to be available', async () => {
+    await renderRoster();
+    fireEvent.click(screen.getByRole('button', { name: 'Preferences for Ned Poole' }));
+    expect(screen.getByText(/available for every service on the roster/)).toBeInTheDocument();
   });
 
   test('warns that a woman cannot be rostered whatever is recorded', async () => {
