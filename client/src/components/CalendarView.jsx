@@ -103,87 +103,91 @@ function EventModal({ event, onSaved, onClose, onDeleted }) {
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
-      <form
-        onSubmit={submit}
+      <div
         onClick={e => e.stopPropagation()}
         className="bg-white rounded-xl w-full max-w-md max-h-[90vh] overflow-y-auto p-5 space-y-4"
       >
-        <h3 className="font-semibold text-church-navy">{isNew ? 'New event' : 'Edit event'}</h3>
+        <form onSubmit={submit} className="space-y-4">
+          <h3 className="font-semibold text-church-navy">{isNew ? 'New event' : 'Edit event'}</h3>
 
-        <label className="block">
-          <span className={labelText}>Title <span className="text-red-400" aria-hidden="true">*</span></span>
-          <input autoFocus required value={form.title} onChange={e => set('title', e.target.value)} className={field} />
-        </label>
-
-        <div className="grid grid-cols-2 gap-3">
           <label className="block">
-            <span className={labelText}>Date</span>
-            <input type="date" value={form.event_date || ''} onChange={e => set('event_date', e.target.value)} className={field} />
+            <span className={labelText}>Title <span className="text-red-400" aria-hidden="true">*</span></span>
+            <input autoFocus required value={form.title} onChange={e => set('title', e.target.value)} className={field} />
           </label>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className={labelText}>Date</span>
+              <input type="date" value={form.event_date || ''} onChange={e => set('event_date', e.target.value)} className={field} />
+            </label>
+            <label className="block">
+              <span className={labelText}>Time</span>
+              <input placeholder="6:00 PM" value={form.event_time || ''} onChange={e => set('event_time', e.target.value)} className={field} />
+            </label>
+          </div>
+
           <label className="block">
-            <span className={labelText}>Time</span>
-            <input placeholder="6:00 PM" value={form.event_time || ''} onChange={e => set('event_time', e.target.value)} className={field} />
+            <span className={labelText}>Location</span>
+            <input placeholder="Fellowship Hall" value={form.location || ''} onChange={e => set('location', e.target.value)} className={field} />
           </label>
-        </div>
 
-        <label className="block">
-          <span className={labelText}>Location</span>
-          <input placeholder="Fellowship Hall" value={form.location || ''} onChange={e => set('location', e.target.value)} className={field} />
-        </label>
-
-        <label className="block">
-          <span className={labelText}>Details</span>
-          <textarea rows={3} value={form.body || ''} onChange={e => set('body', e.target.value)} className={field} />
-        </label>
-
-        <div className="grid grid-cols-2 gap-3">
           <label className="block">
-            <span className={labelText}>Shows as</span>
-            <select value={form.type} onChange={e => set('type', e.target.value)} className={field}>
-              <option value="event">Event</option>
-              <option value="announcement">Announcement</option>
-            </select>
+            <span className={labelText}>Details</span>
+            <textarea rows={3} value={form.body || ''} onChange={e => set('body', e.target.value)} className={field} />
           </label>
-          <label className="block">
-            <span className={labelText}>Priority</span>
-            <select value={form.priority} onChange={e => set('priority', e.target.value)} className={field}>
-              <option value="normal">Normal</option>
-              <option value="urgent">Urgent</option>
-            </select>
+
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className={labelText}>Shows as</span>
+              <select value={form.type} onChange={e => set('type', e.target.value)} className={field}>
+                <option value="event">Event</option>
+                <option value="announcement">Announcement</option>
+              </select>
+            </label>
+            <label className="block">
+              <span className={labelText}>Priority</span>
+              <select value={form.priority} onChange={e => set('priority', e.target.value)} className={field}>
+                <option value="normal">Normal</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </label>
+          </div>
+
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" checked={!!form.active} onChange={e => set('active', e.target.checked ? 1 : 0)} />
+            Visible on the announcements page
           </label>
-        </div>
 
-        <label className="flex items-center gap-2 text-sm text-gray-700">
-          <input type="checkbox" checked={!!form.active} onChange={e => set('active', e.target.checked ? 1 : 0)} />
-          Visible on the announcements page
-        </label>
+          {error && <p className="text-sm text-red-600">{error}</p>}
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
-
-        <div className="flex gap-2 pt-1">
-          <button type="submit" disabled={busy} className="btn-primary text-sm disabled:opacity-50">
-            {busy ? 'Saving…' : 'Save'}
-          </button>
-          <button type="button" onClick={onClose} className="text-sm px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">
-            Cancel
-          </button>
-          {!isNew && (
-            <button type="button" onClick={remove} disabled={busy} className="text-sm px-4 py-2 rounded-lg text-red-600 hover:bg-red-50 ml-auto">
-              Delete
+          <div className="flex gap-2 pt-1">
+            <button type="submit" disabled={busy} className="btn-primary text-sm disabled:opacity-50">
+              {busy ? 'Saving…' : 'Save'}
             </button>
-          )}
-        </div>
+            <button type="button" onClick={onClose} className="text-sm px-4 py-2 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50">
+              Cancel
+            </button>
+            {!isNew && (
+              <button type="button" onClick={remove} disabled={busy} className="text-sm px-4 py-2 rounded-lg text-red-600 hover:bg-red-50 ml-auto">
+                Delete
+              </button>
+            )}
+          </div>
+        </form>
 
         {/* The conversation about this event, for whoever is editing it as much
-            as for everybody else. It sits inside the panel but outside the
-            form, so posting a comment can never submit the event. */}
+            as for everybody else. It sits in the panel but outside the form —
+            EventComments has a <form> of its own, and a form nested inside
+            another one leaves the browser unable to tell which is meant to
+            handle a submit, so posting a comment fell through to a native page
+            reload instead of ever reaching the server. */}
         {!isNew && (
           <div className="pt-4 border-t border-gray-100">
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Comments</p>
             <EventComments subjectType="announcement" subjectId={event.id} />
           </div>
         )}
-      </form>
+      </div>
     </div>
   );
 }

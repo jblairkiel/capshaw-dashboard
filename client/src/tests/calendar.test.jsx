@@ -117,6 +117,40 @@ describe('CalendarView', () => {
 
   // The input is marked `required`, so the browser stops a genuinely empty
   // title. Whitespace slips past that and is caught in the handler instead.
+  // EventComments has a <form> of its own; the edit dialog used to wrap it
+  // inside the event's own <form>, and a form nested in another cannot be
+  // told apart by the browser — the click fell through to a native page
+  // reload instead of ever posting. Regression coverage for that.
+  test('posting a comment from the edit dialog reaches the comments API, not a page reload', async () => {
+    const fetchMock = vi.fn((url, options) => {
+      if (String(url).startsWith('/api/comments/')) {
+        if (options?.method === 'POST') {
+          return Promise.resolve({ json: () => Promise.resolve({ success: true, comments: [] }) });
+        }
+        return Promise.resolve({ json: () => Promise.resolve({ success: true, comments: [], canReply: true, canModerate: false, maxLength: 2000 }) });
+      }
+      if (options?.method && options.method !== 'GET') {
+        return Promise.resolve({ json: () => Promise.resolve({ success: true }) });
+      }
+      return Promise.resolve({ json: () => Promise.resolve({ success: true, items: [EVENT, UNDATED] }) });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<CalendarView user={{ role: 'admin' }} />);
+    fireEvent.click(await screen.findByText(/Fellowship Breakfast/));
+
+    fireEvent.change(await screen.findByLabelText('Write a comment'), { target: { value: 'What time does it start?' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Post' }));
+
+    await waitFor(() => {
+      const post = fetchMock.mock.calls.find(c => String(c[0]).startsWith('/api/comments/') && c[1]?.method === 'POST');
+      expect(post).toBeTruthy();
+      expect(post[0]).toBe('/api/comments/announcement/1');
+    });
+    // The event itself was never saved — the click posted the comment, not the form.
+    expect(fetchMock.mock.calls.some(c => c[0] === '/api/announcements/1' && c[1]?.method === 'PUT')).toBe(false);
+  });
+
   test('a whitespace-only title is rejected rather than saved', async () => {
     const fetchMock = mockApi();
     render(<CalendarView user={{ role: 'admin' }} />);
