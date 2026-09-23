@@ -132,11 +132,16 @@ router.post('/upload', requireWorshipOrder, upload.single('document'), async (re
     });
   } catch (err) {
     console.error('Document conversion error:', err.message);
-    // Multer already wrote this one to disk before the route ever ran; a
-    // file that cannot be read back as a Word document is not a real order
-    // of service, and left in place it would be "the newest file here" —
-    // exactly what a fresh page load trusts as the current one.
-    try { fs.unlinkSync(req.file.path); } catch { /* already gone */ }
+    // Multer already wrote a file to disk before the route ever ran. Find it
+    // by what is actually on disk (it is always the newest thing there,
+    // having just been written) rather than by req.file.path — a file that
+    // cannot be read back as a Word document is not a real order of
+    // service, and left in place it would be "the newest file here": exactly
+    // what a fresh page load trusts as the current one.
+    const broken = currentFilename();
+    if (broken) {
+      try { fs.unlinkSync(path.join(uploadsDir, broken)); } catch { /* already gone */ }
+    }
     res.status(500).json({ success: false, error: err.message });
   }
 });
