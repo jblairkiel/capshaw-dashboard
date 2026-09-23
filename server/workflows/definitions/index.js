@@ -5,7 +5,6 @@
 const { isPage } = require('../pages');
 
 const definitions = [
-  require('./jobSwap'),
   require('./visitorFollowUp'),
   require('./worshipSchedule'),
 ];

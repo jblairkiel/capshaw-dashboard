@@ -4,9 +4,9 @@ const db     = require('../db');
 const engine = require('../workflows/engine');
 const { listDefinitions, getDefinition, validateDefinitions } = require('../workflows/definitions');
 
-// A small cast: an admin, two members (one of them rostered), and a pending
-// user who should not be able to start anything.
-let ADMIN, MEMBER, OTHER, PENDING, RAY, JO, ORPHAN, ASSIGNMENT, VISITOR;
+// A small cast: an admin, two members, and a pending user who should not be
+// able to start anything.
+let ADMIN, MEMBER, OTHER, PENDING, RAY, JO, ORPHAN, VISITOR;
 
 function addUser(name, role, directoryId = null) {
   const { lastInsertRowid: id } = db.prepare(
@@ -47,7 +47,7 @@ function followUp({ user = MEMBER, assignee = ORPHAN } = {}) {
 
 beforeEach(() => {
   for (const t of ['workflow_participants', 'workflow_events', 'workflow_tasks', 'workflow_instances',
-                   'job_assignments', 'visitors', 'users', 'directory']) {
+                   'visitors', 'users', 'directory']) {
     db.prepare(`DELETE FROM ${t}`).run();
   }
 
@@ -59,11 +59,6 @@ beforeEach(() => {
   MEMBER  = addUser('Ray',  'approved', RAY.id);
   OTHER   = addUser('Jo',   'approved', JO.id);
   PENDING = addUser('Pat',  'pending');
-
-  const { lastInsertRowid } = db.prepare(
-    'INSERT INTO job_assignments (month, date, service, job, name) VALUES (?,?,?,?,?)'
-  ).run('April 2025', 'April 6', 'Sunday Worship', 'Song Leader', 'Ray Harris');
-  ASSIGNMENT = db.prepare('SELECT * FROM job_assignments WHERE id = ?').get(lastInsertRowid);
 
   const visitor = db.prepare('INSERT INTO visitors (name) VALUES (?)').run('Sam Visitor');
   VISITOR = db.prepare('SELECT * FROM visitors WHERE id = ?').get(visitor.lastInsertRowid);
@@ -149,8 +144,8 @@ describe('starting a workflow', () => {
 
   test('onStart can refuse, leaving nothing behind', () => {
     const result = engine.start({
-      definitionId: 'job-swap',
-      data: { assignmentId: '9999', reason: 'Away' },
+      definitionId: 'visitor-follow-up',
+      data: { visitorId: '9999', assigneePersonId: String(ORPHAN.id), notes: '' },
       user: MEMBER,
     });
     expect(result.status).toBe(400);
@@ -173,14 +168,12 @@ describe('who a task lands on', () => {
     expect(task.assignee_user_id).toBeNull();
   });
 
-  test('a creator step lands on whoever started it', () => {
-    const { id } = engine.start({
-      definitionId: 'job-swap',
-      data: { assignmentId: String(ASSIGNMENT.id), reason: 'Away that week' },
-      user: MEMBER,
-    });
-    const [task] = pendingTasks(id);
-    expect(task.assignee_user_id).toBe(MEMBER.id);
+  // No shipped workflow currently assigns a step to its creator, but the
+  // engine still offers the mode — exercised directly here rather than
+  // through a real definition.
+  test('a creator step resolves to whoever started the instance', () => {
+    expect(engine.resolveAssignee({ creator: true }, { created_by: MEMBER.id }))
+      .toEqual({ assigneeUserId: MEMBER.id, assigneeRole: '' });
   });
 
   test('a person step lands on that person\'s linked login', () => {
@@ -265,70 +258,18 @@ describe('acting on a task', () => {
     expect(instanceRow(id).step_id).toBe('reach-out');
     expect(instanceRow(id).status).toBe('active');
   });
-});
-
-// ─── Loops and write-back ─────────────────────────────────────────────────────
-
-describe('job swap — looping and roster write-back', () => {
-  function swapRequest() {
-    return engine.start({
-      definitionId: 'job-swap',
-      data: { assignmentId: String(ASSIGNMENT.id), reason: 'Away that week' },
-      user: MEMBER,
-    }).id;
-  }
-
-  test('snapshots the duty so the request stays readable', () => {
-    const id = swapRequest();
-    const data = JSON.parse(instanceRow(id).data);
-    expect(data).toMatchObject({ dutyJob: 'Song Leader', dutyDate: 'April 6', dutyName: 'Ray Harris' });
-    expect(instanceRow(id).title).toBe('Song Leader — April 6 (Ray Harris)');
-  });
-
-  test('approving writes the replacement onto the roster', () => {
-    const id = swapRequest();
-    actOn(id, MEMBER, 'found', 'Jo Harris');
-    actOn(id, ADMIN, 'apply');
-
-    expect(db.prepare('SELECT name FROM job_assignments WHERE id = ?').get(ASSIGNMENT.id).name).toBe('Jo Harris');
-    expect(instanceRow(id).outcome).toBe('covered');
-  });
-
-  test('rejecting a replacement loops back for another, without touching the roster', () => {
-    const id = swapRequest();
-    actOn(id, MEMBER, 'found', 'Jo Harris');
-    actOn(id, ADMIN, 'reject', 'Jo is already leading singing that day');
-
-    expect(instanceRow(id).step_id).toBe('find-replacement');
-    expect(instanceRow(id).status).toBe('active');
-    expect(db.prepare('SELECT name FROM job_assignments WHERE id = ?').get(ASSIGNMENT.id).name).toBe('Ray Harris');
-
-    // ...and the second time round it can still complete.
-    actOn(id, MEMBER, 'found', 'Pat Nolan');
-    actOn(id, ADMIN, 'apply');
-    expect(db.prepare('SELECT name FROM job_assignments WHERE id = ?').get(ASSIGNMENT.id).name).toBe('Pat Nolan');
-  });
 
   test('an effect that fails refuses the action and changes nothing', () => {
-    const id = swapRequest();
-    actOn(id, MEMBER, 'found', 'Jo Harris');
+    const { id } = followUp();
 
-    // The duty disappears from the roster before the scheduler approves.
-    db.prepare('DELETE FROM job_assignments WHERE id = ?').run(ASSIGNMENT.id);
+    // The guest disappears from the file before the contact is recorded.
+    db.prepare('DELETE FROM visitors WHERE id = ?').run(VISITOR.id);
 
-    const result = actOn(id, ADMIN, 'apply');
+    const result = actOn(id, ADMIN, 'emailed');
     expect(result.status).toBe(400);
-    expect(result.error).toMatch(/no longer on the roster/);
-    expect(instanceRow(id).step_id).toBe('approve');
+    expect(result.error).toMatch(/no longer on file/);
+    expect(instanceRow(id).step_id).toBe('reach-out');
     expect(pendingTasks(id)).toHaveLength(1);
-  });
-
-  test('handing it to the scheduler routes to the role step', () => {
-    const id = swapRequest();
-    actOn(id, MEMBER, 'need-help');
-    const [task] = pendingTasks(id);
-    expect(task.assignee_role).toBe('admin');
-    expect(instanceRow(id).step_id).toBe('scheduler-find');
   });
 });
 
@@ -343,14 +284,10 @@ describe('inbox', () => {
   });
 
   test('shows a personally assigned task only to that person', () => {
-    engine.start({
-      definitionId: 'job-swap',
-      data: { assignmentId: String(ASSIGNMENT.id), reason: 'Away' },
-      user: MEMBER,
-    });
+    followUp({ assignee: JO });
 
-    expect(engine.inbox(MEMBER).map(t => t.stepId)).toEqual(['find-replacement']);
-    expect(engine.inbox(OTHER)).toHaveLength(0);
+    expect(engine.inbox(OTHER).map(t => t.stepId)).toEqual(['reach-out']);
+    expect(engine.inbox(MEMBER)).toHaveLength(0);
   });
 
   test('carries the actions the step offers, so the inbox can act inline', () => {

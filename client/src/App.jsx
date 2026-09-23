@@ -380,12 +380,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       )}
       {!updating && activeTab === 'assignments' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
-          <div className="space-y-4">
-            <div className="flex justify-end">
-              <WorkflowDialogButton page="assignments" user={user} label="Roster requests" title="Roster requests" />
-            </div>
-            <ServingSchedule />
-          </div>
+          <ServingSchedule />
         </main>
       )}
       {!updating && activeTab === 'visitors' && (

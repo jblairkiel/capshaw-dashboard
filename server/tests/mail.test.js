@@ -331,20 +331,12 @@ describe('workflow notifications', () => {
   });
 
   test('an action that fails sends nothing at all', () => {
-    const duty = db.prepare('INSERT INTO job_assignments (month,date,service,job,name) VALUES (?,?,?,?,?)')
-      .run('April 2025', 'April 6', 'Sunday Worship', 'Song Leader', 'Ray Harris').lastInsertRowid;
-
-    const { id } = engine.start({
-      definitionId: 'job-swap',
-      data: { assignmentId: String(duty), reason: 'Away' },
-      user: MEMBER,
-    });
-    engine.act({ taskId: pendingTask(id).id, actionId: 'found', note: 'Jo Harris', user: MEMBER });
-    db.prepare('DELETE FROM job_assignments WHERE id = ?').run(duty);
+    const { id } = followUp();
+    db.prepare('DELETE FROM visitors WHERE id = ?').run(VISITOR.id);
     db.prepare('DELETE FROM mail_outbox').run();
 
     // The effect fails, so the transaction rolls back — and no mail escapes.
-    const result = engine.act({ taskId: pendingTask(id).id, actionId: 'apply', user: ADMIN });
+    const result = engine.act({ taskId: pendingTask(id).id, actionId: 'emailed', user: ADMIN });
     expect(result.status).toBe(400);
     expect(outbox()).toEqual([]);
   });
