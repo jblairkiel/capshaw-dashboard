@@ -21,14 +21,20 @@ import WorkflowChart from './WorkflowChart';
 // Small, hand-drawn diagrams for flows that are not a `workflow` — reusing
 // the exact chart renderer the live workflows use below, so every diagram on
 // this page reads as one system rather than two different styles of picture.
-const PERMISSIONS_FLOW = {
+//
+// WorkflowChart wraps a label onto at most two lines of ~22 characters and
+// silently drops anything past that — there is no ellipsis, it just
+// disappears. Every label below is written short enough to fit; if you
+// lengthen one, check it against a real live workflow's step titles (all
+// short, for the same reason) rather than trusting it will wrap cleanly.
+export const PERMISSIONS_FLOW = {
   title: 'How permissions work',
   start: 'grant',
   nodes: [
     { id: 'grant',   kind: 'step', label: 'An admin grants you an area' },
     { id: 'hold',    kind: 'step', label: 'You hold that area' },
-    { id: 'buttons', kind: 'step', label: 'Add / Edit buttons appear on that one page' },
-    { id: 'logged',  kind: 'outcome', tone: 'good', label: 'What you do there is recorded in Action History' },
+    { id: 'buttons', kind: 'step', label: 'Its Add/Edit buttons appear' },
+    { id: 'logged',  kind: 'outcome', tone: 'good', label: 'Recorded in Action History' },
   ],
   edges: [
     { from: 'grant',   to: 'hold' },
@@ -37,14 +43,14 @@ const PERMISSIONS_FLOW = {
   ],
 };
 
-const ROSTER_INPUTS_FLOW = {
+export const ROSTER_INPUTS_FLOW = {
   title: 'What feeds the roster',
   start: 'prefs',
   nodes: [
-    { id: 'prefs',    kind: 'step', label: 'Everyone sets what they will do (My Household & Preferences)' },
-    { id: 'away',     kind: 'step', label: 'Everyone marks the days they will be away' },
+    { id: 'prefs',    kind: 'step', label: 'Everyone sets their preferences' },
+    { id: 'away',     kind: 'step', label: 'Everyone marks their time away' },
     { id: 'generate', kind: 'step', label: 'The schedule keeper clicks Generate' },
-    { id: 'draft',    kind: 'outcome', tone: 'neutral', label: 'A draft — see Monthly Worship Schedule below' },
+    { id: 'draft',    kind: 'outcome', tone: 'neutral', label: 'See Monthly Worship Schedule below' },
   ],
   edges: [
     { from: 'prefs', to: 'generate' },
@@ -53,13 +59,13 @@ const ROSTER_INPUTS_FLOW = {
   ],
 };
 
-const BUG_REPORT_FLOW = {
+export const BUG_REPORT_FLOW = {
   title: 'Reporting a problem',
   start: 'report',
   nodes: [
     { id: 'report', kind: 'step', label: 'Anyone signed in reports a problem' },
     { id: 'notify', kind: 'step', label: 'Every admin is told' },
-    { id: 'work',   kind: 'step', label: 'An admin looks into it and updates its status' },
+    { id: 'work',   kind: 'step', label: 'An admin updates the status' },
     { id: 'back',   kind: 'outcome', tone: 'good', label: 'You are told when it changes' },
   ],
   edges: [
@@ -148,9 +154,10 @@ export default function HowItWorksView() {
       {loaded && worshipChart && (
         <Section title="Monthly Worship Schedule">
           <p className="text-sm text-gray-600">
-            Started from <strong>My Church → My Inbox</strong> by whoever holds Serving Schedule.
-            Regenerating tries a different, equally fair draft without touching the live roster;
-            only Publish writes it and emails everyone who is serving.
+            Started from the <strong>Generate</strong> button at the top of the Serving Schedule
+            page, by whoever holds that area. Regenerating tries a different, equally fair draft
+            without touching the live roster; only Publish writes it and emails everyone who is
+            serving.
           </p>
           <WorkflowChart chart={worshipChart} />
         </Section>

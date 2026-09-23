@@ -944,10 +944,10 @@ reached.
 
 Guest Follow-Up is reached from the Visitors page, behind a **Follow-ups**
 button, so the guest list itself stays the guest list. The Monthly Worship
-Schedule is started from **My Church → My Inbox** instead — it belongs to the
-serving-schedule coordinator, not to any one page — and it is the only way a
-slot on the roster is filled: preferences and time away are the only input,
-there is no separate request to swap or claim a duty.
+Schedule is reached from the Serving Schedule page the same way, behind a
+**Generate** button — and it is the only way a slot on the roster is filled:
+preferences and time away are the only input, there is no separate request to
+swap or claim a duty.
 
 ### Guest follow-ups
 

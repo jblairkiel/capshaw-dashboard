@@ -14,7 +14,10 @@ const OUTCOME_STYLE = {
   neutral: { fill: '#f8fafc', stroke: '#cbd5e1', text: '#475569' },
 };
 
-function wrap(text, max = 22) {
+// Exported so a page authoring its own chart data (How It Works, say) can
+// check a label actually fits before it ships — wrap() itself has no
+// ellipsis or warning, it just drops whatever does not fit on two lines.
+export function wrap(text, max = 22) {
   const words = String(text || '').split(/\s+/);
   const lines = [];
   let line = '';

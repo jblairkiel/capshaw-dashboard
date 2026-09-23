@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { describe, test, expect, vi, afterEach } from 'vitest';
-import HowItWorksView from '../components/HowItWorksView';
+import HowItWorksView, { PERMISSIONS_FLOW, ROSTER_INPUTS_FLOW, BUG_REPORT_FLOW } from '../components/HowItWorksView';
+import { wrap } from '../components/WorkflowChart';
 
 // The hand-drawn diagrams (permissions, roster inputs, bug reports) need no
 // data and should always be there. The two workflow diagrams are drawn from
@@ -40,6 +41,23 @@ function mockDefinitions(definitions = DEFINITIONS) {
 }
 
 afterEach(() => { vi.unstubAllGlobals(); });
+
+// WorkflowChart wraps a label onto at most two lines and silently drops
+// whatever does not fit — no ellipsis, no warning. Every hand-drawn label on
+// this page has to fit inside that, or a word just vanishes off the diagram.
+describe('the hand-drawn charts fit WorkflowChart’s label limit', () => {
+  const charts = { PERMISSIONS_FLOW, ROSTER_INPUTS_FLOW, BUG_REPORT_FLOW };
+
+  for (const [chartName, chart] of Object.entries(charts)) {
+    for (const node of chart.nodes) {
+      test(`${chartName} → "${node.label}" is not truncated`, () => {
+        const words = node.label.split(/\s+/);
+        const wrapped = wrap(node.label).join(' ').split(/\s+/);
+        expect(wrapped).toEqual(words);
+      });
+    }
+  }
+});
 
 describe('HowItWorksView', () => {
   test('the hand-drawn diagrams render without waiting on anything', () => {
