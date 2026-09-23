@@ -244,7 +244,7 @@ jobs:
 
     steps:
       - name: Deploy the container
-        uses: appleboy/ssh-action@v1.0.3
+        uses: appleboy/ssh-action@v1.2.5
         env:
           IMAGE: ghcr.io/${{ github.repository }}:${{ github.sha }}
         with:
