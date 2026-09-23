@@ -4,7 +4,7 @@ const engine  = require('../workflows/engine');
 const { listDefinitions, getDefinition } = require('../workflows/definitions');
 const { fieldsFor } = require('../workflows/options');
 const { PAGES, isPage } = require('../workflows/pages');
-const { requireAuth, requireApproved, hasRole } = require('../middleware/auth');
+const { requireAuth, requireApproved, holds } = require('../middleware/auth');
 
 // Everything here needs a signed-in user: a workflow is always somebody's.
 router.use(requireAuth);
@@ -33,7 +33,7 @@ router.get('/definitions', (req, res) => {
 
   const definitions = listDefinitions()
     .filter(d => !page || d.page === page)
-    .filter(d => hasRole(req.user, d.startRole || 'approved'))
+    .filter(d => holds(req.user, d.startRole || 'approved'))
     .map(d => ({
       id: d.id,
       page: d.page,
