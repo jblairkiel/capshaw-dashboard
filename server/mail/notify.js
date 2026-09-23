@@ -146,8 +146,8 @@ function schedulePublished({ draft, instanceId }) {
       '',
       ...mine.map(r => `  ${r.date} · ${r.service} · ${r.job}`),
       '',
-      'If you cannot make one of these, start a Job Assignment Swap from',
-      `the dashboard and the scheduler will find cover: ${link()}`,
+      'If you cannot make one of these, take yourself off it on the Serving',
+      `Schedule and let the coordinator know it needs covering: ${link()}`,
     ].join('\n');
 
     queued.push(...mailer.enqueue({

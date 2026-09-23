@@ -9,8 +9,8 @@
 // instance data for conditional routing (an approval threshold, say). A step's
 // `assign` decides who is asked to act: a named person, whoever started it, or
 // anyone holding a role. Effects let a step write back to the rest of the site
-// — the job-swap flow updates job_assignments — but a workflow is free to
-// touch nothing but its own data.
+// — publishing the Monthly Worship Schedule writes job_assignments — but a
+// workflow is free to touch nothing but its own data.
 
 const db = require('../db');
 const { getDefinition } = require('./definitions');

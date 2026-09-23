@@ -874,11 +874,11 @@ offers, and where each action leads:
 ```js
 steps: {
   approve: {
-    title: 'Approve and update the roster',
+    title: 'Approve',
     assign: { role: 'admin' },
     actions: [
-      { id: 'apply',  label: 'Approve', to: 'covered' },
-      { id: 'reject', label: 'Not suitable', to: 'find-replacement', requiresNote: true },
+      { id: 'apply',  label: 'Approve', to: 'done' },
+      { id: 'reject', label: 'Send back', to: 'draft', requiresNote: true },
     ],
   },
 }
@@ -896,14 +896,14 @@ linked login the task falls back to the definition's `fallbackRole` rather than
 stalling silently.
 
 **Reaching the rest of the site.** An action may carry an `effect` that reads or
-writes the site database — the job swap updates `job_assignments` on approval.
-An effect that returns an error refuses the action and rolls back, so a failed
-write never leaves the workflow half-advanced. A workflow that touches nothing
-but its own data is equally fine.
+writes the site database — publishing the Monthly Worship Schedule writes the
+draft to `job_assignments`. An effect that returns an error refuses the action
+and rolls back, so a failed write never leaves the workflow half-advanced. A
+workflow that touches nothing but its own data is equally fine.
 
 **Dynamic form options.** A start field can declare `optionsFrom` and be filled
 from live data, scoped to the person opening the form —
-`myAssignments` offers only the duties you are actually rostered for.
+`linkedPeople` offers only directory people who actually have a login to reach.
 
 ### Who sees what
 
@@ -933,13 +933,15 @@ reached.
 
 | Workflow | Shape it exercises |
 |---|---|
-| **Job Assignment Swap** | Starts from a duty you are really rostered for, loops while a replacement is found, writes the new name to `job_assignments` on approval. |
 | **Guest Follow-Up** | Started from the guest it is about, aimed at a named person, loops on "no answer", and closes the moment somebody reaches them. |
 | **Monthly Worship Schedule** | Owned by the `serving-schedule` area; builds a draft from everyone's preferences and publishes it to the roster. |
 
-Each one is reached from the page it belongs to, behind a **Roster requests** or
-**Follow-ups** button at the top of that page, so the page itself stays the
-roster or the guest list.
+Guest Follow-Up is reached from the Visitors page, behind a **Follow-ups**
+button, so the guest list itself stays the guest list. The Monthly Worship
+Schedule is started from **My Church → My Inbox** instead — it belongs to the
+serving-schedule coordinator, not to any one page — and it is the only way a
+slot on the roster is filled: preferences and time away are the only input,
+there is no separate request to swap or claim a duty.
 
 ### Guest follow-ups
 
@@ -1233,10 +1235,11 @@ disturbs May, and publishing twice does not double it up.
 ### Who hears about it
 
 - **Everyone given a turn** gets their own assignments — just theirs, not the
-  whole month — with a pointer to the Job Assignment Swap workflow if they
-  cannot make one. Addresses come from matching the roster name back to the
-  directory; anyone who cannot be matched is recorded on the workflow rather
-  than dropped in silence.
+  whole month — with a reminder that taking themselves off a slot on the
+  Serving Schedule, if they cannot make one, leaves it for the coordinator to
+  fill. Addresses come from matching the roster name back to the directory;
+  anyone who cannot be matched is recorded on the workflow rather than
+  dropped in silence.
 - **The whole month** goes to every user who has not opted out. Everyone is
   opted in by default (`users.wants_monthly_report`); the toggle is on **My
   Info → Email**, and turning it off does not stop the emails about jobs you

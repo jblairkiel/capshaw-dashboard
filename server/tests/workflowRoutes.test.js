@@ -13,7 +13,7 @@ function buildApp(user = null) {
   return app;
 }
 
-let ADMIN, MEMBER, OTHER, PENDING, RAY, ORPHAN, ASSIGNMENT, VISITOR;
+let ADMIN, MEMBER, OTHER, PENDING, RAY, ORPHAN, VISITOR;
 
 function addUser(name, role, directoryId = null) {
   const { lastInsertRowid: id } = db.prepare(
@@ -38,7 +38,7 @@ async function startFollowUp(user = MEMBER) {
 
 beforeEach(() => {
   for (const t of ['workflow_participants', 'workflow_events', 'workflow_tasks', 'workflow_instances',
-                   'job_assignments', 'visitors', 'users', 'directory']) {
+                   'visitors', 'users', 'directory']) {
     db.prepare(`DELETE FROM ${t}`).run();
   }
 
@@ -55,11 +55,6 @@ beforeEach(() => {
   MEMBER  = addUser('Ray', 'approved', RAY.id);
   OTHER   = addUser('Jo',  'approved');
   PENDING = addUser('Pat', 'pending');
-
-  const { lastInsertRowid } = db.prepare(
-    'INSERT INTO job_assignments (month, date, service, job, name) VALUES (?,?,?,?,?)'
-  ).run('April 2025', 'April 6', 'Sunday Worship', 'Song Leader', 'Ray Harris');
-  ASSIGNMENT = db.prepare('SELECT * FROM job_assignments WHERE id = ?').get(lastInsertRowid);
 });
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
@@ -82,28 +77,19 @@ describe('GET /api/workflows/definitions', () => {
     const res = await request(buildApp(MEMBER)).get('/api/workflows/definitions');
     expect(res.status).toBe(200);
     expect(res.body.definitions.map(d => d.id).sort())
-      .toEqual(['job-swap', 'visitor-follow-up']);
+      .toEqual(['visitor-follow-up']);
 
     const followUp = res.body.definitions.find(d => d.id === 'visitor-follow-up');
     expect(followUp.chart.nodes.length).toBeGreaterThan(0);
     expect(followUp.chart.edges.length).toBeGreaterThan(0);
   });
 
-  test('resolves dynamic options against the requesting user', async () => {
+  test('resolves dynamic options for a workflow field against live data', async () => {
     const res = await request(buildApp(MEMBER)).get('/api/workflows/definitions');
-    const swap = res.body.definitions.find(d => d.id === 'job-swap');
-    const duty = swap.fields.find(f => f.key === 'assignmentId');
+    const followUp = res.body.definitions.find(d => d.id === 'visitor-follow-up');
+    const guest = followUp.fields.find(f => f.key === 'visitorId');
 
-    // Ray is rostered for exactly one duty, so that is all he is offered.
-    expect(duty.options).toEqual([
-      { value: String(ASSIGNMENT.id), label: 'April 6 · Sunday Worship · Song Leader' },
-    ]);
-  });
-
-  test('offers a member with no roster duties an empty list rather than everyone\'s', async () => {
-    const res = await request(buildApp(OTHER)).get('/api/workflows/definitions');
-    const swap = res.body.definitions.find(d => d.id === 'job-swap');
-    expect(swap.fields.find(f => f.key === 'assignmentId').options).toEqual([]);
+    expect(guest.options).toEqual([{ value: String(VISITOR.id), label: 'Sam Visitor' }]);
   });
 });
 
@@ -244,25 +230,22 @@ describe('POST /api/workflows/tasks/:taskId', () => {
     expect(res.status).toBe(400);
   });
 
-  test('a full job swap runs end to end and updates the roster', async () => {
-    const started = await request(buildApp(MEMBER))
-      .post('/api/workflows')
-      .send({ definitionId: 'job-swap', data: { assignmentId: String(ASSIGNMENT.id), reason: 'Away' } });
-    const id = started.body.id;
+  test('a reassigned follow-up runs end to end and writes back to the guest', async () => {
+    const id = await startFollowUp(ADMIN);
 
-    const mine = await inboxTask(MEMBER);
-    await request(buildApp(MEMBER))
-      .post(`/api/workflows/tasks/${mine.taskId}`)
-      .send({ action: 'found', note: 'Jo Harris' });
+    const first = await inboxTask(ADMIN);
+    await request(buildApp(ADMIN))
+      .post(`/api/workflows/tasks/${first.taskId}`)
+      .send({ action: 'decline', note: 'Out of town' });
 
-    const scheduler = await inboxTask(ADMIN);
+    const second = await inboxTask(ADMIN);
     const res = await request(buildApp(ADMIN))
-      .post(`/api/workflows/tasks/${scheduler.taskId}`)
-      .send({ action: 'apply' });
+      .post(`/api/workflows/tasks/${second.taskId}`)
+      .send({ action: 'phoned' });
 
     expect(res.body.instance.status).toBe('completed');
-    expect(res.body.instance.outcomeLabel).toMatch(/roster updated/i);
-    expect(db.prepare('SELECT name FROM job_assignments WHERE id = ?').get(ASSIGNMENT.id).name).toBe('Jo Harris');
+    expect(res.body.instance.outcomeLabel).toMatch(/contacted/i);
+    expect(db.prepare('SELECT last_contact_method FROM visitors WHERE id = ?').get(VISITOR.id).last_contact_method).toBe('phone');
     expect(res.body.instance.id).toBe(id);
   });
 });
