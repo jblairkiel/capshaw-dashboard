@@ -181,6 +181,12 @@ implicitly, and nobody else holds one until an admin grants it.
 Everything else stays read-only for everyone signed in: the pages are all
 visible to the whole church family, and only the area holder sees the buttons.
 
+This table is the developer's version. **My Church → How It Works**, inside
+the app itself, is the same information written for everyone else — areas,
+and the flows that actually drive data (the Monthly Worship Schedule,
+Guest Follow-Up, bug reports) as flowcharts anyone signed in can open. See
+[Keeping "How It Works" current](#keeping-how-it-works-current) below.
+
 The calendar and the announcement board are the same table seen two ways, so
 they overlap on purpose: `announcements` may write any row, and `calendar` may
 write only rows that carry a date. A calendar editor taking the date off an
@@ -999,6 +1005,26 @@ Drop a definition in `server/workflows/definitions/` and list it in that
 folder's `index.js`. The inbox, the visibility rules, the API and the flowchart
 all work off the definition alone. `validateDefinitions()` runs at start-up and
 logs any action pointing at a step or outcome that does not exist.
+
+### Keeping "How It Works" current
+
+`client/src/components/HowItWorksView.jsx` (**My Church → How It Works** in
+the app, open to anyone signed in) is the plain-language version of this
+document — what actually drives data around the site, and who is allowed to
+drive it.
+
+Two of its diagrams are pulled live from `GET /api/workflows/definitions` and
+rendered with the same `WorkflowChart` component the workflow inbox uses, so
+changing a step in `server/workflows/definitions/worshipSchedule.js` or
+`visitorFollowUp.js` updates that picture with no separate diagram to
+maintain. The rest of the page is not that automatic:
+
+- **Add, rename or remove an area** (`server/lib/areas.js` / `client/src/lib/roles.js`) → the areas listed under "Who can do what" come straight from `AREAS`, so nothing to touch there, but re-read the surrounding prose if what an area does changed.
+- **Change what feeds the Monthly Worship Schedule draft** (`worshipSchedule.js`'s `buildDraft`) → update the hand-drawn `ROSTER_INPUTS_FLOW` diagram and its prose.
+- **Add another flow that actually writes data** the way bug reports or time away do → give it the same treatment: a short plain-language paragraph and, if it branches or has more than one step, a diagram built the same way (see `PERMISSIONS_FLOW` / `BUG_REPORT_FLOW` for the pattern — a `chart` object handed to `WorkflowChart`, every step marked `visited` since nothing on this page is "in progress").
+
+Treat this the same as updating a test: if a PR changes one of the things
+above, updating this page is part of that PR, not a follow-up.
 
 ---
 

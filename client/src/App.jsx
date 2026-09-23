@@ -29,6 +29,7 @@ import ImpersonationBanner from './components/ImpersonationBanner';
 import GroupsView from './components/GroupsView';
 import BugReportDialog from './components/BugReportDialog';
 import BugReportsView from './components/BugReportsView';
+import HowItWorksView from './components/HowItWorksView';
 import { hasWriteAccess, isAdmin, hasArea } from './lib/roles';
 
 const API = '/api/members';
@@ -73,8 +74,9 @@ const PROFILE_GROUP = {
   id: 'me',
   label: 'My Church',
   items: [
-    { id: 'profile',   label: 'My Household & Preferences' },
-    { id: 'inbox',     label: 'My Inbox' },
+    { id: 'profile',       label: 'My Household & Preferences' },
+    { id: 'inbox',         label: 'My Inbox' },
+    { id: 'how-it-works',  label: 'How It Works' },
   ],
 };
 
@@ -105,7 +107,7 @@ const STANDALONE_TABS = new Set([
   'bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database',
   'directory', 'profile', 'inbox', 'mail-groups', 'livestreams',
   'assignments', 'visitors', 'leadership', 'action-history','service-roster', 'bulletin',
-  'groups', 'bug-reports',
+  'groups', 'bug-reports', 'how-it-works',
 ]);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
@@ -421,6 +423,11 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       {!updating && activeTab === 'profile' && user && (
         <main className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
           <MyProfileView user={user} />
+        </main>
+      )}
+      {!updating && activeTab === 'how-it-works' && user && (
+        <main className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
+          <HowItWorksView />
         </main>
       )}
       {!updating && activeTab === 'users' && admin && (
