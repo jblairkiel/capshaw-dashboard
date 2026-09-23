@@ -1,7 +1,8 @@
-// /api/documents accepts a Word bulletin, converts it to HTML for the site, and
-// lists or removes what has been uploaded. The conversion is the interesting
-// part: mammoth throws paragraph indentation away, so the route re-reads the
-// OOXML and puts it back as padding.
+// /api/documents accepts a Word bulletin, converts it to HTML for the site,
+// and holds exactly one at a time — the most recent upload replaces whatever
+// was there before. The conversion is the interesting part: mammoth throws
+// paragraph indentation away, so the route re-reads the OOXML and puts it
+// back as padding.
 const fs      = require('fs');
 const path    = require('path');
 const request = require('supertest');
@@ -25,32 +26,28 @@ function buildApp(user = null) {
 const ADMIN  = { id: 1, role: 'admin' };
 const MEMBER = { id: 2, role: 'approved' };
 
-// Only ever remove files this run created, so a real uploads directory on a
-// developer's machine survives the suite.
-const created = new Set();
+beforeAll(() => fs.mkdirSync(uploadsDir, { recursive: true }));
 
-function track(filename) {
-  if (filename) created.add(filename);
-  return filename;
-}
+// Every test starts from an empty uploads directory: whatever a previous
+// test left behind (a stray fixture, a failed upload's partial write) would
+// otherwise leak into "there is only one document" assertions.
+beforeEach(() => {
+  for (const f of fs.readdirSync(uploadsDir)) fs.unlinkSync(path.join(uploadsDir, f));
+});
+
+afterAll(() => {
+  for (const f of fs.readdirSync(uploadsDir)) fs.unlinkSync(path.join(uploadsDir, f));
+});
 
 function writeFixture(filename, buffer) {
   fs.writeFileSync(path.join(uploadsDir, filename), buffer);
-  return track(filename);
+  return filename;
 }
-
-beforeAll(() => fs.mkdirSync(uploadsDir, { recursive: true }));
-
-afterAll(() => {
-  for (const f of created) {
-    try { fs.unlinkSync(path.join(uploadsDir, f)); } catch { /* already gone */ }
-  }
-});
 
 // ─── POST /upload ─────────────────────────────────────────────────────────────
 
 describe('POST /api/documents/upload', () => {
-  test('401 signed out, 403 for a member — uploads are admin-only', async () => {
+  test('401 signed out, 403 for a member — uploading is worship-order only', async () => {
     const docx = await buildDocx([{ text: 'Hello' }]);
     for (const [user, status] of [[null, 401], [MEMBER, 403]]) {
       const res = await request(buildApp(user))
@@ -71,11 +68,11 @@ describe('POST /api/documents/upload', () => {
     const res = await request(buildApp(ADMIN))
       .post('/api/documents/upload')
       .attach('document', docx, 'bulletin.docx');
-    track(res.body.storedAs);
 
     expect(res.status).toBe(200);
     expect(res.body.filename).toBe('bulletin.docx');
-    // Stored under a timestamp prefix so two uploads of one name cannot collide
+    // Stored under a timestamp prefix so a same-named re-upload cannot collide
+    // with itself on disk for the moment before the old one is removed.
     expect(res.body.storedAs).toMatch(/^\d+-bulletin\.docx$/);
     expect(res.body.html).toContain('<p>Order of Worship</p>');
     expect(res.body.warnings).toEqual([]);
@@ -91,7 +88,6 @@ describe('POST /api/documents/upload', () => {
     const res = await request(buildApp(ADMIN))
       .post('/api/documents/upload')
       .attach('document', docx, 'indents.docx');
-    track(res.body.storedAs);
 
     expect(res.body.html).toContain('<p>Flush left</p>');
     // 1440 twips = 1 inch, rendered as ~2em
@@ -104,7 +100,6 @@ describe('POST /api/documents/upload', () => {
     const res = await request(buildApp(ADMIN))
       .post('/api/documents/upload')
       .attach('document', docx, 'hanging.docx');
-    track(res.body.storedAs);
     expect(res.body.html).toContain('padding-left:2.00em');
   });
 
@@ -113,7 +108,6 @@ describe('POST /api/documents/upload', () => {
     const res = await request(buildApp(ADMIN))
       .post('/api/documents/upload')
       .attach('document', docx, 'a b/../c&d.docx');
-    track(res.body.storedAs);
 
     expect(res.status).toBe(200);
     expect(res.body.storedAs).toMatch(/^\d+-[a-zA-Z0-9._-]+$/);
@@ -134,145 +128,97 @@ describe('POST /api/documents/upload', () => {
     const res = await request(buildApp(ADMIN))
       .post('/api/documents/upload')
       .attach('document', Buffer.from('this is not a zip'), 'broken.docx');
-    track((res.body.storedAs) || null);
     expect(res.status).toBe(500);
     expect(res.body.success).toBe(false);
-    // Clean up whatever multer wrote before the conversion failed
-    for (const f of fs.readdirSync(uploadsDir).filter(f => f.endsWith('-broken.docx'))) track(f);
+  });
+
+  test('a new upload replaces whatever was there before', async () => {
+    const first  = await buildDocx([{ text: 'First bulletin' }]);
+    const second = await buildDocx([{ text: 'Second bulletin' }]);
+
+    const res1 = await request(buildApp(ADMIN))
+      .post('/api/documents/upload').attach('document', first, 'first.docx');
+    expect(fs.existsSync(path.join(uploadsDir, res1.body.storedAs))).toBe(true);
+
+    const res2 = await request(buildApp(ADMIN))
+      .post('/api/documents/upload').attach('document', second, 'second.docx');
+
+    // The first upload is gone; only the second is left on disk.
+    expect(fs.existsSync(path.join(uploadsDir, res1.body.storedAs))).toBe(false);
+    expect(fs.existsSync(path.join(uploadsDir, res2.body.storedAs))).toBe(true);
+    expect(fs.readdirSync(uploadsDir)).toEqual([res2.body.storedAs]);
+  });
+
+  test('an upload that fails to convert leaves the previous one in place', async () => {
+    const good = await buildDocx([{ text: 'Still here' }]);
+    await request(buildApp(ADMIN)).post('/api/documents/upload').attach('document', good, 'good.docx');
+
+    const res = await request(buildApp(ADMIN))
+      .post('/api/documents/upload')
+      .attach('document', Buffer.from('not a zip at all'), 'broken.docx');
+    expect(res.status).toBe(500);
+
+    const current = await request(buildApp(MEMBER)).get('/api/documents/current');
+    expect(current.body.current.html).toContain('Still here');
   });
 });
 
-// ─── GET / ────────────────────────────────────────────────────────────────────
+// ─── GET /current ─────────────────────────────────────────────────────────────
 
-describe('GET /api/documents', () => {
-  test('lists the stored documents with a display name and size', async () => {
-    const docx = await buildDocx([{ text: 'Hi' }]);
-    const stored = writeFixture(`${Date.now()}-listed-bulletin.docx`, docx);
-
-    const res = await request(buildApp(MEMBER)).get('/api/documents');
+describe('GET /api/documents/current', () => {
+  test('null when nothing has been uploaded', async () => {
+    const res = await request(buildApp(MEMBER)).get('/api/documents/current');
     expect(res.status).toBe(200);
-
-    const entry = res.body.files.find(f => f.filename === stored);
-    expect(entry).toBeDefined();
-    // The timestamp prefix is stripped for display
-    expect(entry.displayName).toBe('listed-bulletin.docx');
-    expect(entry.size).toBe(docx.length);
-    expect(entry.uploadedAt).toBeTruthy();
+    expect(res.body.current).toBeNull();
   });
 
-  test('ignores files that are not Word documents', async () => {
-    writeFixture('notes.txt', Buffer.from('just a note'));
-    const res = await request(buildApp(MEMBER)).get('/api/documents');
-    expect(res.body.files.some(f => f.filename === 'notes.txt')).toBe(false);
-  });
-
-  test('returns the newest upload first', async () => {
-    const docx = await buildDocx([{ text: 'Hi' }]);
-    const older = writeFixture('1000000000000-older.docx', docx);
-    const newer = writeFixture('2000000000000-newer.docx', docx);
-    // mtime, not the name, decides the order
-    fs.utimesSync(path.join(uploadsDir, older), new Date(2020, 0, 1), new Date(2020, 0, 1));
-    fs.utimesSync(path.join(uploadsDir, newer), new Date(2025, 0, 1), new Date(2025, 0, 1));
-
-    const names = (await request(buildApp(MEMBER)).get('/api/documents')).body.files
-      .map(f => f.filename).filter(n => n === older || n === newer);
-    expect(names).toEqual([newer, older]);
-  });
-});
-
-// ─── GET /:filename ───────────────────────────────────────────────────────────
-
-describe('GET /api/documents/:filename', () => {
-  test('converts a stored document on demand', async () => {
+  test('anybody signed in can read it, converted to HTML', async () => {
     const docx = await buildDocx([{ text: 'Announcements' }, { text: 'Indented', left: 1440 }]);
-    const stored = writeFixture(`${Date.now()}-fetch-me.docx`, docx);
+    writeFixture(`${Date.now()}-fetch-me.docx`, docx);
 
-    const res = await request(buildApp(MEMBER)).get(`/api/documents/${stored}`);
+    const res = await request(buildApp(MEMBER)).get('/api/documents/current');
     expect(res.status).toBe(200);
-    expect(res.body.filename).toBe(stored);
-    expect(res.body.html).toContain('<p>Announcements</p>');
-    expect(res.body.html).toContain('padding-left:2.00em');
+    expect(res.body.current.displayName).toBe('fetch-me.docx');
+    expect(res.body.current.html).toContain('<p>Announcements</p>');
+    expect(res.body.current.html).toContain('padding-left:2.00em');
   });
 
-  test('404 for a document that is not stored', async () => {
-    const res = await request(buildApp(MEMBER)).get('/api/documents/nothing-here.docx');
-    expect(res.status).toBe(404);
-    expect(res.body.error).toBe('File not found');
-  });
-
-  test('500 when a stored file cannot be read as a Word document', async () => {
-    const stored = writeFixture(`${Date.now()}-corrupt.docx`, Buffer.from('not a zip at all'));
-    const res = await request(buildApp(MEMBER)).get(`/api/documents/${stored}`);
+  test('500 when the stored file cannot be read as a Word document', async () => {
+    writeFixture(`${Date.now()}-corrupt.docx`, Buffer.from('not a zip at all'));
+    const res = await request(buildApp(MEMBER)).get('/api/documents/current');
     expect(res.status).toBe(500);
     expect(res.body.success).toBe(false);
   });
 });
 
-// ─── Path traversal ───────────────────────────────────────────────────────────
-// Express decodes a route param *after* matching it against the URL, so a
-// request built with a %2F-encoded slash carries a real ../ once
-// req.params.filename is read — one URL segment on the wire, a full
-// traversal once decoded. These prove that can no longer escape uploadsDir.
+// ─── DELETE /current ──────────────────────────────────────────────────────────
 
-describe('path traversal via an encoded filename', () => {
-  test('GET cannot read a file outside the uploads directory', async () => {
-    const outside = path.join(uploadsDir, '..', 'traversal-canary.txt');
-    fs.writeFileSync(outside, 'top secret contents');
-    try {
-      const res = await request(buildApp(MEMBER)).get('/api/documents/..%2Ftraversal-canary.txt');
-      // Reduced to a plain (nonexistent) filename inside uploadsDir, not a
-      // path outside it — the canary's contents never appear anywhere.
-      expect(res.status).toBe(404);
-      expect(JSON.stringify(res.body)).not.toContain('top secret');
-    } finally {
-      fs.unlinkSync(outside);
-    }
-  });
-
-  test('DELETE cannot remove a file outside the uploads directory', async () => {
-    const outside = path.join(uploadsDir, '..', 'traversal-canary.txt');
-    fs.writeFileSync(outside, 'top secret contents');
-    try {
-      const res = await request(buildApp(ADMIN)).delete('/api/documents/..%2Ftraversal-canary.txt');
-      expect(res.status).toBe(404);
-      expect(fs.existsSync(outside)).toBe(true);
-    } finally {
-      fs.unlinkSync(outside);
-    }
-  });
-
-  test('a filename that decodes to nothing but ".." is rejected outright', async () => {
-    const res = await request(buildApp(ADMIN)).delete('/api/documents/..%2F..');
-    expect(res.status).toBe(400);
-    expect(res.body.error).toBe('Invalid filename');
-  });
-});
-
-// ─── DELETE /:filename ────────────────────────────────────────────────────────
-
-describe('DELETE /api/documents/:filename', () => {
-  test('401 signed out, 403 for a member — deleting is admin-only', async () => {
+describe('DELETE /api/documents/current', () => {
+  test('401 signed out, 403 for a member — removing is worship-order only', async () => {
     const docx = await buildDocx([{ text: 'Hi' }]);
-    const stored = writeFixture(`${Date.now()}-guarded.docx`, docx);
+    writeFixture(`${Date.now()}-guarded.docx`, docx);
 
     for (const [user, status] of [[null, 401], [MEMBER, 403]]) {
-      const res = await request(buildApp(user)).delete(`/api/documents/${stored}`);
+      const res = await request(buildApp(user)).delete('/api/documents/current');
       expect(res.status).toBe(status);
     }
-    expect(fs.existsSync(path.join(uploadsDir, stored))).toBe(true);
+    expect(fs.readdirSync(uploadsDir)).toHaveLength(1);
   });
 
-  test('an admin removes the file from disk', async () => {
+  test('removes the file from disk', async () => {
     const docx = await buildDocx([{ text: 'Hi' }]);
-    const stored = writeFixture(`${Date.now()}-doomed.docx`, docx);
+    writeFixture(`${Date.now()}-doomed.docx`, docx);
 
-    const res = await request(buildApp(ADMIN)).delete(`/api/documents/${stored}`);
+    const res = await request(buildApp(ADMIN)).delete('/api/documents/current');
     expect(res.status).toBe(200);
-    expect(fs.existsSync(path.join(uploadsDir, stored))).toBe(false);
+    expect(fs.readdirSync(uploadsDir)).toHaveLength(0);
+
+    const current = await request(buildApp(MEMBER)).get('/api/documents/current');
+    expect(current.body.current).toBeNull();
   });
 
-  test('404 for a document that is not stored', async () => {
-    const res = await request(buildApp(ADMIN)).delete('/api/documents/nothing-here.docx');
+  test('404 when there is nothing to remove', async () => {
+    const res = await request(buildApp(ADMIN)).delete('/api/documents/current');
     expect(res.status).toBe(404);
   });
 });

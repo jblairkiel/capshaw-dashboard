@@ -152,15 +152,15 @@ function applyAssignments(htmlString, groups) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function OrderOfService({ user }) {
-  // Uploading and removing this Sunday's order of service belongs to whoever
-  // looks after the worship order.
+  // Uploading, replacing and removing this Sunday's order of service belongs
+  // to whoever looks after the worship order. There is only ever one on
+  // file — the most recent upload — so everybody signed in sees the same
+  // thing without having to go looking for it.
   const canWrite = hasArea(user, 'worship-order');
-  const [docList, setDocList]         = useState([]);
   const [currentDoc, setCurrentDoc]   = useState(null);
   const [html, setHtml]               = useState('');
-  const [loading, setLoading]         = useState(false);
+  const [loading, setLoading]         = useState(true);
   const [error, setError]             = useState('');
-  const [listLoaded, setListLoaded]   = useState(false);
   const [presenting,   setPresenting]   = useState(false);
   const [annotated,    setAnnotated]    = useState('');
   const [annotating,   setAnnotating]   = useState(false);
@@ -191,15 +191,28 @@ export default function OrderOfService({ user }) {
     }
   }
 
-  const loadDocList = useCallback(async () => {
+  const loadCurrent = useCallback(async () => {
+    setLoading(true);
+    setError('');
     try {
-      const { data } = await axios.get(`${API}/documents`);
-      setDocList(data.files || []);
-      setListLoaded(true);
+      const { data } = await axios.get(`${API}/documents/current`);
+      if (data.current) {
+        setCurrentDoc(data.current.filename);
+        setHtml(data.current.html);
+      } else {
+        setCurrentDoc(null);
+        setHtml('');
+      }
     } catch {
-      setError('Could not load document list.');
+      setError('Could not load the order of service.');
+    } finally {
+      setLoading(false);
     }
   }, []);
+
+  // Whatever was uploaded last is what everybody should see, so it loads on
+  // its own rather than waiting for anybody to ask for it.
+  useEffect(() => { loadCurrent(); }, [loadCurrent]);
 
   async function handleUpload(e) {
     const file = e.target.files[0];
@@ -213,7 +226,6 @@ export default function OrderOfService({ user }) {
       if (data.success) {
         setCurrentDoc(data.filename);
         setHtml(data.html);
-        loadDocList();
       } else {
         setError(data.error || 'Upload failed');
       }
@@ -225,30 +237,12 @@ export default function OrderOfService({ user }) {
     }
   }
 
-  async function handleOpenDoc(filename) {
-    setLoading(true);
-    setError('');
+  async function handleDelete() {
+    if (!confirm('Remove the order of service?')) return;
     try {
-      const { data } = await axios.get(`${API}/documents/${filename}`);
-      if (data.success) {
-        setCurrentDoc(data.filename);
-        setHtml(data.html);
-      } else {
-        setError(data.error);
-      }
-    } catch (err) {
-      setError(err.response?.data?.error || 'Could not open document');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleDelete(filename) {
-    if (!confirm('Delete this document?')) return;
-    try {
-      await axios.delete(`${API}/documents/${filename}`);
-      if (currentDoc === filename) { setCurrentDoc(null); setHtml(''); }
-      loadDocList();
+      await axios.delete(`${API}/documents/current`);
+      setCurrentDoc(null);
+      setHtml('');
     } catch {
       setError('Delete failed');
     }
@@ -273,9 +267,11 @@ export default function OrderOfService({ user }) {
         <aside className="lg:col-span-1 space-y-4">
           {canWrite && (
             <div className="card">
-              <h2 className="section-heading">Upload Document</h2>
+              <h2 className="section-heading">{currentDoc ? 'Replace Document' : 'Upload Document'}</h2>
               <p className="text-sm text-gray-500 mb-3">
-                Upload a Word (.docx) file for the Order of Service.
+                {currentDoc
+                  ? 'Uploading a new Word (.docx) file replaces the one below.'
+                  : 'Upload a Word (.docx) file for the Order of Service.'}
               </p>
               <label className="block">
                 <span className="sr-only">Choose file</span>
@@ -294,45 +290,6 @@ export default function OrderOfService({ user }) {
               {error   && <p className="text-sm text-red-600 mt-2">{error}</p>}
             </div>
           )}
-
-          <div className="card">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="section-heading mb-0">Saved Docs</h2>
-              <button onClick={loadDocList} className="text-xs text-church-navy hover:underline">
-                {listLoaded ? 'Refresh' : 'Load'}
-              </button>
-            </div>
-            {!listLoaded && (
-              <p className="text-sm text-gray-400">Click &quot;Load&quot; to see saved documents.</p>
-            )}
-            {listLoaded && docList.length === 0 && (
-              <p className="text-sm text-gray-400">No documents uploaded yet.</p>
-            )}
-            <ul className="space-y-2">
-              {docList.map((f) => (
-                <li key={f.filename} className="flex items-start justify-between gap-2 text-sm">
-                  <button
-                    onClick={() => handleOpenDoc(f.filename)}
-                    className={`text-left truncate hover:text-church-gold transition-colors ${
-                      currentDoc === f.filename ? 'text-church-gold font-medium' : 'text-church-navy'
-                    }`}
-                    title={f.displayName}
-                  >
-                    {f.displayName}
-                  </button>
-                  {canWrite && (
-                    <button
-                      onClick={() => handleDelete(f.filename)}
-                      className="flex-shrink-0 text-red-400 hover:text-red-600 text-xs"
-                      title="Delete"
-                    >
-                      &#x2715;
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
         </aside>
 
         {/* Document Viewer */}
@@ -344,7 +301,11 @@ export default function OrderOfService({ user }) {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                     d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
-                <p className="text-center">Upload or select a Word document<br />to view the Order of Service</p>
+                <p className="text-center">
+                  {canWrite
+                    ? <>Upload a Word document<br />to show the Order of Service</>
+                    : <>Nothing has been uploaded yet.</>}
+                </p>
               </div>
             )}
             {loading && (
@@ -399,6 +360,15 @@ export default function OrderOfService({ user }) {
                     <button onClick={() => window.print()} className="btn-gold text-sm">
                       Print
                     </button>
+                    {canWrite && (
+                      <button
+                        onClick={handleDelete}
+                        title="Remove"
+                        className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border border-gray-300 text-red-500 hover:border-red-300 hover:bg-red-50 transition-colors"
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div

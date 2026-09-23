@@ -8,10 +8,18 @@ vi.mock('axios');
 const ADMIN  = { id: 1, role: 'admin' };
 const MEMBER = { id: 2, role: 'approved' };
 
-const DOC_LIST = [
-  { filename: '1700000000-bulletin.docx', displayName: 'bulletin.docx' },
-  { filename: '1700000001-order_of_service.docx', displayName: 'order_of_service.docx' },
-];
+const CURRENT = {
+  filename: '1700000001-order_of_service.docx',
+  displayName: 'order_of_service.docx',
+  html: '<p>Call to worship</p>',
+};
+
+function mockCurrent(current = null) {
+  axios.get.mockImplementation(url => {
+    if (url === '/api/documents/current') return Promise.resolve({ data: { success: true, current } });
+    return Promise.resolve({ data: { success: false } });
+  });
+}
 
 beforeEach(() => {
   vi.stubGlobal('confirm', vi.fn(() => true));
@@ -22,151 +30,140 @@ beforeEach(() => {
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
-describe('OrderOfService — document list', () => {
-  test('the list is not fetched until asked to load', () => {
-    render(<OrderOfService user={MEMBER} />);
-    expect(screen.getByText(/Click "Load" to see saved documents/i)).toBeInTheDocument();
-    expect(axios.get).not.toHaveBeenCalled();
-  });
-
-  test('loading lists the saved documents by their display name', async () => {
-    axios.get.mockResolvedValue({ data: { files: DOC_LIST } });
+describe('OrderOfService — showing whatever is current', () => {
+  test('the current document loads and shows on its own, with nothing to click first', async () => {
+    mockCurrent(CURRENT);
     render(<OrderOfService user={MEMBER} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Load' }));
-    expect(await screen.findByText('bulletin.docx')).toBeInTheDocument();
-    expect(screen.getByText('order_of_service.docx')).toBeInTheDocument();
-    // The button now offers to refresh rather than load for the first time
-    expect(screen.getByRole('button', { name: 'Refresh' })).toBeInTheDocument();
+    expect(await screen.findByText('Call to worship')).toBeInTheDocument();
+    expect(axios.get).toHaveBeenCalledWith('/api/documents/current');
+    expect(screen.getByText('order of service')).toBeInTheDocument();
   });
 
-  test('an empty library says so once loaded', async () => {
-    axios.get.mockResolvedValue({ data: { files: [] } });
+  test('nothing uploaded yet says so, worded for whether you can fix that', async () => {
+    mockCurrent(null);
     render(<OrderOfService user={MEMBER} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Load' }));
-    expect(await screen.findByText(/No documents uploaded yet/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Nothing has been uploaded yet/i)).toBeInTheDocument();
   });
 
-  test('a failed list request is reported', async () => {
-    // Note: the error line lives in the upload card, which only an admin sees.
+  test('a member who can fix it is invited to upload', async () => {
+    mockCurrent(null);
+    render(<OrderOfService user={ADMIN} />);
+    expect(await screen.findByText(/Upload a Word document/i)).toBeInTheDocument();
+  });
+
+  test('a failed load is reported, not an empty page pretending there is nothing', async () => {
     axios.get.mockRejectedValue(new Error('network error'));
     render(<OrderOfService user={ADMIN} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Load' }));
-    expect(await screen.findByText(/Could not load document list/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Could not load the order of service/i)).toBeInTheDocument();
   });
 
-  test('only an admin sees the upload form or delete buttons', async () => {
-    axios.get.mockResolvedValue({ data: { files: DOC_LIST } });
+  test('only whoever holds Worship Order sees the upload form or Remove', async () => {
+    mockCurrent(CURRENT);
     render(<OrderOfService user={MEMBER} />);
+    await screen.findByText('Call to worship');
     expect(screen.queryByText('Upload Document')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Load' }));
-    await screen.findByText('bulletin.docx');
-    expect(screen.queryByTitle('Delete')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
   });
 
-  test('an admin sees the upload form and delete buttons', async () => {
-    axios.get.mockResolvedValue({ data: { files: DOC_LIST } });
+  test('whoever holds Worship Order sees the upload form and Remove', async () => {
+    mockCurrent(CURRENT);
     render(<OrderOfService user={ADMIN} />);
-    expect(screen.getByText('Upload Document')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Load' }));
-    await screen.findByText('bulletin.docx');
-    expect(screen.getAllByTitle('Delete')).toHaveLength(2);
+    expect(await screen.findByText('Upload Document')).toBeInTheDocument();
+    await screen.findByText('Call to worship');
+    expect(screen.getByRole('button', { name: 'Remove' })).toBeInTheDocument();
   });
 });
 
-describe('OrderOfService — viewing a document', () => {
-  test('nothing is shown before a document is opened', () => {
-    render(<OrderOfService user={MEMBER} />);
-    expect(screen.getByText(/Upload or select a Word document/i)).toBeInTheDocument();
-  });
-
-  test('opening a saved document renders its HTML', async () => {
-    axios.get.mockImplementation(url => {
-      if (url === '/api/documents') return Promise.resolve({ data: { files: DOC_LIST } });
-      return Promise.resolve({ data: { success: true, filename: DOC_LIST[0].filename, html: '<p>Call to worship</p>' } });
-    });
-    render(<OrderOfService user={MEMBER} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Load' }));
-    fireEvent.click(await screen.findByText('bulletin.docx'));
-
-    expect(await screen.findByText('Call to worship')).toBeInTheDocument();
-    expect(screen.getByText('bulletin')).toBeInTheDocument();
-  });
-
-  test('a document that fails to open is reported', async () => {
-    // The error line lives in the upload card, which only an admin sees.
-    axios.get.mockImplementation(url => {
-      if (url === '/api/documents') return Promise.resolve({ data: { files: DOC_LIST } });
-      return Promise.resolve({ data: { success: false, error: 'File not found' } });
-    });
-    render(<OrderOfService user={ADMIN} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Load' }));
-    fireEvent.click(await screen.findByText('bulletin.docx'));
-
-    expect(await screen.findByText('File not found')).toBeInTheDocument();
-  });
-
-  test('uploading a document displays it and refreshes the list', async () => {
-    axios.get.mockResolvedValue({ data: { files: [] } });
+describe('OrderOfService — uploading replaces what was there', () => {
+  test('uploading the first one displays it', async () => {
+    mockCurrent(null);
     axios.post = vi.fn().mockResolvedValue({
       data: { success: true, filename: 'new.docx', html: '<p>New order</p>' },
     });
     render(<OrderOfService user={ADMIN} />);
+    await screen.findByText('Upload Document');
 
     const file = new File(['docx bytes'], 'new.docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
-    const input = document.querySelector('input[type="file"]');
-    fireEvent.change(input, { target: { files: [file] } });
+    fireEvent.change(document.querySelector('input[type="file"]'), { target: { files: [file] } });
 
     expect(await screen.findByText('New order')).toBeInTheDocument();
     expect(axios.post).toHaveBeenCalledWith('/api/documents/upload', expect.any(FormData));
   });
 
+  test('once one exists, the upload card offers to replace it rather than upload a first one', async () => {
+    mockCurrent(CURRENT);
+    render(<OrderOfService user={ADMIN} />);
+    expect(await screen.findByText('Replace Document')).toBeInTheDocument();
+    expect(screen.getByText(/replaces the one below/i)).toBeInTheDocument();
+  });
+
+  test('uploading a second document shows the second, not both', async () => {
+    mockCurrent(CURRENT);
+    axios.post = vi.fn().mockResolvedValue({
+      data: { success: true, filename: 'second.docx', html: '<p>Second order</p>' },
+    });
+    render(<OrderOfService user={ADMIN} />);
+    await screen.findByText('Call to worship');
+
+    const file = new File(['docx bytes'], 'second.docx', { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+    fireEvent.change(document.querySelector('input[type="file"]'), { target: { files: [file] } });
+
+    expect(await screen.findByText('Second order')).toBeInTheDocument();
+    expect(screen.queryByText('Call to worship')).not.toBeInTheDocument();
+  });
+
   test('an upload the server refuses is reported', async () => {
-    axios.get.mockResolvedValue({ data: { files: [] } });
+    mockCurrent(null);
     axios.post = vi.fn().mockResolvedValue({ data: { success: false, error: 'Only .docx and .doc files are allowed' } });
     render(<OrderOfService user={ADMIN} />);
+    await screen.findByText('Upload Document');
 
     const file = new File(['not a docx'], 'notes.txt', { type: 'text/plain' });
     fireEvent.change(document.querySelector('input[type="file"]'), { target: { files: [file] } });
 
     expect(await screen.findByText('Only .docx and .doc files are allowed')).toBeInTheDocument();
   });
+});
 
-  test('deleting the open document clears the viewer', async () => {
-    axios.get.mockImplementation(url => {
-      if (url === '/api/documents') return Promise.resolve({ data: { files: DOC_LIST } });
-      return Promise.resolve({ data: { success: true, filename: DOC_LIST[0].filename, html: '<p>Call to worship</p>' } });
-    });
+describe('OrderOfService — removing it', () => {
+  test('removing the document clears the viewer for everyone', async () => {
+    mockCurrent(CURRENT);
     axios.delete = vi.fn().mockResolvedValue({ data: { success: true } });
 
     render(<OrderOfService user={ADMIN} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Load' }));
-    fireEvent.click(await screen.findByText('bulletin.docx'));
     await screen.findByText('Call to worship');
 
-    fireEvent.click(screen.getAllByTitle('Delete')[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
     expect(globalThis.confirm).toHaveBeenCalled();
-    await waitFor(() => expect(axios.delete).toHaveBeenCalledWith(`/api/documents/${DOC_LIST[0].filename}`));
-    expect(await screen.findByText(/Upload or select a Word document/i)).toBeInTheDocument();
+    await waitFor(() => expect(axios.delete).toHaveBeenCalledWith('/api/documents/current'));
+    // Rendered as an admin here, so the empty state is the invitation to
+    // upload rather than the plain "nothing yet" a member would see.
+    expect(await screen.findByText(/Upload a Word document/i)).toBeInTheDocument();
   });
 
-  test('declining the delete prompt leaves the document open', async () => {
+  test('declining the prompt leaves the document in place', async () => {
     vi.stubGlobal('confirm', vi.fn(() => false));
-    axios.get.mockImplementation(url => {
-      if (url === '/api/documents') return Promise.resolve({ data: { files: DOC_LIST } });
-      return Promise.resolve({ data: { success: true, filename: DOC_LIST[0].filename, html: '<p>Call to worship</p>' } });
-    });
+    mockCurrent(CURRENT);
     axios.delete = vi.fn();
 
     render(<OrderOfService user={ADMIN} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Load' }));
-    fireEvent.click(await screen.findByText('bulletin.docx'));
     await screen.findByText('Call to worship');
 
-    fireEvent.click(screen.getAllByTitle('Delete')[0]);
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
     expect(axios.delete).not.toHaveBeenCalled();
+    expect(screen.getByText('Call to worship')).toBeInTheDocument();
+  });
+
+  test('a failed removal is reported and the document stays visible', async () => {
+    mockCurrent(CURRENT);
+    axios.delete = vi.fn().mockRejectedValue(new Error('network error'));
+
+    render(<OrderOfService user={ADMIN} />);
+    await screen.findByText('Call to worship');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    expect(await screen.findByText('Delete failed')).toBeInTheDocument();
     expect(screen.getByText('Call to worship')).toBeInTheDocument();
   });
 });
@@ -174,9 +171,9 @@ describe('OrderOfService — viewing a document', () => {
 describe('OrderOfService — assigning jobs', () => {
   const HTML = '<p>Song Leading</p><p>Lord\'s Supper</p><p>Sermon</p>';
 
-  function openDocAs() {
+  function mockWithAssignments(current) {
     axios.get.mockImplementation(url => {
-      if (url === '/api/documents') return Promise.resolve({ data: { files: DOC_LIST } });
+      if (url === '/api/documents/current') return Promise.resolve({ data: { success: true, current } });
       if (url === '/api/members/data') return Promise.resolve({
         data: {
           data: {
@@ -190,28 +187,24 @@ describe('OrderOfService — assigning jobs', () => {
           },
         },
       });
-      return Promise.resolve({ data: { success: true, filename: DOC_LIST[0].filename, html: HTML } });
+      return Promise.resolve({ data: { success: false } });
     });
   }
 
   test('an approved member sees no "Assign Jobs" control', async () => {
-    openDocAs();
+    mockWithAssignments({ ...CURRENT, html: HTML });
     render(<OrderOfService user={MEMBER} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Load' }));
-    fireEvent.click(await screen.findByText('bulletin.docx'));
     await screen.findByText('Sermon');
     expect(screen.queryByRole('button', { name: /Assign Jobs/i })).not.toBeInTheDocument();
   });
 
-  test('an admin can annotate the document with the nearest roster', async () => {
+  test('whoever holds Worship Order can annotate the document with the nearest roster', async () => {
     // Anchor "today" near April 6, 2025 so it is picked as the nearest Sunday.
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.setSystemTime(new Date('2025-04-06T12:00:00Z'));
 
-    openDocAs();
+    mockWithAssignments({ ...CURRENT, html: HTML });
     render(<OrderOfService user={ADMIN} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Load' }));
-    fireEvent.click(await screen.findByText('bulletin.docx'));
     await screen.findByText('Sermon');
 
     fireEvent.click(screen.getByRole('button', { name: /Assign Jobs/i }));
@@ -225,20 +218,13 @@ describe('OrderOfService — assigning jobs', () => {
   });
 
   test('with no Sunday roster to draw from, the document is left unannotated', async () => {
-    // Note: the component sets an explanatory annotateInfo message here, but
-    // that message only renders in the branch reached once annotated is set —
-    // which this path never reaches — so today nothing is shown to the user
-    // beyond the button returning to its normal state. This test pins the
-    // observable behavior; surfacing that message is a follow-up worth doing.
     axios.get.mockImplementation(url => {
-      if (url === '/api/documents') return Promise.resolve({ data: { files: DOC_LIST } });
+      if (url === '/api/documents/current') return Promise.resolve({ data: { success: true, current: { ...CURRENT, html: HTML } } });
       if (url === '/api/members/data') return Promise.resolve({ data: { data: { jobAssignments: { month: '', assignments: [] } } } });
-      return Promise.resolve({ data: { success: true, filename: DOC_LIST[0].filename, html: HTML } });
+      return Promise.resolve({ data: { success: false } });
     });
 
     render(<OrderOfService user={ADMIN} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Load' }));
-    fireEvent.click(await screen.findByText('bulletin.docx'));
     await screen.findByText('Sermon');
 
     fireEvent.click(screen.getByRole('button', { name: /Assign Jobs/i }));
@@ -258,13 +244,8 @@ describe('OrderOfService — presenting', () => {
   afterEach(() => { delete Element.prototype.requestFullscreen; });
 
   test('opens a fullscreen view of the document and can be closed', async () => {
-    axios.get.mockImplementation(url => {
-      if (url === '/api/documents') return Promise.resolve({ data: { files: DOC_LIST } });
-      return Promise.resolve({ data: { success: true, filename: DOC_LIST[0].filename, html: '<p>Call to worship</p>' } });
-    });
+    mockCurrent(CURRENT);
     render(<OrderOfService user={MEMBER} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Load' }));
-    fireEvent.click(await screen.findByText('bulletin.docx'));
     await screen.findByText('Call to worship');
 
     fireEvent.click(screen.getByRole('button', { name: /Present/i }));
