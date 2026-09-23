@@ -214,7 +214,7 @@ jobs:
       # rather than a rebuild of the same commit.
       - name: Sign in to the registry
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
