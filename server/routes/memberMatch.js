@@ -1,5 +1,6 @@
 const express = require('express');
 const router  = express.Router();
+const path    = require('path');
 const db      = require('../db');
 const { requireApproved } = require('../middleware/auth');
 const photoStore = require('../lib/photoStore');
@@ -44,8 +45,12 @@ router.get('/rounds', (req, res) => {
 // matching game showing only your own household would not be much of a game.
 
 router.get('/photo/:filename', (req, res) => {
-  const file = photoStore.photoPath(req.params.filename);
-  if (!file || !photoStore.exists(req.params.filename)) {
+  // path.basename() strips any directory component before photoStore's own
+  // whitelist check ever sees the value, so nothing derived from the request
+  // reaches sendFile still carrying a path to follow.
+  const filename = path.basename(req.params.filename);
+  const file = photoStore.photoPath(filename);
+  if (!file || !photoStore.exists(filename)) {
     return res.status(404).json({ success: false, error: 'No such photo' });
   }
 
