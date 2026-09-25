@@ -31,6 +31,7 @@ const groupRoutes                = require('./routes/groups');
 const commentRoutes              = require('./routes/comments');
 const notificationRoutes         = require('./routes/notifications');
 const bugReportRoutes            = require('./routes/bugReports');
+const memberMatchRoutes          = require('./routes/memberMatch');
 const paths                      = require('./lib/paths');
 const { requireSiteAuth }        = require('./middleware/auth');
 const { applyImpersonation }     = require('./middleware/impersonation');
@@ -138,6 +139,7 @@ function createApp() {
   app.use('/api/comments',        commentRoutes);
   app.use('/api/notifications',   notificationRoutes);
   app.use('/api/bug-reports',     bugReportRoutes);
+  app.use('/api/member-match',    memberMatchRoutes);
 
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
