@@ -692,6 +692,31 @@ they were edited, linked to an account, or carry preferences.
 
 ---
 
+## Member Match
+
+**Grow → Member Match** is a game: a photo from the directory, and a name to
+put to it. Open to anyone `approved` or above — there is no area for it, since
+nothing here is ever written, only read.
+
+`GET /api/member-match/rounds` returns every photo on file with who is in it.
+A round's photo is shared by more than one directory row exactly when it is a
+family portrait (see [Family photos](#family-photos) — a photo is grouped by
+the file it actually is, not by household/address, which is a different
+grouping kept for a different reason). A photo held by one person is a single
+question; held by several, the client asks about the same photo again for
+each person in it, one at a time, rather than all at once — nothing on file
+says which face in a family portrait belongs to which name, so there is no way
+to ask about more than one of them at once.
+
+Multiple-choice options are the correct name plus a few drawn at random from
+everybody else with a photo on file. The whole game is built client-side from
+one `/rounds` call and played in the browser; nothing about a game in progress
+or a score is written anywhere, so there is nothing to keep in step here as
+the directory changes — the next `/rounds` call just reflects whatever photos
+are on file by then.
+
+---
+
 ## Scraper
 
 Data is pulled from capshawchurch.org on start-up and every four hours. Most
@@ -708,11 +733,17 @@ vCard 4.0 `data:` URI.
 Photos are written to `server/data/photos/` rather than into the database,
 named by a hash of their content — so an unchanged photo is not rewritten and a
 family sharing one portrait shares one file. Files nothing references are
-pruned after each sync. They are served by
-`GET /api/profile/person/:id/photo`, which applies the same visibility rule as
-the rest of a profile: admins see anyone, members see their own household.
-Only JPEG, PNG, GIF and WebP are stored (notably **not** SVG, which can carry
-script).
+pruned after each sync. Only JPEG, PNG, GIF and WebP are stored (notably
+**not** SVG, which can carry script).
+
+Two routes serve the same files under two different rules, because they answer
+two different questions. `GET /api/profile/person/:id/photo` is "whose photo is
+this", so it applies the same visibility as the rest of a profile: admins see
+anyone, members see their own household. `GET /api/member-match/photo/:filename`
+is "here is a photo, guess whose" for the [Member Match](#member-match) game,
+so any approved member gets any photo — a matching game limited to your own
+household would not be much of one. Neither route trusts the filename it is
+given beyond checking it against what is actually on disk.
 
 A photo given only as a URL is counted but not downloaded — that would mean one
 request per member. If the church site turns out to serve photos that way, the
