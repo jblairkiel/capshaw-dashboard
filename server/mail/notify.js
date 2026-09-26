@@ -15,8 +15,15 @@ const SITE_URL = process.env.NODE_ENV === 'production'
 // decides where its holders are looked up.
 const { isArea } = require('../middleware/auth');
 
-function link() {
-  return `${SITE_URL} → My Info → Workflows & Inbox`;
+// A real, clickable link into a specific page — and, for anything that is
+// really about one particular thing rather than a whole page, the id of that
+// thing too, so a reader lands on the group meeting or the task itself
+// rather than a page they still have to go looking on. Read back by
+// client/src/App.jsx on load: ?page= picks the tab, and group/event/workflow
+// are whichever of those that page knows how to open on its own.
+function link(page, params = {}) {
+  const clean = Object.fromEntries(Object.entries(params).filter(([, v]) => v != null));
+  return `${SITE_URL}/?${new URLSearchParams({ page, ...clean })}`;
 }
 
 // Users who can act on a task: the named person, or everyone holding the role.
@@ -71,7 +78,7 @@ function taskAssigned({ instance, definition, task }) {
     `  Step: ${step?.title || task.step_id}`,
     step?.instruction ? `\n${step.instruction}` : '',
     '',
-    `Open it here: ${link()}`,
+    `Open it here: ${link('inbox', { workflow: instance.id })}`,
   ].filter(Boolean).join('\n');
 
   return mailer.enqueue({
@@ -112,7 +119,7 @@ function workflowCompleted({ instance, definition, outcomeId, actorName }) {
     `  ${instance.title}`,
     actorName ? `  Closed by: ${actorName}` : '',
     '',
-    `See the full history here: ${link()}`,
+    `See the full history here: ${link('inbox', { workflow: instance.id })}`,
   ].filter(Boolean).join('\n');
 
   return mailer.enqueue({
@@ -147,7 +154,7 @@ function schedulePublished({ draft, instanceId }) {
       ...mine.map(r => `  ${r.date} · ${r.service} · ${r.job}`),
       '',
       'If you cannot make one of these, take yourself off it on the Serving',
-      `Schedule and let the coordinator know it needs covering: ${link()}`,
+      `Schedule and let the coordinator know it needs covering: ${link('assignments')}`,
     ].join('\n');
 
     queued.push(...mailer.enqueue({
@@ -184,7 +191,7 @@ function monthlyReport({ draft, instanceId }) {
     ...[...byDate.entries()].flatMap(([heading, lines]) => [`  ${heading}`, ...lines, '']),
     draft.unfilled?.length ? `${draft.unfilled.length} slot(s) still need somebody.` : '',
     '',
-    `The full schedule is on the dashboard: ${link()}`,
+    `The full schedule is on the dashboard: ${link('assignments')}`,
     '',
     'To stop receiving this summary, turn off "Monthly schedule summary"',
     'under My Info on the dashboard.',
@@ -215,8 +222,8 @@ function eventLines(event) {
   ].filter(Boolean);
 }
 
-function groupLink() {
-  return `${SITE_URL} → Our Church Family → Church Groups`;
+function groupLink(group, event) {
+  return link('groups', { group: group.id, event: event?.id });
 }
 
 function groupEventPublished({ group, event }) {
@@ -234,7 +241,7 @@ function groupEventPublished({ group, event }) {
     '',
     event.rsvpEnabled ? 'Let the group know whether you can come' : 'See the details',
     event.signupEnabled ? `and take something off the ${event.signupTitle.toLowerCase()} list` : '',
-    `here: ${groupLink()}`,
+    `here: ${groupLink(group, event)}`,
   ].filter(Boolean).join('\n');
 
   return mailer.enqueue({
@@ -254,7 +261,7 @@ function groupEventCancelled({ group, event }) {
     '',
     ...eventLines(event),
     '',
-    `Details, and anything the leaders have said about it: ${groupLink()}`,
+    `Details, and anything the leaders have said about it: ${groupLink(group, event)}`,
   ].join('\n');
 
   return mailer.enqueue({
@@ -277,7 +284,7 @@ function groupEventChanged({ group, event, attendees = [], what = '' }) {
     '',
     ...eventLines(event),
     '',
-    `The current details are here: ${groupLink()}`,
+    `The current details are here: ${groupLink(group, event)}`,
   ].filter(Boolean).join('\n');
 
   return mailer.enqueue({

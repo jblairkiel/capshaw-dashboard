@@ -61,10 +61,10 @@ function Inbox({ tasks, onAct, onOpen, busyTask, pageLabel, onGoToPage }) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
-export default function InboxView({ onGoToPage }) {
+export default function InboxView({ onGoToPage, initialInstanceId }) {
   const [tasks,    setTasks]    = useState([]);
   const [pages,    setPages]    = useState([]);
-  const [openId,   setOpenId]   = useState(null);
+  const [openId,   setOpenId]   = useState(initialInstanceId ?? null);
   const [detail,   setDetail]   = useState(null);
   const [busyTask, setBusyTask] = useState(null);
   const [loading,  setLoading]  = useState(true);

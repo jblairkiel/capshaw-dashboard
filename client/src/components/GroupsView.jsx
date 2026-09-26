@@ -427,7 +427,7 @@ function GroupDetails({ group, perms, onChanged }) {
 
 // ─── One group ────────────────────────────────────────────────────────────────
 
-function GroupDetail({ groupId, onBack }) {
+function GroupDetail({ groupId, onBack, initialEventId }) {
   const [data,    setData]    = useState(null);
   const [writing, setWriting] = useState(null);   // null | 'new' | the meeting being edited
   const [error,   setError]   = useState('');
@@ -489,6 +489,7 @@ function GroupDetail({ groupId, onBack }) {
                   members={members}
                   onChanged={load}
                   onEdit={setWriting}
+                  defaultOpen={event.id === initialEventId}
                 />
               ))}
             </div>
@@ -528,9 +529,9 @@ function GroupCard({ group, onOpen, mine = false }) {
   );
 }
 
-export default function GroupsView({ user }) {
+export default function GroupsView({ user, initialGroupId, initialEventId }) {
   const [data,   setData]   = useState(null);
-  const [openId, setOpenId] = useState(null);
+  const [openId, setOpenId] = useState(initialGroupId ?? null);
   const [error,  setError]  = useState('');
 
   const load = useCallback(() => {
@@ -541,7 +542,15 @@ export default function GroupsView({ user }) {
 
   useEffect(() => { load(); }, [load]);
 
-  if (openId) return <GroupDetail groupId={openId} onBack={() => { setOpenId(null); load(); }} />;
+  if (openId) {
+    return (
+      <GroupDetail
+        groupId={openId}
+        onBack={() => { setOpenId(null); load(); }}
+        initialEventId={openId === initialGroupId ? initialEventId : null}
+      />
+    );
+  }
 
   if (error) return <p className="card text-sm text-red-600">{error}</p>;
   if (!data) return <p className="card text-sm text-gray-500">Loading…</p>;
