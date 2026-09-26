@@ -285,6 +285,29 @@ describe('InboxView', () => {
     render(<InboxView user={{ role: 'admin' }} />);
     expect(await screen.findByText('Nope')).toBeInTheDocument();
   });
+
+  // A task-assigned or workflow-completed email links straight to the
+  // instance (server/mail/notify.js). App.jsx reads that back and passes it
+  // down as initialInstanceId — this should open right there rather than
+  // making the reader find it in the list themselves.
+  test('a deep link opens straight to that workflow, skipping the task list', async () => {
+    mockApi({
+      detail: {
+        success: true,
+        instance: { ...INSTANCE, fields: [] },
+        definition: { title: 'Visitor Follow-Up' },
+        visited: [],
+        events: [],
+        myTask: null,
+        tasks: [],
+      },
+    });
+    render(<InboxView user={{ role: 'admin' }} initialInstanceId={3} />);
+
+    expect(await screen.findByText('Follow up with Sam Visitor')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '← Back' })).toBeInTheDocument();
+    expect(screen.queryByText('My Inbox')).not.toBeInTheDocument();
+  });
 });
 
 // ─── Per-page panel ───────────────────────────────────────────────────────────

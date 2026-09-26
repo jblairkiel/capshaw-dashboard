@@ -1,5 +1,5 @@
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
-import { describe, test, expect, vi, beforeEach } from 'vitest';
+import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import App from '../App';
 import LoginPage from '../components/LoginPage';
 import AnnouncementsView from '../components/AnnouncementsView';
@@ -76,6 +76,66 @@ describe('App — site-wide sign-in gate', () => {
     fireEvent.click(screen.getByRole('button', { name: /sign out/i }));
 
     expect(await screen.findByRole('link', { name: /sign in with google/i })).toBeInTheDocument();
+  });
+});
+
+// ─── App — deep links from generated emails ───────────────────────────────────
+// server/mail/notify.js points a generated email at ?page=&group=&event=&workflow=
+// on the root URL. App.jsx reads that once on load to pick the starting tab
+// (see deepLinkFromUrl), rather than always opening to "This Sunday".
+
+function mockDeepLinkApi(user) {
+  const fetchMock = vi.fn(url => {
+    if (url.startsWith('/api/auth/me')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ user }) });
+    }
+    if (/\/api\/groups\/\d+$/.test(url)) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({
+        success: true,
+        group: { id: 3, key: 'group-3', name: 'North Harvest', description: '', meets: '', location: '', email: '', active: true },
+        perms: { manages: false, leads: false, belongs: true, myRole: 'member', canSeeRoll: true },
+        members: [], events: [], candidates: [],
+      }) });
+    }
+    if (url.startsWith('/api/groups')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({
+        success: true, groups: [], mine: [], upcoming: [], canManage: false, linkedToDirectory: true,
+      }) });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true, data: null }) });
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+describe('App — deep links from generated emails', () => {
+  afterEach(() => { window.history.replaceState(null, '', '/'); });
+
+  test('?page=groups&group=3 opens straight to that group instead of the groups landing page', async () => {
+    window.history.replaceState(null, '', '/?page=groups&group=3');
+    mockDeepLinkApi({ id: 1, name: 'Mel', role: 'approved' });
+    render(<App />);
+
+    expect(await screen.findByText('North Harvest')).toBeInTheDocument();
+    expect(screen.getByText('← All groups')).toBeInTheDocument();
+  });
+
+  test('the query string is stripped once the deep link is read, so a later remount does not repeat it', async () => {
+    window.history.replaceState(null, '', '/?page=groups&group=3');
+    mockDeepLinkApi({ id: 1, name: 'Mel', role: 'approved' });
+    render(<App />);
+
+    await screen.findByText('North Harvest');
+    expect(window.location.search).toBe('');
+  });
+
+  test('an unknown ?page falls back to the default tab rather than a blank one', async () => {
+    window.history.replaceState(null, '', '/?page=not-a-real-page');
+    const fetchMock = mockDeepLinkApi({ id: 1, name: 'Mel', role: 'approved' });
+    render(<App />);
+
+    await screen.findByText(/Capshaw Church of Christ — Member Portal/);
+    expect(fetchMock.mock.calls.some(c => String(c[0]).startsWith('/api/groups'))).toBe(false);
   });
 });
 

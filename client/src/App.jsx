@@ -103,6 +103,39 @@ function officeGroupFor(user) {
   return items.length ? [{ id: 'admin', label: 'Church Office', items }] : [];
 }
 
+// Every tab id that could ever be the active one — whether or not this user
+// can currently see it in the nav. A deep link is checked against this
+// rather than against what officeGroupFor(user) happens to return, since an
+// office item a link points at but this user cannot use should fall back to
+// the default tab, not silently render nothing.
+const ALL_TAB_IDS = new Set([
+  ...BASE_GROUPS.flatMap(g => g.items).map(i => i.id),
+  ...PROFILE_GROUP.items.map(i => i.id),
+  ...OFFICE_ITEMS.map(i => i.id),
+]);
+
+// A generated email points here with ?page=&group=&event=&workflow= (see
+// server/mail/notify.js). Read once on load and then the URL is stripped, so
+// a later remount — impersonation starting or stopping, say — does not jump
+// the person back to the same link a second time.
+function deepLinkFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const page = params.get('page');
+  if (!page || !ALL_TAB_IDS.has(page)) return null;
+
+  const toId = value => {
+    const n = Number(value);
+    return value != null && Number.isInteger(n) && n > 0 ? n : null;
+  };
+
+  return {
+    page,
+    groupId:    toId(params.get('group')),
+    eventId:    toId(params.get('event')),
+    workflowId: toId(params.get('workflow')),
+  };
+}
+
 // Pages that fetch what they need themselves, rather than waiting on the
 // scraped payload the app holds.
 const STANDALONE_TABS = new Set([
@@ -172,8 +205,16 @@ function NavDropdown({ group, activeTab, onSelect }) {
 
 
 function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
-  const [activeTab,   setActiveTab]   = useState('order');
+  // Read once, on the very first render, and only ever consumed from here on —
+  // clicking anywhere else in the nav after landing must behave exactly like
+  // it always has.
+  const [deepLink] = useState(deepLinkFromUrl);
+  const [activeTab,   setActiveTab]   = useState(deepLink?.page || 'order');
   const [siteData,    setSiteData]    = useState(null);
+
+  useEffect(() => {
+    if (deepLink) window.history.replaceState(null, '', window.location.pathname);
+  }, [deepLink]);
   const [updating,    setUpdating]    = useState(false);
   const [updateError,    setUpdateError]    = useState('');
   const [updateWarnings, setUpdateWarnings] = useState([]);
@@ -379,7 +420,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       )}
       {!updating && activeTab === 'groups' && (
         <main className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
-          <GroupsView user={user} />
+          <GroupsView user={user} initialGroupId={deepLink?.groupId} initialEventId={deepLink?.eventId} />
         </main>
       )}
       {!updating && activeTab === 'livestreams' && (
@@ -429,7 +470,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       )}
       {!updating && activeTab === 'inbox' && user && (
         <main className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
-          <InboxView onGoToPage={setActiveTab} />
+          <InboxView onGoToPage={setActiveTab} initialInstanceId={deepLink?.workflowId} />
         </main>
       )}
       {!updating && activeTab === 'profile' && user && (

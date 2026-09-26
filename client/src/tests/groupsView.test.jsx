@@ -244,6 +244,36 @@ describe('one group', () => {
   });
 });
 
+// A generated email links straight to a group and, often, one meeting within
+// it (server/mail/notify.js's groupLink). App.jsx reads that back and passes
+// it down as these two props — the page should open right there rather than
+// making the reader find it themselves.
+describe('a deep link', () => {
+  test('opens straight to the linked group, skipping the landing page', async () => {
+    mockApi();
+    render(<GroupsView user={MEMBER} initialGroupId={1} />);
+
+    expect(await screen.findByText('Who is in it')).toBeInTheDocument();
+    expect(screen.queryByText('My groups')).not.toBeInTheDocument();
+  });
+
+  test('and expands the linked meeting within it', async () => {
+    mockApi();
+    render(<GroupsView user={MEMBER} initialGroupId={1} initialEventId={90} />);
+
+    await screen.findByText('Fellowship meal');
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
+  });
+
+  test('a group id with no matching meeting still opens the group, just not expanded', async () => {
+    mockApi();
+    render(<GroupsView user={MEMBER} initialGroupId={1} initialEventId={999} />);
+
+    await screen.findByText('Fellowship meal');
+    expect(screen.getByRole('button', { name: 'Open' })).toBeInTheDocument();
+  });
+});
+
 describe('a meeting', () => {
   async function openMeeting(options = {}) {
     const fetchMock = mockApi(options);
