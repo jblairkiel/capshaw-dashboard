@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta charset="utf-8">
+<!-- The phone scenes: the portal runs in an iPhone-sized frame on the right, and
+     the guide layer draws captions and a fingertip over this page. Served by the
+     guide runner at /__stage?src=<path> on the same origin as the app. -->
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:radial-gradient(1200px 700px at 75% 40%, #24365e 0%, #16213b 55%, #0f1729 100%);}
+.glow{position:fixed;right:40px;top:0;width:560px;height:720px;background:radial-gradient(closest-side, rgba(201,168,76,.18), transparent);}
+.brand{position:fixed;left:70px;top:36px;color:#c9a84c;font:600 13px/1 "DejaVu Sans",sans-serif;letter-spacing:.18em;}
+.brand b{color:#fff;font:700 18px Georgia,serif;letter-spacing:0;margin-right:10px}
+.phone{position:fixed;left:790px;top:24px;width:399px;height:672px;border-radius:52px;background:#0a0e18;
+  box-shadow:0 0 0 2px #2c3650, 0 30px 70px rgba(0,0,0,.6), inset 0 0 0 2px #1d2436;}
+.screen{position:absolute;left:12px;top:16px;width:375px;height:640px;border-radius:38px;overflow:hidden;background:#1a2744;}
+.status{position:absolute;left:0;right:0;top:0;height:34px;display:flex;align-items:center;justify-content:space-between;padding:0 26px 0 30px;
+  color:#fff;font:600 14px "DejaVu Sans",sans-serif;}
+.island{position:absolute;left:50%;top:7px;width:96px;height:22px;margin-left:-48px;background:#05070c;border-radius:12px;}
+.icons{display:flex;gap:6px;align-items:center}
+.bat{width:24px;height:11px;border:1.5px solid #fff;border-radius:3px;position:relative}
+.bat:after{content:'';position:absolute;left:1.5px;top:1.5px;width:15px;height:5px;background:#fff;border-radius:1px}
+.phone iframe{position:absolute;left:0;top:34px;width:375px;height:606px;border:0;background:#f9f6f0;}
+</style></head><body><div class="glow"></div>
+<div class="brand"><b>Capshaw Church of Christ</b>MEMBER PORTAL · ON A PHONE</div>
+<div class="phone"><div class="screen"><div class="status"><span>9:41</span><div class="island"></div><div class="icons">
+<svg width="17" height="11" viewBox="0 0 17 11"><rect x="0" y="7" width="3" height="4" rx="1" fill="#fff"/><rect x="4.5" y="5" width="3" height="6" rx="1" fill="#fff"/><rect x="9" y="2.5" width="3" height="8.5" rx="1" fill="#fff"/><rect x="13.5" y="0" width="3" height="11" rx="1" fill="#fff"/></svg>
+<div class="bat"></div></div></div><iframe id="phone" src="about:blank"></iframe></div></div>
+<script>document.getElementById('phone').src = new URLSearchParams(location.search).get('src') || '/';</script>
+</body></html>
