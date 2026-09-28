@@ -129,7 +129,7 @@ export const AREAS = [
     id:          'contributions',
     label:       'Contribution Counter',
     page:        'Contributions',
-    description: 'Record each week\'s contribution total, and correct earlier weeks.',
+    description: 'Record each week\'s contribution total, correct earlier weeks, and import them from a CSV.',
     tone:        'bg-yellow-100 text-yellow-800',
   },
 ];

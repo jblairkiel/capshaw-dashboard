@@ -97,7 +97,6 @@ router.post('/import-cache', (req, res) => {
 const SCRAPE_SECTIONS = [
   { key: 'jobAssignments', label: 'Job Assignments', table: 'job_assignments', dateCol: null },
   { key: 'attendance',     label: 'Attendance',      table: 'attendance',      dateCol: 'date' },
-  { key: 'contributions',  label: 'Contributions',   table: 'contributions',   dateCol: 'date' },
   { key: 'sermons',        label: 'Sermons',         table: 'sermons',         dateCol: 'date' },
   { key: 'visitors',       label: 'Visitors',        table: 'visitors',        dateCol: null },
   { key: 'anniversaries',  label: 'Anniversaries',   table: 'anniversaries',   dateCol: null },

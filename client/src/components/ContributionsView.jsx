@@ -3,13 +3,13 @@ import { toCsv, downloadCsv } from '../lib/csv';
 import { hasArea } from '../lib/roles';
 import Dialog from './Dialog';
 
-// The counter's weekly total — one number a week, never a per-giver ledger —
-// plus whatever the old church-management site's own history was imported
-// once (see routes/scraper.js's /import-contributions). Both go through
-// /api/records/contributions, which gates writes on the contributions area
-// and records every change in the action history, exactly like Attendance.
+// The counter's weekly total — one number a week, never a per-giver ledger.
+// A single week goes through /api/records/contributions, which gates writes on
+// the contributions area and records every change in the action history,
+// exactly like Attendance. Years of them at once come from a CSV export
+// through /api/contributions/import (server/routes/contributions.js).
 const API        = '/api/records/contributions';
-const IMPORT_API = '/api/members/import-contributions';
+const IMPORT_API = '/api/contributions/import';
 
 const BLANK = { date: '', amount: '' };
 
@@ -38,6 +38,11 @@ function parseRecordDate(value) {
   }
   return null;
 }
+
+const longDate = iso => {
+  const [y, m, d] = String(iso).split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+};
 
 const MONTH_LABEL = d => d.toLocaleDateString('en-US', { month: 'short' });
 
@@ -105,6 +110,75 @@ function TrendChart({ months }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Importing a CSV ──────────────────────────────────────────────────────────
+//
+// The file is read by the server twice: first to say what it holds, then — once
+// somebody has looked at that — to save it. Nothing is written until Import is
+// pressed, and a week already on file is never overwritten.
+
+function ImportCsvDialog({ file, csv, preview, onClose, onImported }) {
+  const [busy, setBusy]   = useState(false);
+  const [error, setError] = useState('');
+  const toAdd = preview.found - preview.alreadyOnFile;
+  const matchesTotal = preview.statedTotal != null && Math.abs(preview.statedTotal - preview.total) < 0.01;
+
+  async function confirm() {
+    setBusy(true); setError('');
+    try {
+      const json = await send(IMPORT_API, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ csv, filename: file.name }),
+      });
+      onImported(json);
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog title="Import contributions" subtitle={file.name} onClose={onClose} width="max-w-md">
+      <div className="space-y-3 text-sm">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+          <dt className="text-gray-500">Weeks in the file</dt>
+          <dd className="font-semibold text-church-navy">{preview.found}</dd>
+          <dt className="text-gray-500">From</dt>
+          <dd>{longDate(preview.first)} to {longDate(preview.last)}</dd>
+          <dt className="text-gray-500">Total</dt>
+          <dd>
+            {moneyPrecise.format(preview.total)}
+            {matchesTotal && <span className="text-green-700"> — matches the file&rsquo;s own total</span>}
+          </dd>
+          <dt className="text-gray-500">Read from</dt>
+          <dd>the &ldquo;{preview.amountColumn}&rdquo; column</dd>
+        </dl>
+
+        {preview.alreadyOnFile > 0 && (
+          <p className="text-gray-600">
+            {preview.alreadyOnFile === 1
+              ? '1 of these weeks is already on file and will be left as it is.'
+              : `${preview.alreadyOnFile} of these weeks are already on file and will be left as they are.`}
+          </p>
+        )}
+        {preview.warnings?.length > 0 && (
+          <ul className="list-disc pl-5 text-xs text-amber-800 space-y-0.5">
+            {preview.warnings.map((w, i) => <li key={i}>{w}</li>)}
+          </ul>
+        )}
+        {error && <p className="text-red-600">{error}</p>}
+
+        <div className="flex justify-end gap-2 pt-1">
+          <button type="button" onClick={onClose} className="px-3 py-2 rounded-lg border border-gray-200 text-gray-600">Cancel</button>
+          <button type="button" onClick={confirm} disabled={busy || toAdd === 0} className="btn-primary text-sm disabled:opacity-50">
+            {busy ? 'Importing…' : toAdd === 0 ? 'Nothing new to import' : `Import ${toAdd} week${toAdd === 1 ? '' : 's'}`}
+          </button>
+        </div>
+      </div>
+    </Dialog>
   );
 }
 
@@ -190,7 +264,8 @@ export default function ContributionsView({ user }) {
   const [records, setRecords]   = useState([]);
   const [loaded, setLoaded]     = useState(false);
   const [editing, setEditing]   = useState(null);
-  const [importing, setImporting] = useState(false);
+  const [reading, setReading]   = useState(false);
+  const [pending, setPending]   = useState(null);   // { file, csv, preview } awaiting confirmation
   const [importResult, setImportResult] = useState(null);
   const [importError, setImportError]   = useState('');
 
@@ -222,9 +297,18 @@ export default function ContributionsView({ user }) {
     .filter(r => r.parsedDate.getFullYear() === year)
     .reduce((s, r) => s + Number(r.amount || 0), 0), [rows]);
 
-  const yearTotal      = totalFor(thisYear);
-  const lastYearTotal  = totalFor(thisYear - 1);
-  const yoyChange      = lastYearTotal > 0 ? ((yearTotal - lastYearTotal) / lastYearTotal) * 100 : null;
+  const yearTotal = totalFor(thisYear);
+
+  // Last year over the same stretch — up to the latest week entered this year,
+  // not to today, since entries lag the calendar. Setting a year still under
+  // way against a whole one would read as a fall every year until December.
+  const latestThisYear = rows.find(r => r.parsedDate.getFullYear() === thisYear)?.parsedDate;
+  const cutoff = latestThisYear
+    && new Date(thisYear - 1, latestThisYear.getMonth(), latestThisYear.getDate());
+  const lastYearToDate = cutoff ? rows
+    .filter(r => r.parsedDate.getFullYear() === thisYear - 1 && r.parsedDate <= cutoff)
+    .reduce((s, r) => s + Number(r.amount || 0), 0) : 0;
+  const yoyChange = lastYearToDate > 0 ? ((yearTotal - lastYearToDate) / lastYearToDate) * 100 : null;
 
   const monthTotal = rows
     .filter(r => r.parsedDate.getFullYear() === thisYear && r.parsedDate.getMonth() === now.getMonth())
@@ -258,18 +342,26 @@ export default function ContributionsView({ user }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows]);
 
-  async function runImport() {
-    setImporting(true);
+  // Picking a file only asks what it holds; the dialog is where it is saved.
+  async function chooseFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setReading(true);
     setImportError('');
     setImportResult(null);
     try {
-      const json = await send(IMPORT_API, { method: 'POST' });
-      setImportResult(json);
-      loadRecords();
+      const csv = await file.text();
+      const preview = await send(IMPORT_API, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ csv, filename: file.name, dryRun: true }),
+      });
+      setPending({ file, csv, preview });
     } catch (err) {
       setImportError(err.message);
     } finally {
-      setImporting(false);
+      setReading(false);
     }
   }
 
@@ -287,10 +379,10 @@ export default function ContributionsView({ user }) {
         <h2 className="section-heading mb-0">Contributions</h2>
         <div className="flex items-center gap-2">
           {canWrite && (
-            <button onClick={runImport} disabled={importing}
-              className="text-sm px-3 py-2 rounded-lg border border-gray-300 text-gray-600 hover:border-church-gold hover:text-church-navy transition-colors disabled:opacity-50">
-              {importing ? 'Importing…' : 'Import from old site'}
-            </button>
+            <label className={`text-sm px-3 py-2 rounded-lg border border-gray-300 text-gray-600 hover:border-church-gold hover:text-church-navy transition-colors cursor-pointer ${reading ? 'opacity-50 pointer-events-none' : ''}`}>
+              {reading ? 'Reading…' : 'Import CSV'}
+              <input type="file" accept=".csv,text/csv" onChange={chooseFile} className="sr-only" aria-label="Import CSV" />
+            </label>
           )}
           {canWrite && (
             <button onClick={() => setEditing({})} className="btn-primary text-sm">
@@ -311,20 +403,11 @@ export default function ContributionsView({ user }) {
       </div>
 
       {importResult && (
-        <div className={`text-sm rounded-lg px-3 py-2 border ${importResult.found
-          ? 'text-green-700 bg-green-50 border-green-200'
-          : 'text-amber-800 bg-amber-50 border-amber-200'}`}>
-          <p>
-            {importResult.found
-              ? `Found ${importResult.found} week${importResult.found === 1 ? '' : 's'} on the old site — added ${importResult.added} new.`
-              : 'Nothing could be read from the old site’s finances page.'}
-          </p>
-          {importResult.warnings?.length > 0 && (
-            <ul className="mt-1 list-disc pl-5 text-xs space-y-0.5 break-words">
-              {importResult.warnings.map((w, i) => <li key={i}>{w.replace(/^contributions:\s*/, '')}</li>)}
-            </ul>
-          )}
-        </div>
+        <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+          Imported {importResult.added} week{importResult.added === 1 ? '' : 's'} of contributions
+          {importResult.alreadyOnFile === 1 && ' — 1 already on file was left as it was'}
+          {importResult.alreadyOnFile > 1 && ` — ${importResult.alreadyOnFile} already on file were left as they were`}.
+        </p>
       )}
       {importError && (
         <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{importError}</p>
@@ -332,7 +415,7 @@ export default function ContributionsView({ user }) {
 
       {rows.length === 0 ? (
         <div className="card flex items-center justify-center h-32 text-gray-400 text-sm">
-          No contributions recorded yet{canWrite ? ' — record this week, or import the old site’s history.' : '.'}
+          No contributions recorded yet{canWrite ? ' — record this week, or import a CSV.' : '.'}
         </div>
       ) : (
         <>
@@ -354,7 +437,7 @@ export default function ContributionsView({ user }) {
               <p className={`text-2xl font-bold ${yoyChange == null ? 'text-gray-400' : yoyChange >= 0 ? 'text-green-600' : 'text-red-500'}`}>
                 {yoyChange == null ? '—' : `${yoyChange >= 0 ? '+' : ''}${yoyChange.toFixed(1)}%`}
               </p>
-              <p className="text-xs text-gray-500 mt-1">Vs. {thisYear - 1}</p>
+              <p className="text-xs text-gray-500 mt-1">Vs. {thisYear - 1} to date</p>
             </div>
           </div>
 
@@ -400,6 +483,14 @@ export default function ContributionsView({ user }) {
             </div>
           </div>
         </>
+      )}
+
+      {pending && (
+        <ImportCsvDialog
+          {...pending}
+          onClose={() => setPending(null)}
+          onImported={json => { setPending(null); setImportResult(json); loadRecords(); }}
+        />
       )}
 
       {editing && (

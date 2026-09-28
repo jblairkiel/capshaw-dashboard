@@ -177,7 +177,7 @@ implicitly, and nobody else holds one until an admin grants it.
 | `church-groups` | Church Groups | Create the congregation's small groups (or generate a whole set at once), retire them, and appoint each group's leader |
 | `mail-groups` | Email Groups | Decide who is in each distribution group, and send to them |
 | `bulletin` | Weekly Newsletter | Write each week's prayer lists and offering, and export the newsletter as Word or PDF |
-| `contributions` | Contributions | Record each week's contribution total, and correct earlier weeks — see [Contributions](#contributions) |
+| `contributions` | Contributions | Record each week's contribution total, correct earlier weeks, and import them from a CSV — see [Contributions](#contributions) |
 
 Everything else stays read-only for everyone signed in: the pages are all
 visible to the whole church family, and only the area holder sees the buttons.
@@ -452,65 +452,64 @@ an admin can then change.
 One total a week — never a per-giver ledger, nobody's individual giving is
 tracked here — the same shape as attendance. **Analytics is the page's main
 view**: this year's total so far, this month's, the average per week, how this
-year compares to last, and a chart of the last 12 months. The raw list of
-weeks sits below it for anyone who wants the numbers themselves.
+year compares with the same weeks of last year, and a chart of the last 12
+months. The raw list of weeks sits below it for anyone who wants the numbers
+themselves.
+
+The year-on-year figure compares this year with last year *up to the latest
+week entered this year*, not with the whole of last year and not up to today —
+entries lag the calendar, and setting a year still under way against a
+complete one would read as a fall every year until December.
 
 Reading the page is open to anybody signed in, the same as Attendance. Writing
-is the `contributions` area's alone:
+is the `contributions` area's alone (the **Contribution Counter**), and an
+admin's:
 
 | | |
 |---|---|
-| **Record this week** | Enters a new week's total, or corrects an earlier one |
-| **Import from old site** | A one-time pull of the congregation's contribution history off the old church-management site — see below |
+| **Record this week** | Enters one week's total, or corrects an earlier one (`/api/records/contributions`, so each change is in the action history) |
+| **Import CSV** | Brings in years of weekly totals at once from a spreadsheet — see below |
 
-### Importing the old site's history
+### Importing a CSV
 
-Before this dashboard, weekly totals lived on the finances page of the same
-church-management site the rest of the scraper reads
-(`/members/finances`). **Import from old site** (`POST
-/api/members/import-contributions`) reads that page's collection history.
+The old church-management site exports its finances as a CSV: a heading row
+or two (`Income / Giving`, `Expenses / Other / Total Expenses`), one row per
+Sunday, and a totals row at the bottom. **Import CSV** reads that export and
+anything shaped like it (`server/lib/contributions.js`,
+`POST /api/contributions/import`):
 
-Nobody writing the parser had seen the page's markup, so rather than assume
-one layout it reads every shape a finance page is likely to take
-(`parseContributions` in `server/lib/parsers.js`):
+- **The columns are found, not assumed.** The date column is whichever holds
+  dates; the amount is the column headed as what was given — *Giving*,
+  *Collection*, *Contribution*, *Offering* — never one headed as an expense, a
+  budget, a difference, a year-to-date running total or a percentage. Heading
+  rows are read down each column, so *Income* over *Giving* reads as
+  "Income Giving". With no headings at all, the first column of dollar amounts
+  after the date is taken, so a count is not mistaken for money.
+- **Dates and money in the usual shapes**: `10/03/21`, `2021-10-03`,
+  `Oct 3, 2021`; `$4,978.00`, `4978`, `(120.00)`. Dates are stored as ISO, the
+  same as a week typed in by hand, so the import recognises a week already on
+  file however it was written.
+- **A week listed once per fund is added up**, unless it carries its own total
+  row, which then stands.
+- **Checked against the file's own total.** A row with an amount and no date
+  is the totals row; if the weeks read do not add up to it, the preview says so.
 
-| Shape | How it is read |
-|---|---|
-| A table | The date and collection columns are found by their headings, so `Collection \| Budget \| Over/Under` gives the collection rather than the last money cell in the row. A week listed once per fund is added up, unless it carries its own total row |
-| A chart | `labels: [...]` and the series whose label reads as a collection, out of the page's inline script |
-| JSON | An array of records in an inline script, or a same-site URL the page's script loads its figures from |
+**Nothing is saved until somebody has seen what the file holds.** Choosing a
+file sends it with `dryRun: true`, and the page shows the number of weeks, the
+dates they span, their total (and whether it matches the file's), which column
+was read, and how many are already on file. **Import** then saves them.
 
-It also follows what the page points at: the widest date span, the pager,
-and one request per year when history is split by year (a year dropdown or a
-row of year links). **Only GET requests are made, and never to a path that
-sounds like it changes something** (`/delete`, `/edit`, `/approve`, …) — a
-form on a finances page might record a contribution, so none is submitted.
+A week already on file is never overwritten — typed in, corrected, or imported
+before — so importing the same file twice adds nothing the second time, and
+correcting a week is done with **Edit**, not by re-importing. The whole import
+is one entry in the action history (*Imported 253 week(s) of contributions
+from finances.csv*), rather than one per week.
 
-Dates are stored as ISO, the same as a week typed in by hand, so the import
-recognises a week that is already on file however it was written.
-
-Unlike attendance and the rest, this never runs on the automatic 4-hour
-scrape: the old site's history stops changing once this dashboard is where a
-new week gets typed in, so there is nothing to keep re-reading. It also only
-**fills in** weeks nobody has a row for yet — a week already on file, whether
-the counter typed it in or an earlier import found it, is never overwritten.
-Running the import again after a correction is therefore always safe.
-
-**When it reads nothing, it says why.** The import's warnings are shown on
-the page, and name the likely cause:
-
-- *landed on /members instead* — the site sent the scraper somewhere else,
-  which usually means **the account the scraper signs in with
-  (`CAPSHAW_MEMBER_USERNAME`) is not allowed to see finances**. Seeing the page
-  in your own browser does not mean the scraper's account can.
-- *nothing could be read from /members/finances — …* — the page loaded, and
-  the rest of the line says what it held instead (its tables' first rows,
-  headings, forms, scripts, PDF links, iframes).
-
-`GET /api/members/debug/contributions` (admin only, the **Diagnose** button on
-**Church Office → Church Records → Scrape Status**) reports the same, plus the
-year pages and data URLs the import would follow — see
-[Diagnosing a section that looks empty](#diagnosing-a-section-that-looks-empty).
+A file with no column of dates or no column of amounts is refused with which
+one it is missing. The finances page on the old site itself cannot be scraped
+instead: it holds a breakdown by category for one period (*Type | Category |
+Amount | %*), with no week-by-week history on it, so the CSV export is the
+way in.
 
 ---
 
