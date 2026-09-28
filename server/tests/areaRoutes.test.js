@@ -23,10 +23,11 @@ function buildApp(user = null) {
 
 const ADMIN      = { id: 1, role: 'admin',    name: 'Ada' };
 const MEMBER     = { id: 2, role: 'approved', name: 'Mel', areas: [] };
-const ATTENDANCE = { id: 3, role: 'approved', name: 'Ann', areas: ['attendance'] };
-const GUESTS     = { id: 4, role: 'approved', name: 'Gus', areas: ['visitors'] };
-const LEADERS    = { id: 5, role: 'approved', name: 'Lee', areas: ['leadership'] };
-const PENDING    = { id: 6, role: 'pending',  name: 'Pat', areas: ['attendance'] };
+const ATTENDANCE    = { id: 3, role: 'approved', name: 'Ann', areas: ['attendance'] };
+const GUESTS        = { id: 4, role: 'approved', name: 'Gus', areas: ['visitors'] };
+const LEADERS       = { id: 5, role: 'approved', name: 'Lee', areas: ['leadership'] };
+const PENDING       = { id: 6, role: 'pending',  name: 'Pat', areas: ['attendance'] };
+const CONTRIBUTIONS = { id: 7, role: 'approved', name: 'Cal', areas: ['contributions'] };
 
 // The history points at the account that made each change, so the accounts the
 // requests are made as have to actually exist.
@@ -38,14 +39,14 @@ function seedAccounts() {
   // reaches for the account rather than the request — the workflow engine
   // deciding who may action a task — reads them from there.
   const grant = db.prepare('INSERT OR IGNORE INTO user_areas (user_id, area) VALUES (?, ?)');
-  for (const u of [ADMIN, MEMBER, ATTENDANCE, GUESTS, LEADERS, PENDING]) {
+  for (const u of [ADMIN, MEMBER, ATTENDANCE, GUESTS, LEADERS, PENDING, CONTRIBUTIONS]) {
     insert.run(u.id, 'google', `${u.name}-id`, `${u.name.toLowerCase()}@example.com`, u.name, u.role);
     for (const area of (u.areas || [])) grant.run(u.id, area);
   }
 }
 
 beforeEach(() => {
-  for (const table of ['action_log', 'attendance', 'visitor_visits', 'visitors',
+  for (const table of ['action_log', 'attendance', 'contributions', 'visitor_visits', 'visitors',
                        'workflow_events', 'workflow_tasks', 'workflow_participants', 'workflow_instances',
                        'elder_duties', 'elders', 'deacon_duties', 'deacons', 'user_areas', 'users']) {
     db.prepare(`DELETE FROM ${table}`).run();
@@ -139,6 +140,65 @@ describe('/api/records', () => {
       .post('/api/records/attendance')
       .send({ date: '2026-06-07', service: 'Sun AM', count: 91 });
     expect(history()).toHaveLength(0);
+  });
+});
+
+// ─── Contributions ──────────────────────────────────────────────────────────────
+//
+// Entering a new week's total is the contributions area's alone — reading is
+// still open to anybody signed in, same as every other record.
+
+describe('/api/records/contributions', () => {
+  test('the contributions area may add, edit and delete a week\'s total', async () => {
+    const created = await request(buildApp(CONTRIBUTIONS))
+      .post('/api/records/contributions')
+      .send({ date: '2026-06-07', amount: 4200 });
+    expect(created.status).toBe(200);
+    expect(created.body.row).toMatchObject({ date: '2026-06-07', amount: 4200 });
+
+    const edited = await request(buildApp(CONTRIBUTIONS))
+      .patch(`/api/records/contributions/${created.body.row.id}`)
+      .send({ amount: 4350 });
+    expect(edited.status).toBe(200);
+    expect(edited.body.row.amount).toBe(4350);
+
+    const removed = await request(buildApp(CONTRIBUTIONS))
+      .delete(`/api/records/contributions/${created.body.row.id}`);
+    expect(removed.status).toBe(200);
+    expect(db.prepare('SELECT COUNT(*) n FROM contributions').get().n).toBe(0);
+  });
+
+  test('nobody else may enter a week\'s total, attendance included', async () => {
+    for (const user of [MEMBER, ATTENDANCE]) {
+      const res = await request(buildApp(user))
+        .post('/api/records/contributions')
+        .send({ date: '2026-06-07', amount: 4200 });
+      expect(res.status).toBe(403);
+    }
+    expect(db.prepare('SELECT COUNT(*) n FROM contributions').get().n).toBe(0);
+  });
+
+  test('anybody signed in may still read the totals', async () => {
+    const res = await request(buildApp(MEMBER)).get('/api/records/contributions');
+    expect(res.status).toBe(200);
+    expect(res.body.canWrite).toBe(false);
+  });
+
+  test('an admin may enter a week\'s total too', async () => {
+    const res = await request(buildApp(ADMIN))
+      .post('/api/records/contributions')
+      .send({ date: '2026-06-14', amount: 3900 });
+    expect(res.status).toBe(200);
+  });
+
+  test('every change is recorded under the contributions area', async () => {
+    const created = await request(buildApp(CONTRIBUTIONS))
+      .post('/api/records/contributions')
+      .send({ date: '2026-06-07', amount: 4200 });
+
+    const entries = history();
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ action: 'create', user_id: CONTRIBUTIONS.id, area: 'contributions' });
   });
 });
 

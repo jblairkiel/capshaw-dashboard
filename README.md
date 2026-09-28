@@ -177,6 +177,7 @@ implicitly, and nobody else holds one until an admin grants it.
 | `church-groups` | Church Groups | Create the congregation's small groups (or generate a whole set at once), retire them, and appoint each group's leader |
 | `mail-groups` | Email Groups | Decide who is in each distribution group, and send to them |
 | `bulletin` | Weekly Newsletter | Write each week's prayer lists and offering, and export the newsletter as Word or PDF |
+| `contributions` | Contributions | Record each week's contribution total, and correct earlier weeks — see [Contributions](#contributions) |
 
 Everything else stays read-only for everyone signed in: the pages are all
 visible to the whole church family, and only the area holder sees the buttons.
@@ -443,6 +444,46 @@ The list is seeded on first run from the services already present in the
 attendance table, so an existing database keeps working with nothing to do. A
 database with no attendance yet gets this congregation's usual services, which
 an admin can then change.
+
+---
+
+## Contributions
+
+One total a week — never a per-giver ledger, nobody's individual giving is
+tracked here — the same shape as attendance. **Analytics is the page's main
+view**: this year's total so far, this month's, the average per week, how this
+year compares to last, and a chart of the last 12 months. The raw list of
+weeks sits below it for anyone who wants the numbers themselves.
+
+Reading the page is open to anybody signed in, the same as Attendance. Writing
+is the `contributions` area's alone:
+
+| | |
+|---|---|
+| **Record this week** | Enters a new week's total, or corrects an earlier one |
+| **Import from old site** | A one-time pull of the congregation's contribution history off the old church-management site — see below |
+
+### Importing the old site's history
+
+Before this dashboard, weekly totals lived on the same church-management site
+the rest of the scraper reads. **Import from old site** (`POST
+/api/members/import-contributions`) fetches that history, widening the date
+filter and following its pager the same way the [visitor tracker](#the-tracker-shows-a-slice-so-the-scrape-works-its-controls)
+does, so one click reads all of it rather than whatever slice the page
+defaults to.
+
+Unlike attendance and the rest, this never runs on the automatic 4-hour
+scrape: the old site's history stops changing once this dashboard is where a
+new week gets typed in, so there is nothing to keep re-reading. It also only
+**fills in** weeks nobody has a row for yet — a week already on file, whether
+the counter typed it in or an earlier import found it, is never overwritten.
+Running the import again after a correction is therefore always safe.
+
+If the import comes back empty, `GET /api/members/debug/contributions`
+(admin only, alongside the other sections on **Church Office → Church
+Records → Scrape Status**) reports what the page actually returned and what
+the parser made of it — the same diagnosis every other scraped section gets;
+see [Diagnosing a section that looks empty](#diagnosing-a-section-that-looks-empty).
 
 ---
 

@@ -190,6 +190,27 @@ function parseAttendance(html) {
   return records.sort((a, b) => b.date.localeCompare(a.date));
 }
 
+// The old site's weekly contribution total — one number a week, the same
+// shape as attendance rather than a per-giver ledger. The date leads the row
+// exactly like every other section here; the amount is whichever trailing
+// cell reads as money, since a fund or an envelope count sometimes sits
+// between the two.
+function parseContributions(html) {
+  const records = [];
+  for (const table of extractTables(html)) {
+    for (const row of table) {
+      if (row[0] === 'Date') continue;
+      if (row.length < 2 || !row[0].match(/\d{1,2}\/\d{1,2}\/\d{2,4}/)) continue;
+      const amountCell = [...row].reverse().find(c => /^\$?[\d,]+(\.\d{1,2})?$/.test(c.trim()));
+      if (!amountCell) continue;
+      const amount = parseFloat(amountCell.replace(/[$,]/g, ''));
+      if (Number.isNaN(amount)) continue;
+      records.push({ date: row[0], amount });
+    }
+  }
+  return records.sort((a, b) => b.date.localeCompare(a.date));
+}
+
 function parseSermons(html) {
   const sermons = [];
   for (const table of extractTables(html)) {
@@ -980,6 +1001,7 @@ module.exports = {
   extractTablesPreservingCells,
   parseJobAssignments,
   parseAttendance,
+  parseContributions,
   parseSermons,
   parseVisitors,
   parseVisitorTable,

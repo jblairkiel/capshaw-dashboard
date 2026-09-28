@@ -29,6 +29,18 @@ const TABLES = {
     order:    'date DESC',
     describe: r => `${r.date || 'undated'} · ${r.service || 'service'} · ${r.count ?? 0}`,
   },
+  // One total per week — the counter's own record, plus whatever the old
+  // church-management site's history was imported once (see
+  // routes/scraper.js). Never a per-giver breakdown.
+  contributions: {
+    area:     'contributions',
+    entity:   'contribution record',
+    columns:  ['id', 'date', 'amount'],
+    writable: ['date', 'amount'],
+    search:   'date',
+    order:    'date DESC',
+    describe: r => `${r.date || 'undated'} · $${Number(r.amount ?? 0).toFixed(2)}`,
+  },
   sermons: {
     area:     'worship-order',
     entity:   'sermon',

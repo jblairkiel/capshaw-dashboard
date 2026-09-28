@@ -47,7 +47,7 @@ const ADMIN   = { id: 1, role: 'admin' };
 const MEMBER  = { id: 2, role: 'approved' };
 const PENDING = { id: 3, role: 'pending' };
 
-const TABLES = ['attendance', 'sermons', 'job_assignments', 'visitor_visits', 'visitors',
+const TABLES = ['attendance', 'contributions', 'sermons', 'job_assignments', 'visitor_visits', 'visitors',
                 'anniversaries', 'deacon_duties', 'deacons', 'bulletins', 'directory', 'scraped_meta'];
 
 // ─── Page fixtures, in the shape the real parsers expect ──────────────────────
@@ -675,5 +675,67 @@ describe('GET /api/members/debug/:section', () => {
     const res = await request(buildApp(ADMIN)).get('/api/members/debug/sermons');
     expect(res.status).toBe(502);
     expect(res.body.error).toBe('ECONNRESET');
+  });
+});
+
+// ─── POST /import-contributions ────────────────────────────────────────────────
+//
+// A one-time backfill from the old site's own contribution history, not part
+// of the automatic 4-hour cycle — so this only fills in weeks nobody has a row
+// for yet, and never touches one the counter already typed in or corrected.
+
+describe('POST /api/members/import-contributions', () => {
+  const CONTRIBUTIONS = { id: 4, role: 'approved', areas: ['contributions'] };
+
+  const CONTRIBUTIONS_HTML = table([
+    ['Date', 'Amount'],
+    ['01/05/2025', '$4,200.00'],
+    ['01/12/2025', '$3,950.50'],
+  ]);
+
+  test('401 signed out, 403 for somebody who does not hold the area', async () => {
+    expect((await request(buildApp(null)).post('/api/members/import-contributions')).status).toBe(401);
+    expect((await request(buildApp(MEMBER)).post('/api/members/import-contributions')).status).toBe(403);
+  });
+
+  test('parses the old site\'s history and adds every week found', async () => {
+    fetchPage.mockImplementation(async path => {
+      if (path === '/members/contributions') return page(CONTRIBUTIONS_HTML);
+      throw new Error(`unexpected page fetch: ${path}`);
+    });
+
+    const res = await request(buildApp(CONTRIBUTIONS)).post('/api/members/import-contributions');
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ success: true, found: 2, added: 2 });
+
+    const rows = db.prepare('SELECT date, amount FROM contributions ORDER BY date').all();
+    expect(rows).toEqual([
+      { date: '01/05/2025', amount: 4200 },
+      { date: '01/12/2025', amount: 3950.5 },
+    ]);
+  });
+
+  test('an admin may run it too', async () => {
+    fetchPage.mockImplementation(async () => page(CONTRIBUTIONS_HTML));
+    const res = await request(buildApp(ADMIN)).post('/api/members/import-contributions');
+    expect(res.status).toBe(200);
+  });
+
+  test('never overwrites a week already on file, hand-entered or imported before', async () => {
+    db.prepare('INSERT INTO contributions (date, amount) VALUES (?, ?)').run('01/05/2025', 9999);
+    fetchPage.mockImplementation(async () => page(CONTRIBUTIONS_HTML));
+
+    const res = await request(buildApp(CONTRIBUTIONS)).post('/api/members/import-contributions');
+    expect(res.body).toMatchObject({ found: 2, added: 1 });
+
+    const kept = db.prepare('SELECT amount FROM contributions WHERE date = ?').get('01/05/2025');
+    expect(kept.amount).toBe(9999);
+  });
+
+  test('a fetch failure is reported rather than thrown', async () => {
+    fetchPage.mockImplementation(async () => { throw new Error('ECONNRESET'); });
+    const res = await request(buildApp(CONTRIBUTIONS)).post('/api/members/import-contributions');
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ success: true, found: 0, added: 0 });
   });
 });

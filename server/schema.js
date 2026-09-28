@@ -113,6 +113,17 @@ function initSchema(db) {
     count   INTEGER NOT NULL DEFAULT 0
   );
 
+  -- One total per week, the same shape as attendance rather than a per-giver
+  -- ledger — nobody's individual giving is tracked here. Historical weeks come
+  -- from the old church-management site's own record of them (imported once,
+  -- never overwritten by a later import — see routes/scraper.js); each new
+  -- week is typed in by whoever holds the contributions area.
+  CREATE TABLE IF NOT EXISTS contributions (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    date    TEXT    NOT NULL,
+    amount  REAL    NOT NULL DEFAULT 0
+  );
+
   CREATE TABLE IF NOT EXISTS sermons (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     date    TEXT    NOT NULL,
