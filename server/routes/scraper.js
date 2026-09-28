@@ -283,7 +283,7 @@ router.get('/data', (req, res) => {
 const DEBUG_SECTIONS = {
   jobAssignments: { path: '/members/job-assignments',                       parser: parseJobAssignments },
   attendance:     { path: '/members/attendance',                            parser: parseAttendance },
-  contributions:  { path: '/members/contributions',                        parser: parseContributions },
+  contributions:  { path: '/members/finances',                             parser: parseContributions },
   sermons:        { path: '/members/sermons',                               parser: parseSermons },
   visitors:       { path: '/members/visitor-tracker',                       parser: parseVisitors },
   anniversaries:  { path: '/members/anniversaries-members-non-members',     parser: parseAnniversaries },
@@ -601,7 +601,7 @@ router.get('/status', (req, res) => {
 // visitor tracker is, so the same widen-then-follow-the-pager approach reads
 // all of it rather than whatever slice the page defaults to.
 
-const CONTRIBUTIONS_PAGE     = '/members/contributions';
+const CONTRIBUTIONS_PAGE     = '/members/finances';
 const MAX_CONTRIBUTION_PAGES = 40;
 
 async function fetchContributionHistory(warnings) {
