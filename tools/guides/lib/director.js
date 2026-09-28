@@ -187,10 +187,13 @@ async function openSegment(browser, { base, work, name, device = 'desktop', stor
 
   const phone = device === 'phone' ? page.frameLocator('#phone') : null;
   const d = new Director(page, { name, pace, phone });
-  await page.goto(device === 'phone' ? `${base}/__stage?src=${encodeURIComponent(start)}` : `${base}${start}`);
   if (phone) {
+    await page.goto(`${base}/__stage`);
+    await d.openOnPhone(start);
     await phone.locator('body').waitFor();
     d.frameRect = await page.locator('#phone').boundingBox();
+  } else {
+    await page.goto(`${base}${start}`);
   }
 
   const close = async () => { await sleep(300); await cap.stop(); await ctx.close(); };

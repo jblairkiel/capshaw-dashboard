@@ -1,7 +1,8 @@
 <!doctype html><html><head><meta charset="utf-8">
 <!-- The phone scenes: the portal runs in an iPhone-sized frame on the right, and
      the guide layer draws captions and a fingertip over this page. Served by the
-     guide runner at /__stage?src=<path> on the same origin as the app. -->
+     guide runner at /__stage on the same origin as the app; the runner loads the
+     frame itself (lib/director.js), so nothing here reads the address bar. -->
 <style>
 html,body{margin:0;height:100%;overflow:hidden;background:radial-gradient(1200px 700px at 75% 40%, #24365e 0%, #16213b 55%, #0f1729 100%);}
 .glow{position:fixed;right:40px;top:0;width:560px;height:720px;background:radial-gradient(closest-side, rgba(201,168,76,.18), transparent);}
@@ -22,5 +23,4 @@ html,body{margin:0;height:100%;overflow:hidden;background:radial-gradient(1200px
 <div class="phone"><div class="screen"><div class="status"><span>9:41</span><div class="island"></div><div class="icons">
 <svg width="17" height="11" viewBox="0 0 17 11"><rect x="0" y="7" width="3" height="4" rx="1" fill="#fff"/><rect x="4.5" y="5" width="3" height="6" rx="1" fill="#fff"/><rect x="9" y="2.5" width="3" height="8.5" rx="1" fill="#fff"/><rect x="13.5" y="0" width="3" height="11" rx="1" fill="#fff"/></svg>
 <div class="bat"></div></div></div><iframe id="phone" src="about:blank"></iframe></div></div>
-<script>document.getElementById('phone').src = new URLSearchParams(location.search).get('src') || '/';</script>
 </body></html>
