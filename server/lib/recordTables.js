@@ -29,9 +29,8 @@ const TABLES = {
     order:    'date DESC',
     describe: r => `${r.date || 'undated'} · ${r.service || 'service'} · ${r.count ?? 0}`,
   },
-  // One total per week — the counter's own record, plus whatever the old
-  // church-management site's history was imported once (see
-  // routes/scraper.js). Never a per-giver breakdown.
+  // One total per week — typed in by the counter, or imported from a CSV
+  // export (routes/contributions.js). Never a per-giver breakdown.
   contributions: {
     area:     'contributions',
     entity:   'contribution record',

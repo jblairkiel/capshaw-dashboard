@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const router  = express.Router();
-const { requireApproved, requireAdmin, requireArea } = require('../middleware/auth');
+const { requireApproved, requireAdmin } = require('../middleware/auth');
 const { syncDirectory } = require('../lib/directorySync');
 const fs      = require('fs');
 const path    = require('path');
@@ -26,12 +26,6 @@ const {
   stripTags,
   parseJobAssignments,
   parseAttendance,
-  parseContributions,
-  parseContributionsResponse,
-  parseAnyDate,
-  financePeriodLinks,
-  financeDataUrls,
-  describeFinancePage,
   parseSermons,
   parseVisitors,
   widestSpanQuery,
@@ -288,7 +282,6 @@ router.get('/data', (req, res) => {
 const DEBUG_SECTIONS = {
   jobAssignments: { path: '/members/job-assignments',                       parser: parseJobAssignments },
   attendance:     { path: '/members/attendance',                            parser: parseAttendance },
-  contributions:  { path: '/members/finances',                             parser: parseContributions },
   sermons:        { path: '/members/sermons',                               parser: parseSermons },
   visitors:       { path: '/members/visitor-tracker',                       parser: parseVisitors },
   anniversaries:  { path: '/members/anniversaries-members-non-members',     parser: parseAnniversaries },
@@ -363,17 +356,6 @@ router.get('/debug/:section', requireAdmin, async (req, res) => {
           html: body.slice(from, Math.min(m.index, from + 300)).replace(/\s+/g, ' ').trim(),
         };
       });
-    }
-
-    // The finances page may draw its history as a chart, split it by year, or
-    // load it from a URL of its own — none of which a table dump shows.
-    if (req.params.section === 'contributions') {
-      report.finance = {
-        landedOn:    landedPath(page) || null,
-        summary:     describeFinancePage(body),
-        periodLinks: financePeriodLinks(body, section.path),
-        dataUrls:    financeDataUrls(body, section.path),
-      };
     }
 
     let parsed;
@@ -608,136 +590,5 @@ router.get('/status', (req, res) => {
   });
 });
 
-// ─── One-time contribution history import ──────────────────────────────────
-//
-// Unlike attendance and the rest, this never runs on the automatic 4-hour
-// cycle: the old site's contribution history stops changing once this
-// dashboard is where the counter records a new week, so there is nothing to
-// keep re-reading.
-//
-// Nobody writing this has seen the finances page, so everything it points at
-// is followed rather than assumed: the widest date span, the pager, one
-// request per year when history is split by year, and any same-site URL its
-// script loads figures from. Only GET requests are ever made — a form on a
-// finances page might record something. And when it all reads as nothing, the
-// warning says what the page did contain, so the next change is not a guess.
-
-const CONTRIBUTIONS_PAGE     = '/members/finances';
-const MAX_CONTRIBUTION_PAGES = 40;
-
-function landedPath(page) {
-  try { return new URL(page.url).pathname.replace(/\/+$/, ''); } catch { return ''; }
-}
-
-async function fetchContributionHistory(warnings) {
-  const first = await fetchPage(CONTRIBUTIONS_PAGE).catch(e => ({ body: '', status: 0, _err: e.message }));
-  if (first._err) {
-    warnings.push(`contributions: ${CONTRIBUTIONS_PAGE} could not be loaded — ${first._err}`);
-    return { first, records: [] };
-  }
-
-  const landed = landedPath(first);
-  if (landed.includes('login')) throw new Error('Session expired or login failed — check credentials in .env');
-  if (landed && !landed.startsWith(CONTRIBUTIONS_PAGE)) {
-    warnings.push(`contributions: asking for ${CONTRIBUTIONS_PAGE} landed on ${landed} instead — the account the scraper signs in with may not be allowed to see the finances page`);
-    return { first, records: [] };
-  }
-  if (first.status !== 200 || !first.body) {
-    warnings.push(`contributions: ${CONTRIBUTIONS_PAGE} came back HTTP ${first.status}${first.status === 403 ? ' — the scraper\'s account is not allowed to see it' : ''}`);
-    return { first, records: [] };
-  }
-
-  const byDate  = new Map();
-  const visited = new Set([CONTRIBUTIONS_PAGE]);
-  const queue   = [];
-  let fetched   = 1;
-
-  const take = (path, body) => {
-    try {
-      for (const r of parseContributionsResponse(body)) if (!byDate.has(r.date)) byDate.set(r.date, r);
-    } catch (e) {
-      warnings.push(`contributions: ${path} could not be read — ${e.message}`);
-    }
-    for (const link of [
-      widestSpanQuery(body, path),
-      ...pagerLinks(body, path),
-      ...financePeriodLinks(body, path),
-      ...financeDataUrls(body, path),
-    ]) {
-      if (link && !visited.has(link)) { visited.add(link); queue.push(link); }
-    }
-  };
-
-  take(CONTRIBUTIONS_PAGE, first.body);
-
-  while (queue.length && fetched < MAX_CONTRIBUTION_PAGES) {
-    const next = queue.shift();
-    fetched++;
-    let page;
-    try {
-      page = await fetchPage(next);
-    } catch (e) {
-      warnings.push(`contributions: ${next} could not be loaded — ${e.message}; some weeks may be missing`);
-      continue;
-    }
-    if (page.status !== 200 || !page.body) {
-      warnings.push(`contributions: ${next} came back ${page.status}; some weeks may be missing`);
-      continue;
-    }
-    take(next, page.body);
-  }
-
-  if (queue.length) {
-    warnings.push(`contributions: stopped after ${MAX_CONTRIBUTION_PAGES} pages — there may be more`);
-  }
-  if (fetched > 1) console.log(`[scraper] contributions — read ${fetched} page(s) of the finances history`);
-
-  const records = [...byDate.values()];
-  if (!records.length) {
-    warnings.push(`contributions: nothing could be read from ${CONTRIBUTIONS_PAGE} — ${describeFinancePage(first.body)}`);
-  }
-  return { first, records };
-}
-
-// POST /api/members/import-contributions — gated the same way entering a new
-// week is: whoever holds the contributions area (or an admin). Only fills in
-// weeks nobody has a row for yet, so a week the counter already typed in or
-// corrected by hand is never overwritten by running the import again.
-router.post('/import-contributions', requireArea('contributions'), async (req, res) => {
-  if (_updateInProgress) {
-    return res.status(409).json({ success: false, error: 'A site update is already in progress' });
-  }
-  _updateInProgress = true;
-  const warnings = [];
-  try {
-    resetSession();
-    const { records } = await fetchContributionHistory(warnings);
-
-    // Rows typed in by hand are ISO; anything older may not be. Compared as the
-    // same week either way, so the import never doubles one.
-    const have = new Set(db.prepare('SELECT date FROM contributions').all().map(r => parseAnyDate(r.date) || r.date));
-    const insertNew = db.transaction(rows => {
-      const ins = db.prepare('INSERT INTO contributions (date, amount) VALUES (?, ?)');
-      let added = 0;
-      for (const r of rows) {
-        if (have.has(r.date)) continue;
-        ins.run(r.date, r.amount);
-        have.add(r.date);
-        added++;
-      }
-      return added;
-    });
-    const added = insertNew(records);
-
-    if (warnings.length) console.log(`[scraper] contributions import warnings: ${warnings.join('; ')}`);
-    console.log(`[scraper] contributions import — found ${records.length} week(s), added ${added} new`);
-    res.json({ success: true, found: records.length, added, warnings });
-  } catch (err) {
-    console.error('[scraper] contribution import error:', err.message);
-    res.status(500).json({ success: false, error: err.message });
-  } finally {
-    _updateInProgress = false;
-  }
-});
 
 module.exports = { router, runUpdate, readData, parseCookies, cookieStr, mergeCookieStr, normaliseJobAssignments };
