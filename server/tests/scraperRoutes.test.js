@@ -700,7 +700,7 @@ describe('POST /api/members/import-contributions', () => {
 
   test('parses the old site\'s history and adds every week found', async () => {
     fetchPage.mockImplementation(async path => {
-      if (path === '/members/contributions') return page(CONTRIBUTIONS_HTML);
+      if (path === '/members/finances') return page(CONTRIBUTIONS_HTML);
       throw new Error(`unexpected page fetch: ${path}`);
     });
 
