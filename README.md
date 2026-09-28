@@ -465,12 +465,29 @@ is the `contributions` area's alone:
 
 ### Importing the old site's history
 
-Before this dashboard, weekly totals lived on the same church-management site
-the rest of the scraper reads. **Import from old site** (`POST
-/api/members/import-contributions`) fetches that history, widening the date
-filter and following its pager the same way the [visitor tracker](#the-tracker-shows-a-slice-so-the-scrape-works-its-controls)
-does, so one click reads all of it rather than whatever slice the page
-defaults to.
+Before this dashboard, weekly totals lived on the finances page of the same
+church-management site the rest of the scraper reads
+(`/members/finances`). **Import from old site** (`POST
+/api/members/import-contributions`) reads that page's collection history.
+
+Nobody writing the parser had seen the page's markup, so rather than assume
+one layout it reads every shape a finance page is likely to take
+(`parseContributions` in `server/lib/parsers.js`):
+
+| Shape | How it is read |
+|---|---|
+| A table | The date and collection columns are found by their headings, so `Collection \| Budget \| Over/Under` gives the collection rather than the last money cell in the row. A week listed once per fund is added up, unless it carries its own total row |
+| A chart | `labels: [...]` and the series whose label reads as a collection, out of the page's inline script |
+| JSON | An array of records in an inline script, or a same-site URL the page's script loads its figures from |
+
+It also follows what the page points at: the widest date span, the pager,
+and one request per year when history is split by year (a year dropdown or a
+row of year links). **Only GET requests are made, and never to a path that
+sounds like it changes something** (`/delete`, `/edit`, `/approve`, …) — a
+form on a finances page might record a contribution, so none is submitted.
+
+Dates are stored as ISO, the same as a week typed in by hand, so the import
+recognises a week that is already on file however it was written.
 
 Unlike attendance and the rest, this never runs on the automatic 4-hour
 scrape: the old site's history stops changing once this dashboard is where a
@@ -479,11 +496,21 @@ new week gets typed in, so there is nothing to keep re-reading. It also only
 the counter typed it in or an earlier import found it, is never overwritten.
 Running the import again after a correction is therefore always safe.
 
-If the import comes back empty, `GET /api/members/debug/contributions`
-(admin only, alongside the other sections on **Church Office → Church
-Records → Scrape Status**) reports what the page actually returned and what
-the parser made of it — the same diagnosis every other scraped section gets;
-see [Diagnosing a section that looks empty](#diagnosing-a-section-that-looks-empty).
+**When it reads nothing, it says why.** The import's warnings are shown on
+the page, and name the likely cause:
+
+- *landed on /members instead* — the site sent the scraper somewhere else,
+  which usually means **the account the scraper signs in with
+  (`CAPSHAW_MEMBER_USERNAME`) is not allowed to see finances**. Seeing the page
+  in your own browser does not mean the scraper's account can.
+- *nothing could be read from /members/finances — …* — the page loaded, and
+  the rest of the line says what it held instead (its tables' first rows,
+  headings, forms, scripts, PDF links, iframes).
+
+`GET /api/members/debug/contributions` (admin only, the **Diagnose** button on
+**Church Office → Church Records → Scrape Status**) reports the same, plus the
+year pages and data URLs the import would follow — see
+[Diagnosing a section that looks empty](#diagnosing-a-section-that-looks-empty).
 
 ---
 

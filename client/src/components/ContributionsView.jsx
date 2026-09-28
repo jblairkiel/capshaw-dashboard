@@ -311,10 +311,20 @@ export default function ContributionsView({ user }) {
       </div>
 
       {importResult && (
-        <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-          Found {importResult.found} week{importResult.found === 1 ? '' : 's'} on the old site — added {importResult.added} new.
-          {importResult.warnings?.length > 0 && ` (${importResult.warnings.length} warning${importResult.warnings.length === 1 ? '' : 's'})`}
-        </p>
+        <div className={`text-sm rounded-lg px-3 py-2 border ${importResult.found
+          ? 'text-green-700 bg-green-50 border-green-200'
+          : 'text-amber-800 bg-amber-50 border-amber-200'}`}>
+          <p>
+            {importResult.found
+              ? `Found ${importResult.found} week${importResult.found === 1 ? '' : 's'} on the old site — added ${importResult.added} new.`
+              : 'Nothing could be read from the old site’s finances page.'}
+          </p>
+          {importResult.warnings?.length > 0 && (
+            <ul className="mt-1 list-disc pl-5 text-xs space-y-0.5 break-words">
+              {importResult.warnings.map((w, i) => <li key={i}>{w.replace(/^contributions:\s*/, '')}</li>)}
+            </ul>
+          )}
+        </div>
       )}
       {importError && (
         <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{importError}</p>

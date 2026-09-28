@@ -251,6 +251,19 @@ function SectionDiagnosis({ report }) {
         {report.tables ? ` · ${report.tables.length} table${report.tables.length === 1 ? '' : 's'}` : ''}
       </p>
 
+      {report.finance && (
+        <div className="text-xs text-gray-600 space-y-1">
+          {report.finance.landedOn && report.finance.landedOn !== report.path && (
+            <p className="text-amber-800">
+              Asking for {report.path} landed on {report.finance.landedOn} — the scraper&rsquo;s account may not be allowed to see it.
+            </p>
+          )}
+          <p>What the page holds: {report.finance.summary}</p>
+          {report.finance.periodLinks.length > 0 && <p>Years it would also read: {report.finance.periodLinks.join(', ')}</p>}
+          {report.finance.dataUrls.length > 0 && <p>Data it would also fetch: {report.finance.dataUrls.join(', ')}</p>}
+        </div>
+      )}
+
       {report.photos && (
         <p className="text-xs text-gray-600">
           Photos: <strong>{report.photos.embedded}</strong> embedded in the vCard

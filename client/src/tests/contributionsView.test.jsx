@@ -104,4 +104,16 @@ describe('ContributionsView', () => {
 
     expect(await screen.findByText(/Found 12 weeks on the old site — added 3 new\./i)).toBeInTheDocument();
   });
+
+  test('an import that reads nothing says why, rather than only counting warnings', async () => {
+    mockApi({ importResult: {
+      success: true, found: 0, added: 0,
+      warnings: ['contributions: asking for /members/finances landed on /members instead — the account the scraper signs in with may not be allowed to see the finances page'],
+    } });
+    render(<ContributionsView user={COUNTER} />);
+    fireEvent.click(await screen.findByRole('button', { name: /import from old site/i }));
+
+    expect(await screen.findByText(/Nothing could be read from the old site’s finances page/i)).toBeInTheDocument();
+    expect(screen.getByText(/landed on \/members instead/)).toBeInTheDocument();
+  });
 });
