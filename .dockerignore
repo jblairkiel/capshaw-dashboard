@@ -33,3 +33,5 @@ server/tests
 client/src/tests
 README.md
 ecosystem.config.js
+# Guide recording, and whatever a local run left in its work folder
+tools

@@ -1,0 +1,5 @@
+# Image and video work for tools/guides. Install with: pip install -r tools/guides/requirements.txt
+Pillow>=10
+imageio-ffmpeg>=0.5     # a static ffmpeg with libx264, so no system ffmpeg is needed
+python-docx>=1.1        # the sample order of service
+pymupdf>=1.24           # turns an exported newsletter PDF into an image to show on screen

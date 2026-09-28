@@ -1,0 +1,11 @@
+{
+  "name": "capshaw-guides",
+  "private": true,
+  "description": "Records captioned video guides of the member portal from scripted scenes, against a throwaway copy of the site filled with sample data.",
+  "scripts": {
+    "tour": "node run.js tour"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}

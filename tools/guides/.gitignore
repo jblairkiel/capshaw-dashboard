@@ -1,0 +1,6 @@
+node_modules/
+# Each run's throwaway database, frames and intermediate clips.
+work/
+# Finished videos and review sheets.
+output/
+__pycache__/
