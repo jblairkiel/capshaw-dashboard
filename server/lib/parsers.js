@@ -190,25 +190,413 @@ function parseAttendance(html) {
   return records.sort((a, b) => b.date.localeCompare(a.date));
 }
 
-// The old site's weekly contribution total — one number a week, the same
-// shape as attendance rather than a per-giver ledger. The date leads the row
-// exactly like every other section here; the amount is whichever trailing
-// cell reads as money, since a fund or an envelope count sometimes sits
-// between the two.
-function parseContributions(html) {
-  const records = [];
-  for (const table of extractTables(html)) {
-    for (const row of table) {
-      if (row[0] === 'Date') continue;
-      if (row.length < 2 || !row[0].match(/\d{1,2}\/\d{1,2}\/\d{2,4}/)) continue;
-      const amountCell = [...row].reverse().find(c => /^\$?[\d,]+(\.\d{1,2})?$/.test(c.trim()));
-      if (!amountCell) continue;
-      const amount = parseFloat(amountCell.replace(/[$,]/g, ''));
-      if (Number.isNaN(amount)) continue;
-      records.push({ date: row[0], amount });
+// ─── Contributions (the finances page's collection history) ───────────────────
+//
+// One total a week, never a per-giver ledger. Nobody here has seen the page's
+// markup, so rather than assume one layout this reads every shape a finance
+// page is likely to use, in order, and takes the first that yields anything:
+//
+//   1. a table, with the date and collection columns found by their headings
+//      — "Collection | Budget | Over/Under" must give the collection, not the
+//      last money cell in the row
+//   2. chart data in an inline script (labels: [...], data: [...])
+//   3. a JSON array of records in an inline script
+//
+// Dates come back as ISO so a week imported from the site and the same week
+// typed in by the counter are recognised as the same week.
+
+const MONTH_INDEX = {
+  jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, sept: 8, oct: 9, nov: 10, dec: 11,
+};
+
+function isoDate(year, month, day) {
+  const y = year < 100 ? 2000 + year : year;
+  if (y < 1990 || y > 2100 || month < 0 || month > 11 || day < 1 || day > 31) return null;
+  const d = new Date(Date.UTC(y, month, day));
+  if (d.getUTCMonth() !== month) return null;
+  return `${y}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function monthIndex(word) {
+  const w = word.toLowerCase();
+  return MONTH_INDEX[w.slice(0, 4)] ?? MONTH_INDEX[w.slice(0, 3)];
+}
+
+// "2026-09-21", "9/21/2026", "09-21-26", "Sep 21, 2026", "Sunday, September
+// 21st 2026", "21 Sep 2026" — anything else is not a date.
+function parseAnyDate(text) {
+  const s = String(text ?? '').trim();
+  let m;
+  if ((m = s.match(/\b(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})\b/))) return isoDate(+m[1], +m[2] - 1, +m[3]);
+  if ((m = s.match(/\b(\d{1,2})[/-](\d{1,2})[/-](\d{4}|\d{2})\b/))) return isoDate(+m[3], +m[1] - 1, +m[2]);
+  if ((m = s.match(/\b([A-Za-z]{3,9})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})\b/))) {
+    const month = monthIndex(m[1]);
+    if (month !== undefined) return isoDate(+m[3], month, +m[2]);
+  }
+  if ((m = s.match(/\b(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?,?\s+(\d{4})\b/))) {
+    const month = monthIndex(m[2]);
+    if (month !== undefined) return isoDate(+m[3], month, +m[1]);
+  }
+  return null;
+}
+
+// "$4,200.00", "4200", "$ 4,200", "(120.00)", "-$120", "4,200.00 USD".
+function parseMoney(text) {
+  let s = String(text ?? '').replace(/ /g, ' ').trim();
+  if (!s || parseAnyDate(s)) return null;
+  const negative = /^\(.*\)$/.test(s) || /^-/.test(s) || /^\$\s*-/.test(s);
+  s = s.replace(/^\(|\)$/g, '').replace(/\busd\b/i, '').replace(/[$\s,]/g, '').replace(/^-/, '');
+  if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
+  const n = parseFloat(s);
+  return negative ? -n : n;
+}
+
+const DATE_HEADER_RE       = /\b(date|week|sunday|period|day)\b/i;
+const NOT_AMOUNT_HEADER_RE = /\b(budget|goal|need(ed)?|diff(erence)?|over|under|variance|short(fall)?|ytd|year.to.date|average|avg|expenses?|spent|balance|attendance|count|per.capita|pledged?)\b/i;
+
+// How strongly a heading (or a chart series' label, or a JSON key) says "this
+// is what was collected". Zero means it does not.
+function amountHeaderScore(text) {
+  const s = String(text ?? '');
+  if (NOT_AMOUNT_HEADER_RE.test(s)) return 0;
+  if (/\b(collections?|contributions?|offerings?|giving|given|tithes?)\b/i.test(s)) return 4;
+  if (/\b(received|receipts|deposits?|income|actual)\b/i.test(s)) return 3;
+  if (/\bamount\b/i.test(s)) return 2;
+  if (/\btotal\b/i.test(s)) return 1;
+  return 0;
+}
+
+function roundCents(n) {
+  return Math.round(n * 100) / 100;
+}
+
+function parseContributionTable(rows) {
+  if (!rows.length) return [];
+
+  // The heading row, if there is one, is among the first few and holds no date.
+  const headerIdx = rows.slice(0, 3).findIndex(r =>
+    r.some(c => DATE_HEADER_RE.test(c) || amountHeaderScore(c) > 0) && !r.some(c => parseAnyDate(c)));
+  const header = headerIdx >= 0 ? rows[headerIdx] : null;
+  const body   = header ? rows.slice(headerIdx + 1) : rows;
+  const width  = Math.max(0, ...body.map(r => r.length));
+
+  const share = (col, test) => {
+    const cells = body.map(r => r[col] ?? '').filter(c => c.trim());
+    return cells.length ? cells.filter(test).length / cells.length : 0;
+  };
+
+  let dateCol = header
+    ? header.findIndex((c, i) => DATE_HEADER_RE.test(c) && share(i, v => !!parseAnyDate(v)) >= 0.5)
+    : -1;
+  if (dateCol < 0) {
+    for (let i = 0; i < width; i++) if (share(i, v => !!parseAnyDate(v)) >= 0.5) { dateCol = i; break; }
+  }
+  if (dateCol < 0) return [];
+
+  let amountCol = -1;
+  if (header) {
+    let best = 0;
+    header.forEach((c, i) => {
+      const score = amountHeaderScore(c);
+      if (i !== dateCol && score > best && share(i, v => parseMoney(v) !== null) >= 0.5) {
+        best = score;
+        amountCol = i;
+      }
+    });
+  }
+  // No heading says which column was collected: the first column that reads as
+  // money — with a dollar sign or cents, so a count is not taken for one — and
+  // is not headed as a budget, a difference or a running total.
+  if (amountCol < 0) {
+    for (let i = 0; i < width; i++) {
+      if (i === dateCol || (header && NOT_AMOUNT_HEADER_RE.test(header[i] || ''))) continue;
+      if (share(i, v => parseMoney(v) !== null && /\$|\.\d{2}\b/.test(v)) >= 0.5) { amountCol = i; break; }
     }
   }
+  if (amountCol < 0) return [];
+
+  // A week listed once per fund, or per service, is one week: its rows are
+  // added up — unless one of them is that week's own total, which then stands.
+  const byDate = new Map();
+  for (const row of body) {
+    const date   = parseAnyDate(row[dateCol] ?? '');
+    const amount = parseMoney(row[amountCol] ?? '');
+    if (!date || amount === null) continue;
+    const isTotal = /\btotal\b/i.test(row.filter((_, i) => i !== dateCol && i !== amountCol).join(' '));
+    const seen = byDate.get(date);
+    if (!seen || (isTotal && !seen.isTotal)) byDate.set(date, { amount, isTotal });
+    else if (!isTotal && !seen.isTotal) seen.amount = roundCents(seen.amount + amount);
+  }
+  return [...byDate].map(([date, v]) => ({ date, amount: v.amount }));
+}
+
+// Every quoted string or bare number in an array literal. A label such as
+// "Sep 21, 2026" carries its own comma, so splitting on commas would not do.
+function looseArray(literal) {
+  return [...literal.matchAll(/(["'`])((?:\\.|(?!\1).)*)\1|(-?\d+(?:\.\d+)?)/g)]
+    .map(m => (m[3] !== undefined ? m[3] : m[2]));
+}
+
+function parseChartScripts(html) {
+  for (const [, script] of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) {
+    const labelsMatch = script.match(/labels\s*:\s*(\[[\s\S]*?\])/);
+    if (!labelsMatch) continue;
+    const dates = looseArray(labelsMatch[1]).map(parseAnyDate);
+    if (!dates.length || dates.some(d => !d)) continue;
+
+    let best = null;
+    for (const m of script.matchAll(/\bdata\s*:\s*(\[[^\]]*\])/g)) {
+      const values = looseArray(m[1]).map(parseMoney);
+      if (values.length !== dates.length || values.some(v => v === null)) continue;
+      const before = script.slice(Math.max(0, m.index - 300), m.index);
+      const label  = [...before.matchAll(/\blabel\s*:\s*(["'`])((?:\\.|(?!\1).)*)\1/g)].pop()?.[2] ?? '';
+      if (label && NOT_AMOUNT_HEADER_RE.test(label)) continue;
+      const score = amountHeaderScore(label);
+      if (!best || score > best.score) best = { score, values };
+    }
+    if (best) return dates.map((date, i) => ({ date, amount: best.values[i] }));
+  }
+  return [];
+}
+
+// Records out of parsed JSON, wherever in it they sit: an array of objects
+// carrying a date and an amount, or a chart's { labels, datasets }.
+function contributionsFromJson(value, depth = 0) {
+  if (!value || typeof value !== 'object' || depth > 6) return [];
+
+  if (Array.isArray(value.labels) && Array.isArray(value.datasets)) {
+    const dates = value.labels.map(parseAnyDate);
+    if (dates.length && dates.every(Boolean)) {
+      const sets = value.datasets
+        .filter(s => Array.isArray(s?.data) && s.data.length === dates.length && !NOT_AMOUNT_HEADER_RE.test(s.label || ''))
+        .sort((a, b) => amountHeaderScore(b.label) - amountHeaderScore(a.label));
+      const values = sets[0]?.data.map(parseMoney);
+      if (values && values.every(v => v !== null)) return dates.map((date, i) => ({ date, amount: values[i] }));
+    }
+  }
+
+  if (Array.isArray(value) && value.length && value.every(v => v && typeof v === 'object' && !Array.isArray(v))) {
+    const keys     = Object.keys(value[0]);
+    const dateKey  = keys.find(k => DATE_HEADER_RE.test(k) && parseAnyDate(value[0][k]))
+                  ?? keys.find(k => parseAnyDate(value[0][k]));
+    const amountKey = keys
+      .filter(k => k !== dateKey && amountHeaderScore(k) > 0 && parseMoney(value[0][k]) !== null)
+      .sort((a, b) => amountHeaderScore(b) - amountHeaderScore(a))[0];
+    if (dateKey && amountKey) {
+      return value
+        .map(v => ({ date: parseAnyDate(v[dateKey]), amount: parseMoney(v[amountKey]) }))
+        .filter(r => r.date && r.amount !== null);
+    }
+  }
+
+  for (const child of Array.isArray(value) ? value : Object.values(value)) {
+    const found = contributionsFromJson(child, depth + 1);
+    if (found.length) return found;
+  }
+  return [];
+}
+
+// The balanced [...] or {...} starting at `start`, or '' if it never closes.
+function balancedLiteral(text, start) {
+  const open = text[start];
+  const close = open === '[' ? ']' : '}';
+  let depth = 0;
+  let quote = '';
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = '';
+    } else if (c === '"' || c === "'") quote = c;
+    else if (c === open) depth++;
+    else if (c === close && --depth === 0) return text.slice(start, i + 1);
+  }
+  return '';
+}
+
+// Each attempt scans to the literal's end, so both are capped: a large bundle
+// inlined into the page must not hold the server up.
+const MAX_JSON_SCRIPT = 200_000;
+const MAX_JSON_TRIES  = 200;
+
+function parseJsonScripts(html) {
+  for (const [, script] of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) {
+    if (script.length > MAX_JSON_SCRIPT) continue;
+    let tries = 0;
+    for (let i = script.search(/[[{]/); i >= 0 && tries < MAX_JSON_TRIES; tries++) {
+      const literal = balancedLiteral(script, i);
+      if (!literal) break;
+      let parsed;
+      try { parsed = JSON.parse(literal); } catch { parsed = undefined; }
+      const found = parsed === undefined ? [] : contributionsFromJson(parsed);
+      if (found.length) return found;
+      // Past a literal that parsed; into one that did not, since JSON may sit
+      // inside a script object that is not itself JSON.
+      const from = parsed === undefined ? i + 1 : i + literal.length;
+      const next = script.slice(from).search(/[[{]/);
+      i = next < 0 ? -1 : from + next;
+    }
+  }
+  return [];
+}
+
+function parseContributions(html) {
+  const body = String(html ?? '');
+  let records = [];
+
+  // Tables first, and each table on its own: the first one that reads wins a
+  // date, so a summary further down the page cannot double a week.
+  const byDate = new Map();
+  for (const rows of extractTablesPreservingCells(body)) {
+    for (const r of parseContributionTable(rows)) if (!byDate.has(r.date)) byDate.set(r.date, r);
+  }
+  records = [...byDate.values()];
+
+  if (!records.length) records = parseChartScripts(body);
+  if (!records.length) records = parseJsonScripts(body);
+
   return records.sort((a, b) => b.date.localeCompare(a.date));
+}
+
+// If the body is JSON (an endpoint the page loads its data from), the records
+// in it; otherwise the page parsed as HTML.
+function parseContributionsResponse(text) {
+  const trimmed = String(text ?? '').trim();
+  if (/^[[{]/.test(trimmed)) {
+    try {
+      return contributionsFromJson(JSON.parse(trimmed))
+        .sort((a, b) => b.date.localeCompare(a.date));
+    } catch { /* not JSON after all */ }
+  }
+  return parseContributions(trimmed);
+}
+
+// ─── What else the finances page points at ────────────────────────────────────
+//
+// History is often split by year — a dropdown or a row of year links — and the
+// figures are sometimes loaded by the page's script from a URL of their own.
+// These are read off the page; only GET forms and same-site links are ever
+// followed, so a form that records something is never submitted.
+
+function readGetForm(openTag, formBody, path) {
+  if (/\bmethod\s*=\s*["']?post/i.test(openTag)) return null;
+  const action = asPath(attr(openTag, 'action'), path) || path.split('?')[0];
+  const [actionPath, actionQuery = ''] = action.split('?');
+
+  const fields = new Map();
+  for (const pair of actionQuery.split('&')) {
+    if (!pair) continue;
+    const at = pair.indexOf('=');
+    const key = decodeURIComponent(at < 0 ? pair : pair.slice(0, at));
+    if (key) fields.set(key, at < 0 ? '' : decodeURIComponent(pair.slice(at + 1)));
+  }
+  for (const input of formBody.matchAll(/<input([^>]*)>/gi)) {
+    const tag  = input[1];
+    const type = (attr(tag, 'type') || 'text').toLowerCase();
+    const name = attr(tag, 'name');
+    if (!name || type === 'submit' || type === 'button' || type === 'reset') continue;
+    if ((type === 'checkbox' || type === 'radio') && !/\bchecked\b/i.test(tag)) continue;
+    fields.set(name, attr(tag, 'value'));
+  }
+
+  const selects = [...formBody.matchAll(/<select([^>]*)>([\s\S]*?)<\/select>/gi)].map(([, selectTag, options]) => ({
+    name: attr(selectTag, 'name'),
+    choices: [...options.matchAll(/<option([^>]*)>([\s\S]*?)<\/option>/gi)].map(o => ({
+      value:    /\bvalue\s*=/i.test(o[1]) ? attr(o[1], 'value') : stripTags(o[2]),
+      label:    stripTags(o[2]),
+      selected: /\bselected\b/i.test(o[1]),
+    })),
+  })).filter(s => s.name && s.choices.length);
+  for (const s of selects) fields.set(s.name, (s.choices.find(c => c.selected) || s.choices[0]).value);
+
+  return { actionPath, fields, selects };
+}
+
+function asQuery(actionPath, fields) {
+  const query = [...fields].map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+  return query ? `${actionPath}?${query}` : actionPath;
+}
+
+const YEAR_RE = /\b(19|20)\d{2}\b/;
+
+// A path that sounds like it changes something is never requested, even as a
+// GET: some sites do delete or approve on a plain link.
+const CHANGES_SOMETHING_RE = /\/(delete|remove|destroy|edit|update|create|store|add|new|save|void|approve|reject|logout|sign-?out)\b/i;
+
+function financePeriodLinks(html, path) {
+  const here  = path.split('?')[0];
+  const found = new Set();
+
+  // A dropdown whose options are years, or spans named by year: one request each.
+  for (const [, openTag, formBody] of html.matchAll(/<form([^>]*)>([\s\S]*?)<\/form>/gi)) {
+    const form = readGetForm(openTag, formBody, path);
+    if (!form) continue;
+    for (const s of form.selects) {
+      const yearly = s.choices.filter(c => YEAR_RE.test(c.label) || YEAR_RE.test(c.value));
+      if (yearly.length < Math.max(2, s.choices.length / 2)) continue;
+      // The one it is set to is the page already in hand.
+      const current = s.choices.find(c => c.selected) || s.choices[0];
+      for (const c of yearly) {
+        if (c === current) continue;
+        found.add(asQuery(form.actionPath, new Map([...form.fields, [s.name, c.value]])));
+      }
+    }
+  }
+
+  // A row of links to the same page, one per year.
+  for (const link of html.matchAll(/<a([^>]*)>([\s\S]*?)<\/a>/gi)) {
+    const target = asPath(attr(link[1], 'href'), path);
+    if (!target) continue;
+    const [targetPath, query = ''] = target.split('?');
+    const sameListing = targetPath === here || targetPath.startsWith(`${here}/`);
+    if (!sameListing || CHANGES_SOMETHING_RE.test(targetPath)) continue;
+    if (YEAR_RE.test(query) || YEAR_RE.test(targetPath.slice(here.length))) found.add(target);
+  }
+
+  found.delete(path);
+  return [...found];
+}
+
+// Same-site URLs the page's own script (or an iframe) loads its figures from.
+function financeDataUrls(html, path) {
+  const found = new Set();
+  const candidates = [
+    ...[...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)]
+      .flatMap(([, s]) => [...s.matchAll(/(["'`])((?:https?:\/\/[^"'`\s]*capshawchurch\.org)?\/[^"'`\s]+)\1/g)].map(m => m[2])),
+    ...[...html.matchAll(/<(?:iframe|[a-z]+[^>]*\bdata-(?:url|src|source|endpoint))[^>]*>/gi)]
+      .flatMap(([tag]) => ['src', 'data-url', 'data-src', 'data-source', 'data-endpoint'].map(a => attr(tag, a))),
+  ];
+  for (const raw of candidates) {
+    const target = asPath(raw, path);
+    if (!target || target === path || CHANGES_SOMETHING_RE.test(target.split('?')[0])) continue;
+    if (/\.(js|css|png|jpe?g|gif|svg|webp|ico|woff2?)(\?|$)/i.test(target)) continue;
+    if (/financ|collect|contribut|giving|offering|budget|donat/i.test(target)) found.add(target);
+  }
+  return [...found].slice(0, 8);
+}
+
+// Why a finances page read as nothing, in one line a person can act on.
+function describeFinancePage(html) {
+  const body     = String(html ?? '');
+  const tables   = extractTablesPreservingCells(body);
+  const headings = [...body.matchAll(/<(h[1-6])[^>]*>([\s\S]*?)<\/\1>/gi)].map(m => stripTags(m[2])).filter(Boolean);
+  const forms    = [...body.matchAll(/<form([^>]*)>([\s\S]*?)<\/form>/gi)].map(([, openTag, formBody]) => {
+    const method  = /\bmethod\s*=\s*["']?post/i.test(openTag) ? 'POST' : 'GET';
+    const selects = [...formBody.matchAll(/<select([^>]*)>/gi)].map(s => attr(s[1], 'name')).filter(Boolean);
+    return `${method}${selects.length ? ` (${selects.join(', ')})` : ''}`;
+  });
+  const scripts  = [...body.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].filter(([, s]) => s.trim()).length;
+  const pdfs     = [...body.matchAll(/href\s*=\s*["'][^"']+\.pdf/gi)].length;
+  const iframes  = [...body.matchAll(/<iframe\b/gi)].length;
+
+  return [
+    `${tables.length} table(s)${tables.length ? ` — first rows: ${tables.slice(0, 2).map(t => JSON.stringify(t[0] ?? [])).join(' / ')}` : ''}`,
+    headings.length ? `headings: ${headings.slice(0, 8).join(' | ')}` : 'no headings',
+    forms.length ? `forms: ${forms.join('; ')}` : 'no forms',
+    `${scripts} inline script(s)`,
+    pdfs ? `${pdfs} PDF link(s)` : '',
+    iframes ? `${iframes} iframe(s)` : '',
+  ].filter(Boolean).join('; ');
 }
 
 function parseSermons(html) {
@@ -667,66 +1055,27 @@ function spanWeight(text) {
 }
 
 // The page asked for with its date-span dropdown set as wide as it goes, or ''
-// when the page has no such dropdown.
+// when the page has no such dropdown. A filter submitted by POST cannot be
+// asked for as a link, and guessing at one would be worse than leaving the
+// page as it came, so readGetForm skips those.
 function widestSpanQuery(html, path) {
-  for (const form of html.matchAll(/<form([^>]*)>([\s\S]*?)<\/form>/gi)) {
-    const [, openTag, body] = form;
-    // A filter submitted by POST cannot be asked for as a link, and guessing
-    // at one would be worse than leaving the page as it came.
-    if (/\bmethod\s*=\s*["']?post/i.test(openTag)) continue;
-
-    const selects = [...body.matchAll(/<select([^>]*)>([\s\S]*?)<\/select>/gi)];
-    if (!selects.length) continue;
-
-    // An action may carry a query of its own, which the form's own fields are
-    // submitted on top of rather than after.
-    const action = asPath(attr(openTag, 'action'), path) || path.split('?')[0];
-    const [actionPath, actionQuery = ''] = action.split('?');
-
-    const fields = new Map();
-    for (const pair of actionQuery.split('&')) {
-      if (!pair) continue;
-      const at = pair.indexOf('=');
-      const key = decodeURIComponent(at < 0 ? pair : pair.slice(0, at));
-      if (key) fields.set(key, at < 0 ? '' : decodeURIComponent(pair.slice(at + 1)));
-    }
-
-    for (const input of body.matchAll(/<input([^>]*)>/gi)) {
-      const tag  = input[1];
-      const type = (attr(tag, 'type') || 'text').toLowerCase();
-      const name = attr(tag, 'name');
-      if (!name || type === 'submit' || type === 'button' || type === 'reset') continue;
-      if ((type === 'checkbox' || type === 'radio') && !/\bchecked\b/i.test(tag)) continue;
-      fields.set(name, attr(tag, 'value'));
-    }
+  for (const [, openTag, body] of html.matchAll(/<form([^>]*)>([\s\S]*?)<\/form>/gi)) {
+    const form = readGetForm(openTag, body, path);
+    if (!form || !form.selects.length) continue;
 
     let widened = '';
-    for (const [, selectTag, options] of selects) {
-      const name = attr(selectTag, 'name');
-      if (!name) continue;
-
-      const choices = [...options.matchAll(/<option([^>]*)>([\s\S]*?)<\/option>/gi)].map(o => ({
-        value:    /\bvalue\s*=/i.test(o[1]) ? attr(o[1], 'value') : stripTags(o[2]),
-        label:    stripTags(o[2]),
-        selected: /\bselected\b/i.test(o[1]),
-      }));
-      if (!choices.length) continue;
-
-      // Whatever it is set to now, unless this is the dropdown we came for.
+    for (const { name, choices } of form.selects) {
       const current = choices.find(c => c.selected) || choices[0];
-      fields.set(name, current.value);
-
-      const widest = choices.reduce((best, c) =>
+      const widest  = choices.reduce((best, c) =>
         spanWeight(c.label) > spanWeight(best.label) ? c : best, choices[0]);
       if (spanWeight(widest.label) > spanWeight(current.label)) {
-        fields.set(name, widest.value);
+        form.fields.set(name, widest.value);
         widened = widest.label;
       }
     }
     if (!widened) continue;
 
-    const query = [...fields].map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
-    return query ? `${actionPath}?${query}` : actionPath;
+    return asQuery(form.actionPath, form.fields);
   }
   return '';
 }
@@ -1002,6 +1351,12 @@ module.exports = {
   parseJobAssignments,
   parseAttendance,
   parseContributions,
+  parseContributionsResponse,
+  parseAnyDate,
+  parseMoney,
+  financePeriodLinks,
+  financeDataUrls,
+  describeFinancePage,
   parseSermons,
   parseVisitors,
   parseVisitorTable,

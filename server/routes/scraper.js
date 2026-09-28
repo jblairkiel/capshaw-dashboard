@@ -27,6 +27,11 @@ const {
   parseJobAssignments,
   parseAttendance,
   parseContributions,
+  parseContributionsResponse,
+  parseAnyDate,
+  financePeriodLinks,
+  financeDataUrls,
+  describeFinancePage,
   parseSermons,
   parseVisitors,
   widestSpanQuery,
@@ -360,6 +365,17 @@ router.get('/debug/:section', requireAdmin, async (req, res) => {
       });
     }
 
+    // The finances page may draw its history as a chart, split it by year, or
+    // load it from a URL of its own — none of which a table dump shows.
+    if (req.params.section === 'contributions') {
+      report.finance = {
+        landedOn:    landedPath(page) || null,
+        summary:     describeFinancePage(body),
+        periodLinks: financePeriodLinks(body, section.path),
+        dataUrls:    financeDataUrls(body, section.path),
+      };
+    }
+
     let parsed;
     try {
       parsed = section.parser(body);
@@ -597,63 +613,90 @@ router.get('/status', (req, res) => {
 // Unlike attendance and the rest, this never runs on the automatic 4-hour
 // cycle: the old site's contribution history stops changing once this
 // dashboard is where the counter records a new week, so there is nothing to
-// keep re-reading. The report is paged and date-filtered the same way the
-// visitor tracker is, so the same widen-then-follow-the-pager approach reads
-// all of it rather than whatever slice the page defaults to.
+// keep re-reading.
+//
+// Nobody writing this has seen the finances page, so everything it points at
+// is followed rather than assumed: the widest date span, the pager, one
+// request per year when history is split by year, and any same-site URL its
+// script loads figures from. Only GET requests are ever made — a form on a
+// finances page might record something. And when it all reads as nothing, the
+// warning says what the page did contain, so the next change is not a guess.
 
 const CONTRIBUTIONS_PAGE     = '/members/finances';
 const MAX_CONTRIBUTION_PAGES = 40;
 
+function landedPath(page) {
+  try { return new URL(page.url).pathname.replace(/\/+$/, ''); } catch { return ''; }
+}
+
 async function fetchContributionHistory(warnings) {
   const first = await fetchPage(CONTRIBUTIONS_PAGE).catch(e => ({ body: '', status: 0, _err: e.message }));
-  if (first._err || !first.body || first.status === 404) return [first];
-
-  let page = first;
-  const wide = widestSpanQuery(first.body, CONTRIBUTIONS_PAGE);
-  if (wide) {
-    try {
-      const widened = await fetchPage(wide);
-      if (widened.status === 200 && widened.body) {
-        page = widened;
-        console.log(`[scraper] contributions — asked for every date it offers (${wide})`);
-      }
-    } catch (e) {
-      warnings.push(`contributions: could not widen the date filter — ${e.message}`);
-    }
+  if (first._err) {
+    warnings.push(`contributions: ${CONTRIBUTIONS_PAGE} could not be loaded — ${first._err}`);
+    return { first, records: [] };
   }
 
-  const pages   = [page];
-  const visited = new Set([wide || CONTRIBUTIONS_PAGE, CONTRIBUTIONS_PAGE]);
-  const queue   = pagerLinks(page.body, wide || CONTRIBUTIONS_PAGE).filter(l => !visited.has(l));
+  const landed = landedPath(first);
+  if (landed.includes('login')) throw new Error('Session expired or login failed — check credentials in .env');
+  if (landed && !landed.startsWith(CONTRIBUTIONS_PAGE)) {
+    warnings.push(`contributions: asking for ${CONTRIBUTIONS_PAGE} landed on ${landed} instead — the account the scraper signs in with may not be allowed to see the finances page`);
+    return { first, records: [] };
+  }
+  if (first.status !== 200 || !first.body) {
+    warnings.push(`contributions: ${CONTRIBUTIONS_PAGE} came back HTTP ${first.status}${first.status === 403 ? ' — the scraper\'s account is not allowed to see it' : ''}`);
+    return { first, records: [] };
+  }
 
-  while (queue.length && pages.length < MAX_CONTRIBUTION_PAGES) {
-    const next = queue.shift();
-    if (visited.has(next)) continue;
-    visited.add(next);
+  const byDate  = new Map();
+  const visited = new Set([CONTRIBUTIONS_PAGE]);
+  const queue   = [];
+  let fetched   = 1;
 
-    let following;
+  const take = (path, body) => {
     try {
-      following = await fetchPage(next);
+      for (const r of parseContributionsResponse(body)) if (!byDate.has(r.date)) byDate.set(r.date, r);
+    } catch (e) {
+      warnings.push(`contributions: ${path} could not be read — ${e.message}`);
+    }
+    for (const link of [
+      widestSpanQuery(body, path),
+      ...pagerLinks(body, path),
+      ...financePeriodLinks(body, path),
+      ...financeDataUrls(body, path),
+    ]) {
+      if (link && !visited.has(link)) { visited.add(link); queue.push(link); }
+    }
+  };
+
+  take(CONTRIBUTIONS_PAGE, first.body);
+
+  while (queue.length && fetched < MAX_CONTRIBUTION_PAGES) {
+    const next = queue.shift();
+    fetched++;
+    let page;
+    try {
+      page = await fetchPage(next);
     } catch (e) {
       warnings.push(`contributions: ${next} could not be loaded — ${e.message}; some weeks may be missing`);
       continue;
     }
-    if (following.status !== 200 || !following.body) {
-      warnings.push(`contributions: ${next} came back ${following.status}; some weeks may be missing`);
+    if (page.status !== 200 || !page.body) {
+      warnings.push(`contributions: ${next} came back ${page.status}; some weeks may be missing`);
       continue;
     }
-
-    pages.push(following);
-    for (const link of pagerLinks(following.body, next)) {
-      if (!visited.has(link)) queue.push(link);
-    }
+    take(next, page.body);
   }
 
   if (queue.length) {
     warnings.push(`contributions: stopped after ${MAX_CONTRIBUTION_PAGES} pages — there may be more`);
   }
+  if (fetched > 1) console.log(`[scraper] contributions — read ${fetched} page(s) of the finances history`);
 
-  return pages;
+  const records = [...byDate.values()];
+  if (!records.length) {
+    warnings.push(`contributions: nothing could be read from ${CONTRIBUTIONS_PAGE} — ${describeFinancePage(first.body)}`);
+  }
+  return { first, records };
 }
 
 // POST /api/members/import-contributions — gated the same way entering a new
@@ -668,38 +711,27 @@ router.post('/import-contributions', requireArea('contributions'), async (req, r
   const warnings = [];
   try {
     resetSession();
-    const pages = await fetchContributionHistory(warnings);
+    const { records } = await fetchContributionHistory(warnings);
 
-    if (pages[0]?.url && pages[0].url.includes('login')) {
-      throw new Error('Session expired or login failed — check credentials in .env');
-    }
-
-    const parsed = [];
-    for (const page of pages) {
-      if (page._err || page.status === 404 || !page.body) continue;
-      try {
-        parsed.push(...parseContributions(page.body));
-      } catch (e) {
-        warnings.push(`contributions: parse error — ${e.message}`);
-      }
-    }
-
-    const existingDates = new Set(db.prepare('SELECT date FROM contributions').all().map(r => r.date));
+    // Rows typed in by hand are ISO; anything older may not be. Compared as the
+    // same week either way, so the import never doubles one.
+    const have = new Set(db.prepare('SELECT date FROM contributions').all().map(r => parseAnyDate(r.date) || r.date));
     const insertNew = db.transaction(rows => {
       const ins = db.prepare('INSERT INTO contributions (date, amount) VALUES (?, ?)');
       let added = 0;
       for (const r of rows) {
-        if (existingDates.has(r.date)) continue;
+        if (have.has(r.date)) continue;
         ins.run(r.date, r.amount);
-        existingDates.add(r.date);
+        have.add(r.date);
         added++;
       }
       return added;
     });
-    const added = insertNew(parsed);
+    const added = insertNew(records);
 
-    console.log(`[scraper] contributions import — found ${parsed.length} week(s), added ${added} new`);
-    res.json({ success: true, found: parsed.length, added, warnings });
+    if (warnings.length) console.log(`[scraper] contributions import warnings: ${warnings.join('; ')}`);
+    console.log(`[scraper] contributions import — found ${records.length} week(s), added ${added} new`);
+    res.json({ success: true, found: records.length, added, warnings });
   } catch (err) {
     console.error('[scraper] contribution import error:', err.message);
     res.status(500).json({ success: false, error: err.message });

@@ -2,6 +2,11 @@ const {
   stripTags,
   parseAttendance,
   parseContributions,
+  parseContributionsResponse,
+  parseAnyDate,
+  parseMoney,
+  financePeriodLinks,
+  financeDataUrls,
   parseSermons,
   parseJobAssignments,
   parseAnniversaries,
@@ -60,55 +65,144 @@ describe('parseAttendance', () => {
 
 // ─── parseContributions ────────────────────────────────────────────────────────
 //
-// One total a week, not a per-giver ledger, so the shape to key on is a date
-// leading the row and a dollar amount trailing it — whatever sits in between
-// (a fund, an envelope count) is not this parser's business.
+// Nobody writing this has seen the finances page's markup, so each shape a
+// finance page is likely to take is pinned here. Dates always come back as
+// ISO, so an imported week and the same week typed in by hand are one week.
+
+describe('parseAnyDate / parseMoney', () => {
+  test.each([
+    ['09/21/2026', '2026-09-21'],
+    ['9/21/26', '2026-09-21'],
+    ['2026-09-21', '2026-09-21'],
+    ['Sep 21, 2026', '2026-09-21'],
+    ['Sunday, September 21st 2026', '2026-09-21'],
+    ['21 Sept 2026', '2026-09-21'],
+    ['Week of 9/21/2026', '2026-09-21'],
+  ])('%s is %s', (text, iso) => expect(parseAnyDate(text)).toBe(iso));
+
+  test('what is not a date is not one', () => {
+    for (const text of ['Total', '$4,200.00', '2026', '13/45/2026', 'Week 12']) expect(parseAnyDate(text)).toBeNull();
+  });
+
+  test.each([
+    ['$4,200.00', 4200], ['4200', 4200], ['$ 4,200', 4200], ['3,950.5', 3950.5],
+    ['(120.00)', -120], ['-$120', -120], ['4,200.00 USD', 4200],
+  ])('%s is %d', (text, n) => expect(parseMoney(text)).toBe(n));
+
+  test('a date, a blank or a word is not money', () => {
+    for (const text of ['', '—', '9/21/2026', 'General Fund']) expect(parseMoney(text)).toBeNull();
+  });
+});
 
 describe('parseContributions', () => {
+  const table = rows => `<table>${rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</table>`;
+
   test('reads a plain date/amount table', () => {
-    const html = `
-      <table>
-        <tr><td>Date</td><td>Amount</td></tr>
-        <tr><td>04/13/2025</td><td>$4,200.00</td></tr>
-        <tr><td>04/06/2025</td><td>$3,950.50</td></tr>
-      </table>`;
-    const result = parseContributions(html);
-    expect(result).toHaveLength(2);
-    expect(result[0]).toEqual({ date: '04/13/2025', amount: 4200 });
-    expect(result[1]).toEqual({ date: '04/06/2025', amount: 3950.5 });
+    const html = table([['Date', 'Amount'], ['04/13/2025', '$4,200.00'], ['04/06/2025', '$3,950.50']]);
+    expect(parseContributions(html)).toEqual([
+      { date: '2025-04-13', amount: 4200 },
+      { date: '2025-04-06', amount: 3950.5 },
+    ]);
   });
 
-  test('takes the trailing money cell when a fund sits in between', () => {
-    const html = `
-      <table>
-        <tr><td>Date</td><td>Fund</td><td>Total</td></tr>
-        <tr><td>04/13/2025</td><td>General</td><td>4200</td></tr>
-      </table>`;
-    expect(parseContributions(html)).toEqual([{ date: '04/13/2025', amount: 4200 }]);
+  test('takes the collection column, not the budget or the difference beside it', () => {
+    const html = table([
+      ['Week', 'Collection', 'Weekly Budget', 'Over / Under', 'YTD Contribution'],
+      ['Sep 21, 2026', '$4,200.00', '$5,000.00', '($800.00)', '$160,000.00'],
+    ]);
+    expect(parseContributions(html)).toEqual([{ date: '2026-09-21', amount: 4200 }]);
   });
 
-  test('skips the header row and any row with no readable amount', () => {
-    const html = `
-      <table>
-        <tr><td>Date</td><td>Amount</td></tr>
-        <tr><td>04/13/2025</td><td>—</td></tr>
-      </table>`;
-    expect(parseContributions(html)).toEqual([]);
+  test('finds the date wherever its column is', () => {
+    const html = table([['Fund', 'Date', 'Contribution'], ['General', '2026-09-21', '4,200.00']]);
+    expect(parseContributions(html)).toEqual([{ date: '2026-09-21', amount: 4200 }]);
   });
 
-  test('sorts descending by date', () => {
-    const html = `
-      <table>
-        <tr><td>04/06/2025</td><td>3950.50</td></tr>
-        <tr><td>04/13/2025</td><td>4200</td></tr>
-      </table>`;
-    const result = parseContributions(html);
-    expect(result[0].date).toBe('04/13/2025');
-    expect(result[1].date).toBe('04/06/2025');
+  test('with no headings, the first money column after the date — not a count', () => {
+    const html = table([['09/21/2026', '142', '$4,200.00', '$5,000.00']]);
+    expect(parseContributions(html)).toEqual([{ date: '2026-09-21', amount: 4200 }]);
+  });
+
+  test('a week listed per fund is added up into one week', () => {
+    const html = table([
+      ['Date', 'Fund', 'Amount'],
+      ['09/21/2026', 'General', '$4,000.00'],
+      ['09/21/2026', 'Building', '$200.00'],
+    ]);
+    expect(parseContributions(html)).toEqual([{ date: '2026-09-21', amount: 4200 }]);
+  });
+
+  test('…unless the week carries its own total row', () => {
+    const html = table([
+      ['Date', 'Fund', 'Amount'],
+      ['09/21/2026', 'General', '$4,000.00'],
+      ['09/21/2026', 'Building', '$200.00'],
+      ['09/21/2026', 'Total', '$4,200.00'],
+    ]);
+    expect(parseContributions(html)).toEqual([{ date: '2026-09-21', amount: 4200 }]);
+  });
+
+  test('skips rows with no readable amount', () => {
+    expect(parseContributions(table([['Date', 'Amount'], ['04/13/2025', '—']]))).toEqual([]);
+  });
+
+  test('reads chart data when the history is drawn rather than tabled', () => {
+    const html = `<canvas id="c"></canvas><script>
+      new Chart(ctx, { type: 'bar', data: {
+        labels: ['Sep 14, 2026', 'Sep 21, 2026'],
+        datasets: [
+          { label: 'Budget', data: [5000, 5000] },
+          { label: 'Collection', data: [3950.5, 4200] },
+        ] } });
+    </script>`;
+    expect(parseContributions(html)).toEqual([
+      { date: '2026-09-21', amount: 4200 },
+      { date: '2026-09-14', amount: 3950.5 },
+    ]);
+  });
+
+  test('reads a JSON array of records in an inline script', () => {
+    const html = `<script>window.history = [{"week":"2026-09-21","collection":"4200.00","budget":"5000.00"}];</script>`;
+    expect(parseContributions(html)).toEqual([{ date: '2026-09-21', amount: 4200 }]);
+  });
+
+  test('parseContributionsResponse reads a JSON endpoint as well as a page', () => {
+    const json = JSON.stringify({ data: [{ date: '09/21/2026', amount: 4200 }] });
+    expect(parseContributionsResponse(json)).toEqual([{ date: '2026-09-21', amount: 4200 }]);
   });
 
   test('returns empty array for empty html', () => {
     expect(parseContributions('<html></html>')).toEqual([]);
+  });
+});
+
+describe('financePeriodLinks / financeDataUrls', () => {
+  test('a year dropdown in a GET form gives one request per year', () => {
+    const html = `<form action="/members/finances" method="get">
+      <select name="year"><option value="2026" selected>2026</option><option value="2025">2025</option><option value="2024">2024</option></select>
+    </form>`;
+    expect(financePeriodLinks(html, '/members/finances')).toEqual([
+      '/members/finances?year=2025', '/members/finances?year=2024',
+    ]);
+  });
+
+  test('a POST form is never followed — it might record something', () => {
+    const html = `<form action="/members/finances" method="post">
+      <select name="year"><option>2026</option><option>2025</option></select></form>`;
+    expect(financePeriodLinks(html, '/members/finances')).toEqual([]);
+  });
+
+  test('year links on the same page are followed', () => {
+    const html = '<a href="/members/finances?year=2025">2025</a><a href="/members/finances/2024">2024</a><a href="/members/directory?year=2025">x</a>';
+    expect(financePeriodLinks(html, '/members/finances')).toEqual([
+      '/members/finances?year=2025', '/members/finances/2024',
+    ]);
+  });
+
+  test('a data URL in the page script is found, a stylesheet is not', () => {
+    const html = `<script>fetch('/members/finances/collection-history.json').then(r => r.json());
+      const css = '/css/finances.css';</script>`;
+    expect(financeDataUrls(html, '/members/finances')).toEqual(['/members/finances/collection-history.json']);
   });
 });
 
