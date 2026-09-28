@@ -161,6 +161,12 @@ describe('parseContributions', () => {
     ]);
   });
 
+  test('a script whose end tag carries whitespace is still read', () => {
+    const html = `<script>new Chart(el, { data: { labels: ['Sep 21, 2026'],
+      datasets: [{ label: 'Collection', data: [4200] }] } });</script >`;
+    expect(parseContributions(html)).toEqual([{ date: '2026-09-21', amount: 4200 }]);
+  });
+
   test('reads a JSON array of records in an inline script', () => {
     const html = `<script>window.history = [{"week":"2026-09-21","collection":"4200.00","budget":"5000.00"}];</script>`;
     expect(parseContributions(html)).toEqual([{ date: '2026-09-21', amount: 4200 }]);

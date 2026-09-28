@@ -337,8 +337,14 @@ function looseArray(literal) {
     .map(m => (m[3] !== undefined ? m[3] : m[2]));
 }
 
+// The body of every inline script. The end tag may carry whitespace or
+// anything else before its ">" ("</script >"), which browsers accept too.
+function inlineScripts(html) {
+  return [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\b[^>]*>/gi)].map(m => m[1]);
+}
+
 function parseChartScripts(html) {
-  for (const [, script] of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) {
+  for (const script of inlineScripts(html)) {
     const labelsMatch = script.match(/labels\s*:\s*(\[[\s\S]*?\])/);
     if (!labelsMatch) continue;
     const dates = looseArray(labelsMatch[1]).map(parseAnyDate);
@@ -420,7 +426,7 @@ const MAX_JSON_SCRIPT = 200_000;
 const MAX_JSON_TRIES  = 200;
 
 function parseJsonScripts(html) {
-  for (const [, script] of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)) {
+  for (const script of inlineScripts(html)) {
     if (script.length > MAX_JSON_SCRIPT) continue;
     let tries = 0;
     for (let i = script.search(/[[{]/); i >= 0 && tries < MAX_JSON_TRIES; tries++) {
@@ -561,8 +567,8 @@ function financePeriodLinks(html, path) {
 function financeDataUrls(html, path) {
   const found = new Set();
   const candidates = [
-    ...[...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)]
-      .flatMap(([, s]) => [...s.matchAll(/(["'`])((?:https?:\/\/[^"'`\s]*capshawchurch\.org)?\/[^"'`\s]+)\1/g)].map(m => m[2])),
+    ...inlineScripts(html)
+      .flatMap(s => [...s.matchAll(/(["'`])((?:https?:\/\/[^"'`\s]*capshawchurch\.org)?\/[^"'`\s]+)\1/g)].map(m => m[2])),
     ...[...html.matchAll(/<(?:iframe|[a-z]+[^>]*\bdata-(?:url|src|source|endpoint))[^>]*>/gi)]
       .flatMap(([tag]) => ['src', 'data-url', 'data-src', 'data-source', 'data-endpoint'].map(a => attr(tag, a))),
   ];
@@ -585,7 +591,7 @@ function describeFinancePage(html) {
     const selects = [...formBody.matchAll(/<select([^>]*)>/gi)].map(s => attr(s[1], 'name')).filter(Boolean);
     return `${method}${selects.length ? ` (${selects.join(', ')})` : ''}`;
   });
-  const scripts  = [...body.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].filter(([, s]) => s.trim()).length;
+  const scripts  = inlineScripts(body).filter(s => s.trim()).length;
   const pdfs     = [...body.matchAll(/href\s*=\s*["'][^"']+\.pdf/gi)].length;
   const iframes  = [...body.matchAll(/<iframe\b/gi)].length;
 
