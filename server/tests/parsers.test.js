@@ -1,6 +1,7 @@
 const {
   stripTags,
   parseAttendance,
+  parseContributions,
   parseSermons,
   parseJobAssignments,
   parseAnniversaries,
@@ -54,6 +55,60 @@ describe('parseAttendance', () => {
 
   test('returns empty array for empty html', () => {
     expect(parseAttendance('<html></html>')).toEqual([]);
+  });
+});
+
+// ─── parseContributions ────────────────────────────────────────────────────────
+//
+// One total a week, not a per-giver ledger, so the shape to key on is a date
+// leading the row and a dollar amount trailing it — whatever sits in between
+// (a fund, an envelope count) is not this parser's business.
+
+describe('parseContributions', () => {
+  test('reads a plain date/amount table', () => {
+    const html = `
+      <table>
+        <tr><td>Date</td><td>Amount</td></tr>
+        <tr><td>04/13/2025</td><td>$4,200.00</td></tr>
+        <tr><td>04/06/2025</td><td>$3,950.50</td></tr>
+      </table>`;
+    const result = parseContributions(html);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toEqual({ date: '04/13/2025', amount: 4200 });
+    expect(result[1]).toEqual({ date: '04/06/2025', amount: 3950.5 });
+  });
+
+  test('takes the trailing money cell when a fund sits in between', () => {
+    const html = `
+      <table>
+        <tr><td>Date</td><td>Fund</td><td>Total</td></tr>
+        <tr><td>04/13/2025</td><td>General</td><td>4200</td></tr>
+      </table>`;
+    expect(parseContributions(html)).toEqual([{ date: '04/13/2025', amount: 4200 }]);
+  });
+
+  test('skips the header row and any row with no readable amount', () => {
+    const html = `
+      <table>
+        <tr><td>Date</td><td>Amount</td></tr>
+        <tr><td>04/13/2025</td><td>—</td></tr>
+      </table>`;
+    expect(parseContributions(html)).toEqual([]);
+  });
+
+  test('sorts descending by date', () => {
+    const html = `
+      <table>
+        <tr><td>04/06/2025</td><td>3950.50</td></tr>
+        <tr><td>04/13/2025</td><td>4200</td></tr>
+      </table>`;
+    const result = parseContributions(html);
+    expect(result[0].date).toBe('04/13/2025');
+    expect(result[1].date).toBe('04/06/2025');
+  });
+
+  test('returns empty array for empty html', () => {
+    expect(parseContributions('<html></html>')).toEqual([]);
   });
 });
 

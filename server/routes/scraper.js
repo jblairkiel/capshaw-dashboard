@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const router  = express.Router();
-const { requireApproved, requireAdmin } = require('../middleware/auth');
+const { requireApproved, requireAdmin, requireArea } = require('../middleware/auth');
 const { syncDirectory } = require('../lib/directorySync');
 const fs      = require('fs');
 const path    = require('path');
@@ -26,6 +26,7 @@ const {
   stripTags,
   parseJobAssignments,
   parseAttendance,
+  parseContributions,
   parseSermons,
   parseVisitors,
   widestSpanQuery,
@@ -282,6 +283,7 @@ router.get('/data', (req, res) => {
 const DEBUG_SECTIONS = {
   jobAssignments: { path: '/members/job-assignments',                       parser: parseJobAssignments },
   attendance:     { path: '/members/attendance',                            parser: parseAttendance },
+  contributions:  { path: '/members/contributions',                        parser: parseContributions },
   sermons:        { path: '/members/sermons',                               parser: parseSermons },
   visitors:       { path: '/members/visitor-tracker',                       parser: parseVisitors },
   anniversaries:  { path: '/members/anniversaries-members-non-members',     parser: parseAnniversaries },
@@ -590,5 +592,120 @@ router.get('/status', (req, res) => {
   });
 });
 
+// ─── One-time contribution history import ──────────────────────────────────
+//
+// Unlike attendance and the rest, this never runs on the automatic 4-hour
+// cycle: the old site's contribution history stops changing once this
+// dashboard is where the counter records a new week, so there is nothing to
+// keep re-reading. The report is paged and date-filtered the same way the
+// visitor tracker is, so the same widen-then-follow-the-pager approach reads
+// all of it rather than whatever slice the page defaults to.
+
+const CONTRIBUTIONS_PAGE     = '/members/contributions';
+const MAX_CONTRIBUTION_PAGES = 40;
+
+async function fetchContributionHistory(warnings) {
+  const first = await fetchPage(CONTRIBUTIONS_PAGE).catch(e => ({ body: '', status: 0, _err: e.message }));
+  if (first._err || !first.body || first.status === 404) return [first];
+
+  let page = first;
+  const wide = widestSpanQuery(first.body, CONTRIBUTIONS_PAGE);
+  if (wide) {
+    try {
+      const widened = await fetchPage(wide);
+      if (widened.status === 200 && widened.body) {
+        page = widened;
+        console.log(`[scraper] contributions — asked for every date it offers (${wide})`);
+      }
+    } catch (e) {
+      warnings.push(`contributions: could not widen the date filter — ${e.message}`);
+    }
+  }
+
+  const pages   = [page];
+  const visited = new Set([wide || CONTRIBUTIONS_PAGE, CONTRIBUTIONS_PAGE]);
+  const queue   = pagerLinks(page.body, wide || CONTRIBUTIONS_PAGE).filter(l => !visited.has(l));
+
+  while (queue.length && pages.length < MAX_CONTRIBUTION_PAGES) {
+    const next = queue.shift();
+    if (visited.has(next)) continue;
+    visited.add(next);
+
+    let following;
+    try {
+      following = await fetchPage(next);
+    } catch (e) {
+      warnings.push(`contributions: ${next} could not be loaded — ${e.message}; some weeks may be missing`);
+      continue;
+    }
+    if (following.status !== 200 || !following.body) {
+      warnings.push(`contributions: ${next} came back ${following.status}; some weeks may be missing`);
+      continue;
+    }
+
+    pages.push(following);
+    for (const link of pagerLinks(following.body, next)) {
+      if (!visited.has(link)) queue.push(link);
+    }
+  }
+
+  if (queue.length) {
+    warnings.push(`contributions: stopped after ${MAX_CONTRIBUTION_PAGES} pages — there may be more`);
+  }
+
+  return pages;
+}
+
+// POST /api/members/import-contributions — gated the same way entering a new
+// week is: whoever holds the contributions area (or an admin). Only fills in
+// weeks nobody has a row for yet, so a week the counter already typed in or
+// corrected by hand is never overwritten by running the import again.
+router.post('/import-contributions', requireArea('contributions'), async (req, res) => {
+  if (_updateInProgress) {
+    return res.status(409).json({ success: false, error: 'A site update is already in progress' });
+  }
+  _updateInProgress = true;
+  const warnings = [];
+  try {
+    resetSession();
+    const pages = await fetchContributionHistory(warnings);
+
+    if (pages[0]?.url && pages[0].url.includes('login')) {
+      throw new Error('Session expired or login failed — check credentials in .env');
+    }
+
+    const parsed = [];
+    for (const page of pages) {
+      if (page._err || page.status === 404 || !page.body) continue;
+      try {
+        parsed.push(...parseContributions(page.body));
+      } catch (e) {
+        warnings.push(`contributions: parse error — ${e.message}`);
+      }
+    }
+
+    const existingDates = new Set(db.prepare('SELECT date FROM contributions').all().map(r => r.date));
+    const insertNew = db.transaction(rows => {
+      const ins = db.prepare('INSERT INTO contributions (date, amount) VALUES (?, ?)');
+      let added = 0;
+      for (const r of rows) {
+        if (existingDates.has(r.date)) continue;
+        ins.run(r.date, r.amount);
+        existingDates.add(r.date);
+        added++;
+      }
+      return added;
+    });
+    const added = insertNew(parsed);
+
+    console.log(`[scraper] contributions import — found ${parsed.length} week(s), added ${added} new`);
+    res.json({ success: true, found: parsed.length, added, warnings });
+  } catch (err) {
+    console.error('[scraper] contribution import error:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  } finally {
+    _updateInProgress = false;
+  }
+});
 
 module.exports = { router, runUpdate, readData, parseCookies, cookieStr, mergeCookieStr, normaliseJobAssignments };

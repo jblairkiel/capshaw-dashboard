@@ -125,6 +125,13 @@ export const AREAS = [
     description: 'Write each week\'s prayer lists and offering, and export the newsletter as Word or PDF.',
     tone:        'bg-indigo-100 text-indigo-800',
   },
+  {
+    id:          'contributions',
+    label:       'Contribution Counter',
+    page:        'Contributions',
+    description: 'Record each week\'s contribution total, and correct earlier weeks.',
+    tone:        'bg-yellow-100 text-yellow-800',
+  },
 ];
 
 export const AREA_IDS = AREAS.map(a => a.id);

@@ -31,6 +31,7 @@ import BugReportDialog from './components/BugReportDialog';
 import BugReportsView from './components/BugReportsView';
 import HowItWorksView from './components/HowItWorksView';
 import MemberMatchView from './components/MemberMatchView';
+import ContributionsView from './components/ContributionsView';
 import { hasWriteAccess, isAdmin, hasArea } from './lib/roles';
 
 const API = '/api/members';
@@ -53,6 +54,7 @@ const BASE_GROUPS = [
     items: [
       { id: 'assignments',   label: 'Serving Schedule' },
       { id: 'attendance',    label: 'Attendance' },
+      { id: 'contributions', label: 'Contributions' },
       { id: 'visitors',      label: 'Guests' },
       { id: 'groups',        label: 'Church Groups' },
       { id: 'anniversaries', label: 'Birthdays & Anniversaries' },
@@ -142,7 +144,7 @@ const STANDALONE_TABS = new Set([
   'bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database',
   'directory', 'profile', 'inbox', 'mail-groups', 'livestreams',
   'assignments', 'visitors', 'leadership', 'action-history','service-roster', 'bulletin',
-  'groups', 'bug-reports', 'how-it-works', 'member-match',
+  'groups', 'bug-reports', 'how-it-works', 'member-match', 'contributions',
 ]);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
@@ -451,6 +453,11 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       {!updating && activeTab === 'leadership' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           <LeadershipView bulletins={siteData?.bulletins} />
+        </main>
+      )}
+      {!updating && activeTab === 'contributions' && (
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <ContributionsView user={user} />
         </main>
       )}
       {!updating && activeTab === 'service-roster' && hasArea(user, 'serving-schedule') && (

@@ -84,6 +84,12 @@ const AREAS = [
     page:  'Weekly Newsletter',
     description: 'Write each week\'s prayer lists and offering, and export the newsletter as Word or PDF.',
   },
+  {
+    id:    'contributions',
+    label: 'Contribution Counter',
+    page:  'Contributions',
+    description: 'Record each week\'s contribution total, and correct earlier weeks.',
+  },
 ];
 
 const AREA_IDS = AREAS.map(a => a.id);
