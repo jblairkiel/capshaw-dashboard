@@ -207,6 +207,7 @@ function compose(sunday) {
   const { issue, saved, carriedFrom } = draftFor(auto.sunday);
 
   const attendance = auto.lastWeek.attendance;
+  const contribution = auto.lastWeek.contribution;
 
   return {
     sunday:      auto.sunday,
@@ -228,12 +229,21 @@ function compose(sunday) {
       // The one prayer block the newsletter sets as a paragraph rather than a
       // list, because it is long and every entry is the same shape.
       evangelists: nameParagraph(lines(issue.evangelists), { separator: '; ', joiner: ' \u2013 ' }),
+      // The same list as typed, one entry per line, for the form to edit. The
+      // segments above are for the exports; joining those back into text is
+      // what used to write "[object Object]" over the real list (#94).
+      evangelistLines: lines(issue.evangelists),
     },
 
+    // The offering is last week's total from the Contributions page when one
+    // is on file; the figure typed on the newsletter is only a stand-in for a
+    // week nobody has entered yet. Both are sent so the form can say which.
     lastWeek: {
       sunday:    attendance.sunday    ? attendance.sunday.count    : null,
       wednesday: attendance.wednesday ? attendance.wednesday.count : null,
-      offering:  issue.offering,
+      offering:  contribution !== null ? data.money(contribution) : issue.offering,
+      offeringTyped: issue.offering,
+      offeringFromContributions: contribution !== null ? data.money(contribution) : null,
       building:  issue.building,
     },
 

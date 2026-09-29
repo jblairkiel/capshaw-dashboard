@@ -30,7 +30,7 @@ function buildApp(user = null) {
 const SUNDAY = '2026-05-03';
 
 beforeEach(() => {
-  for (const t of ['bulletin_issues', 'announcements', 'anniversaries', 'attendance', 'elders', 'deacons', 'action_log', 'users']) {
+  for (const t of ['bulletin_issues', 'announcements', 'anniversaries', 'attendance', 'contributions', 'elders', 'deacons', 'action_log', 'users']) {
     db.prepare(`DELETE FROM "${t}"`).run();
   }
   // action_log.user_id is a foreign key into users, so an entry is only written
@@ -90,6 +90,23 @@ describe('the typed half, week to week', () => {
 });
 
 describe('composing the two halves', () => {
+  test('last week’s offering comes from the Contributions page when a total is on file', () => {
+    issues.save(SUNDAY, { offering: '$7,125' });
+    // The newsletter for May 3 reports the week of April 26 — a correction
+    // entered on the Tuesday is part of that week's total.
+    db.prepare('INSERT INTO contributions (date, amount) VALUES (?, ?)').run('2026-04-26', 6200);
+    db.prepare('INSERT INTO contributions (date, amount) VALUES (?, ?)').run('2026-04-28', 10.5);
+    db.prepare('INSERT INTO contributions (date, amount) VALUES (?, ?)').run('2026-05-03', 9999);
+
+    const b = issues.compose(SUNDAY);
+    expect(b.lastWeek).toMatchObject({ offering: '$6,210.50', offeringTyped: '$7,125', offeringFromContributions: '$6,210.50' });
+  });
+
+  test('a whole-dollar total prints without cents', () => {
+    db.prepare('INSERT INTO contributions (date, amount) VALUES (?, ?)').run('2026-04-26', 6577);
+    expect(issues.compose(SUNDAY).lastWeek.offering).toBe('$6,577');
+  });
+
   test('the queried sections and the typed ones arrive together', () => {
     db.prepare('INSERT INTO announcements (title,event_date,active) VALUES (?,?,1)').run('Potluck', '2026-05-10');
     db.prepare('INSERT INTO attendance (date,service,count) VALUES (?,?,?)').run('04/26/26', 'Sunday AM Worship', 250);
@@ -106,7 +123,8 @@ describe('composing the two halves', () => {
     expect(b.quoteRef).toBe('Gal. 6:9');
     expect(b.reminders).toContain('Potluck May 10');
     expect(b.prayer.ongoing).toEqual(['Dean Coffield']);
-    expect(b.lastWeek).toMatchObject({ sunday: 250, offering: '$7,125' });
+    expect(b.prayer.evangelistLines).toEqual([]);
+    expect(b.lastWeek).toMatchObject({ sunday: 250, offering: '$7,125', offeringTyped: '$7,125', offeringFromContributions: null });
     // The leadership reads as a running paragraph with the names in bold.
     expect(b.leadership.elders).toEqual([{ text: 'Barry Britnell', bold: true }]);
     expect(b.groups[0]).toMatchObject({ name: 'Group 1', leader: 'Hunter Reece', note: 'Meeting May 17' });
@@ -126,6 +144,15 @@ describe('composing the two halves', () => {
       { text: 'Wes Webb', bold: true },
       { text: ' – High Springs, Florida', bold: false },
     ]);
+  });
+
+  test('saving the list back unchanged leaves it unchanged (#94)', () => {
+    const typed = 'Samuel Lopez – Ocosingo, Mexico\nWes Webb – High Springs, Florida';
+    issues.save(SUNDAY, { evangelists: typed });
+    // What the form does: load the week, then save what it shows.
+    const shown = issues.compose(SUNDAY).prayer.evangelistLines.join('\n');
+    issues.save(SUNDAY, { evangelists: shown });
+    expect(issues.find(SUNDAY).evangelists).toBe(typed);
   });
 
   describe('a deacon\'s primary responsibility', () => {
@@ -372,5 +399,86 @@ describe('the weeks already written', () => {
     const res = await request(buildApp(MEMBER)).get('/api/bulletin/issues');
     expect(res.status).toBe(200);
     expect(res.body.issues.map(i => i.sunday)).toEqual(['2026-05-03', '2026-04-26']);
+  });
+});
+
+describe('emailing the newsletter', () => {
+  const fs    = require('fs');
+  const paths = require('../lib/paths');
+  const mailer = require('../mail/mailer');
+
+  function listWith(key, ...emails) {
+    const group = db.prepare('SELECT id FROM mail_groups WHERE key = ?').get(key);
+    db.prepare('DELETE FROM mail_group_members WHERE group_id = ?').run(group.id);
+    for (const email of emails) db.prepare('INSERT INTO mail_group_members (group_id, email) VALUES (?, ?)').run(group.id, email);
+  }
+
+  beforeEach(() => {
+    db.prepare('DELETE FROM mail_outbox').run();
+    db.prepare('DELETE FROM mail_group_members').run();
+    issues.save(SUNDAY, { ongoing: 'Dean Coffield' });
+  });
+
+  test('lists every mailing list and how many on it can be reached', async () => {
+    listWith('announcements', 'one@example.invalid', 'two@example.invalid');
+    const res = await request(buildApp(EDITOR)).get('/api/bulletin/mail-lists');
+    expect(res.status).toBe(200);
+    expect(res.body.lists.find(l => l.key === 'announcements')).toMatchObject({ name: 'Announcements', reachable: 2, missing: 0 });
+  });
+
+  test('queues one copy per address, each with the PDF attached', async () => {
+    listWith('announcements', 'one@example.invalid', 'two@example.invalid');
+    const res = await request(buildApp(EDITOR)).post(`/api/bulletin/${SUNDAY}/email`).send({ list: 'announcements' });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ queued: 2, list: { key: 'announcements', name: 'Announcements' } });
+    expect(res.body.sent).toEqual([expect.objectContaining({ list: 'announcements', count: 2 })]);
+
+    const rows = db.prepare('SELECT * FROM mail_outbox ORDER BY id').all();
+    // intended_for is who it was really for when a test redirect is on.
+    expect(rows.map(r => r.intended_for || r.to_email)).toEqual(['one@example.invalid', 'two@example.invalid']);
+    expect(rows[0].context).toBe(`bulletin:${SUNDAY}:announcements`);
+    expect(rows[0].subject).toContain('May 3, 2026');
+
+    // Both copies point at the one file, and it is the PDF.
+    const [attached] = mailer.attachmentsOf(rows[0]);
+    expect(mailer.attachmentsOf(rows[1])).toEqual([attached]);
+    expect(attached).toMatchObject({ filename: 'capshaw-newsletter-2026-05-03.pdf', contentType: 'application/pdf' });
+    const file = mailer.attachmentPath(attached.file);
+    expect(file.startsWith(paths.mailAttachments)).toBe(true);
+    expect(fs.readFileSync(file).subarray(0, 5).toString()).toBe('%PDF-');
+  });
+
+  test('says which weeks have already gone out, and to which list', async () => {
+    listWith('announcements', 'one@example.invalid');
+    await request(buildApp(EDITOR)).post(`/api/bulletin/${SUNDAY}/email`).send({ list: 'announcements' });
+
+    const res = await request(buildApp(EDITOR)).get(`/api/bulletin/${SUNDAY}/emails`);
+    expect(res.body.sent).toEqual([expect.objectContaining({ list: 'announcements', count: 1 })]);
+    const other = await request(buildApp(EDITOR)).get('/api/bulletin/2026-05-10/emails');
+    expect(other.body.sent).toEqual([]);
+  });
+
+  test('refuses a list nobody on can be reached, or no list at all', async () => {
+    let res = await request(buildApp(EDITOR)).post(`/api/bulletin/${SUNDAY}/email`).send({ list: 'announcements' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/Nobody on the Announcements list/);
+
+    res = await request(buildApp(EDITOR)).post(`/api/bulletin/${SUNDAY}/email`).send({ list: 'no-such-list' });
+    expect(res.status).toBe(400);
+    res = await request(buildApp(EDITOR)).post(`/api/bulletin/${SUNDAY}/email`).send({});
+    expect(res.status).toBe(400);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM mail_outbox').get().n).toBe(0);
+  });
+
+  test('is for whoever looks after the newsletter, and is recorded', async () => {
+    listWith('announcements', 'one@example.invalid');
+    const denied = await request(buildApp(MEMBER)).post(`/api/bulletin/${SUNDAY}/email`).send({ list: 'announcements' });
+    expect(denied.status).toBe(403);
+    expect((await request(buildApp(MEMBER)).get('/api/bulletin/mail-lists')).status).toBe(403);
+
+    await request(buildApp(EDITOR)).post(`/api/bulletin/${SUNDAY}/email`).send({ list: 'announcements' });
+    const [log] = db.prepare("SELECT * FROM action_log WHERE area = 'bulletin' ORDER BY id DESC").all();
+    expect(log.summary).toBe('Emailed the newsletter for May 3, 2026 to the Announcements list (1)');
   });
 });

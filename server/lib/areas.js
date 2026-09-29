@@ -90,6 +90,12 @@ const AREAS = [
     page:  'Contributions',
     description: 'Record each week\'s contribution total, correct earlier weeks, and import them from a CSV.',
   },
+  {
+    id:    'records',
+    label: 'Reports & Record Keeping',
+    page:  'Record Keeping',
+    description: 'See which services are missing their songs, guests or contribution, mark a service as having nothing to record, and set which services are tracked.',
+  },
 ];
 
 const AREA_IDS = AREAS.map(a => a.id);

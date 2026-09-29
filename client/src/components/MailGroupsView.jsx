@@ -140,67 +140,6 @@ function GroupDetail({ groupKey, onBack, onChanged }) {
   );
 }
 
-// ─── The outbox ───────────────────────────────────────────────────────────────
-
-function Outbox() {
-  const [data, setData] = useState(null);
-  const [busy, setBusy] = useState(false);
-
-  const load = useCallback(() => { call(`${API}/outbox`).then(setData).catch(() => {}); }, []);
-  useEffect(() => { load(); }, [load]);
-
-  async function sendNow() {
-    setBusy(true);
-    try { await call(`${API}/outbox/send`, { method: 'POST' }); load(); }
-    finally { setBusy(false); }
-  }
-
-  if (!data) return null;
-
-  const STATUS = {
-    sent:    'bg-emerald-100 text-emerald-800',
-    pending: 'bg-amber-100 text-amber-800',
-    failed:  'bg-red-100 text-red-700',
-  };
-
-  return (
-    <div className="card">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <h3 className="font-semibold text-church-navy text-sm">Recent mail</h3>
-        <button
-          onClick={sendNow}
-          disabled={busy}
-          className="text-xs px-3 py-1.5 rounded-lg border border-church-gold text-church-gold hover:bg-church-gold hover:text-church-navy disabled:opacity-50"
-        >
-          {busy ? 'Sending…' : 'Send queued now'}
-        </button>
-      </div>
-
-      <p className="text-xs text-gray-500 mt-1">
-        {Object.entries(data.counts).map(([k, n]) => `${n} ${k}`).join(' · ') || 'Nothing sent yet'}
-      </p>
-
-      {data.messages.length > 0 && (
-        <div className="mt-3 space-y-1 max-h-72 overflow-y-auto">
-          {data.messages.map(m => (
-            <div key={m.id} className="flex items-start gap-2 py-1.5 border-b border-gray-50 last:border-0">
-              <span className={`text-xs px-1.5 py-0.5 rounded shrink-0 ${STATUS[m.status] || ''}`}>{m.status}</span>
-              <div className="min-w-0 flex-1">
-                <p className="text-xs text-church-navy truncate">{m.subject}</p>
-                <p className="text-xs text-gray-400 truncate">
-                  to {m.to_email}
-                  {m.intended_for && <> · intended for {m.intended_for}</>}
-                </p>
-                {m.error && <p className="text-xs text-red-600">{m.error}</p>}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export default function MailGroupsView() {
@@ -283,7 +222,10 @@ export default function MailGroupsView() {
             (elders@…) has to be set up with your mail provider.
           </p>
 
-          <Outbox />
+          <p className="text-xs text-gray-400">
+            What has been sent to these lists, and every other email the site sends, is on
+            Church Office → Emails.
+          </p>
         </>
       )}
     </div>

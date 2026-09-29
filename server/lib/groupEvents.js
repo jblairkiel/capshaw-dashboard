@@ -44,6 +44,7 @@ function rowToEvent(row) {
     createdBy:     row.created_by,
     createdAt:     row.created_at,
     publishedAt:   row.published_at,
+    headCount:     row.head_count ?? null,
   };
 }
 

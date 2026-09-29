@@ -8,6 +8,7 @@ const comments      = require('../lib/eventComments');
 const notifications = require('../lib/notifications');
 const actionLog     = require('../lib/actionLog');
 const notify        = require('../mail/notify');
+const keeping       = require('../lib/recordKeeping');
 const { requireAuth, requireApproved } = require('../middleware/auth');
 
 // ─── Church groups ────────────────────────────────────────────────────────────
@@ -584,6 +585,37 @@ router.post('/:groupId/events/:eventId/cancel', requireApproved, loadGroup, requ
   });
 
   res.json({ success: true, event: eventPayload(event.id, req.user, { canManage: true }), notified: told });
+});
+
+// ─── PUT /api/groups/:groupId/events/:eventId/head-count { count } ────────────
+// How many came, once the meeting has happened. `null` takes it back. The
+// Record Keeping report counts a posted meeting without one as not recorded.
+
+router.put('/:groupId/events/:eventId/head-count', requireApproved, loadGroup, requireLeads, loadEvent, (req, res) => {
+  const raw = req.body?.count;
+  const count = raw === null || raw === '' ? null : Number(raw);
+  if (count !== null && !(Number.isInteger(count) && count >= 0 && count <= 10000)) {
+    return res.status(400).json({ success: false, error: 'The head count has to be a whole number' });
+  }
+  if (req.event.status !== 'published') {
+    return res.status(400).json({ success: false, error: 'Only a meeting that was posted can have a head count' });
+  }
+  if (!req.event.date || req.event.date > keeping.churchToday()) {
+    return res.status(400).json({ success: false, error: 'The meeting has not happened yet' });
+  }
+
+  db.prepare('UPDATE group_events SET head_count = ? WHERE id = ?').run(count, req.event.id);
+  actionLog.record(req.user, {
+    area:     'church-groups',
+    action:   'update',
+    entity:   'group meeting',
+    entityId: req.event.id,
+    summary:  count === null
+      ? `Took back the head count for "${req.event.title}" (${req.group.name})`
+      : `Recorded ${count} at "${req.event.title}" (${req.group.name})`,
+    details:  { before: req.event.headCount, after: count },
+  });
+  res.json({ success: true, event: eventPayload(req.event.id, req.user, { canManage: true }) });
 });
 
 router.delete('/:groupId/events/:eventId', requireApproved, loadGroup, requireLeads, loadEvent, (req, res) => {

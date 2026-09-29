@@ -10,7 +10,11 @@
 // congregation. Clearing MAIL_REDIRECT_TO is the single, explicit step that
 // makes this site able to write to real people.
 
-const db = require('../db');
+const fs     = require('fs');
+const path   = require('path');
+const crypto = require('crypto');
+const db     = require('../db');
+const paths  = require('../lib/paths');
 
 const MAX_ATTEMPTS = 3;
 
@@ -35,6 +39,40 @@ function isRedirecting() {
   return !!config().redirectTo;
 }
 
+// ─── Attachments ──────────────────────────────────────────────────────────────
+//
+// A file to send is written once, named by its content, and every queued copy
+// of the message points at it — a newsletter to a hundred people is one PDF on
+// disk, not a hundred. The row keeps the name the recipient sees separately
+// from the stored name, which is only ever a hash.
+
+const ATTACHMENT_NAME = /^[a-f0-9]{64}\.[a-z0-9]{1,5}$/;
+
+function saveAttachment({ buffer, filename, contentType }) {
+  const ext  = (path.extname(String(filename || '')).slice(1).toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin').slice(0, 5);
+  const file = `${crypto.createHash('sha256').update(buffer).digest('hex')}.${ext}`;
+  fs.mkdirSync(paths.mailAttachments, { recursive: true });
+  const target = path.join(paths.mailAttachments, file);
+  if (!fs.existsSync(target)) fs.writeFileSync(target, buffer);
+  return { file, filename: path.basename(String(filename || file)), contentType: contentType || 'application/octet-stream' };
+}
+
+// Where a stored attachment is, or null for anything that is not a name this
+// module wrote — the column is data, and never a way to reach another file.
+function attachmentPath(file) {
+  const name = path.basename(String(file || ''));
+  return ATTACHMENT_NAME.test(name) ? path.join(paths.mailAttachments, name) : null;
+}
+
+function attachmentsOf(row) {
+  try {
+    const list = JSON.parse(row.attachments || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
 // ─── Queueing ─────────────────────────────────────────────────────────────────
 
 function validAddress(email) {
@@ -43,7 +81,7 @@ function validAddress(email) {
 
 // Queues one message per recipient. Returns the rows created, so a caller (or
 // a test) can see exactly what was queued without touching a mail server.
-function enqueue({ to, subject, body, context = '' }) {
+function enqueue({ to, subject, body, context = '', attachments = [] }) {
   const { redirectTo } = config();
   const recipients = (Array.isArray(to) ? to : [to]).filter(r => validAddress(r?.email));
 
@@ -53,9 +91,10 @@ function enqueue({ to, subject, body, context = '' }) {
   const rows = [];
 
   const insert = db.prepare(`
-    INSERT INTO mail_outbox (to_email, to_name, intended_for, subject, body, context)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO mail_outbox (to_email, to_name, intended_for, subject, body, context, attachments)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
+  const attached = JSON.stringify(attachments.map(({ file, filename, contentType }) => ({ file, filename, contentType })));
 
   for (const recipient of recipients) {
     const email = recipient.email.trim().toLowerCase();
@@ -67,7 +106,7 @@ function enqueue({ to, subject, body, context = '' }) {
     const finalBody   = redirectTo ? redirectNotice(email, recipient.name) + body : body;
 
     const { lastInsertRowid: id } = insert.run(
-      deliverTo, recipient.name || '', intendedFor, subject, finalBody, context
+      deliverTo, recipient.name || '', intendedFor, subject, finalBody, context, attached
     );
     rows.push(db.prepare('SELECT * FROM mail_outbox WHERE id = ?').get(id));
   }
@@ -136,11 +175,17 @@ async function drainOutbox({ limit = 25 } = {}) {
 
   for (const row of pending) {
     try {
+      const attachments = attachmentsOf(row).map(a => {
+        const file = attachmentPath(a.file);
+        if (!file || !fs.existsSync(file)) throw new Error(`The attachment ${a.filename || ''} is missing`);
+        return { filename: a.filename, contentType: a.contentType, path: file };
+      });
       await mail.sendMail({
         from,
         to: row.to_email,
         subject: row.subject,
         text: row.body,
+        attachments: attachments.length ? attachments : undefined,
         headers: row.intended_for ? { 'X-Intended-For': row.intended_for } : undefined,
       });
       db.prepare("UPDATE mail_outbox SET status = 'sent', sent_at = datetime('now'), attempts = attempts + 1 WHERE id = ?")
@@ -168,4 +213,5 @@ function send(message) {
 module.exports = {
   config, isConfigured, isRedirecting, validAddress,
   enqueue, send, drainOutbox, resetTransport, MAX_ATTEMPTS,
+  saveAttachment, attachmentPath, attachmentsOf,
 };

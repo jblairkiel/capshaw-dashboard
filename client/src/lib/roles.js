@@ -132,6 +132,13 @@ export const AREAS = [
     description: 'Record each week\'s contribution total, correct earlier weeks, and import them from a CSV.',
     tone:        'bg-yellow-100 text-yellow-800',
   },
+  {
+    id:          'records',
+    label:       'Reports & Record Keeping',
+    page:        'Record Keeping',
+    description: 'See which services are missing their songs, guests or contribution, mark a service as having nothing to record, and set which services are tracked.',
+    tone:        'bg-teal-100 text-teal-800',
+  },
 ];
 
 export const AREA_IDS = AREAS.map(a => a.id);

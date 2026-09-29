@@ -19,6 +19,7 @@ function bulletinFor(overrides = {}) {
       shutIns: [], pregnancies: [],
       // The exports set this one as a paragraph, so it arrives as bold/plain runs.
       evangelists: [{ text: 'Samuel Lopez', bold: true }, { text: ' – Ocosingo, Mexico', bold: false }],
+      evangelistLines: ['Samuel Lopez – Ocosingo, Mexico'],
     },
     lastWeek: { sunday: 250, wednesday: 190, offering: '$7,125', building: '$87,450 (35%)' },
     anniversaries: ['John & Sarah Miller – 15 yrs'],
@@ -99,6 +100,20 @@ describe('the weekly newsletter screen', () => {
     expect(await screen.findByText('Saved for this week.')).toBeInTheDocument();
   });
 
+  test('the evangelists arrive as the lines that were typed, not as export segments (#94)', async () => {
+    const fetchMock = mockApi();
+    render(<WeeklyBulletinView canWrite />);
+    await screen.findByText('May 3, 2026');
+    expect(screen.getByDisplayValue('Samuel Lopez – Ocosingo, Mexico')).toBeInTheDocument();
+    expect(screen.queryByDisplayValue(/object Object/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      const put = fetchMock.mock.calls.find(([, opts]) => opts?.method === 'PUT');
+      expect(JSON.parse(put[1].body).evangelists).toBe('Samuel Lopez – Ocosingo, Mexico');
+    });
+  });
+
   test('saving sends the typed half back, and nothing else', async () => {
     const fetchMock = mockApi();
     render(<WeeklyBulletinView canWrite />);
@@ -120,6 +135,26 @@ describe('the weekly newsletter screen', () => {
       expect(body.reminders).toBeUndefined();
       expect(body.elders).toBeUndefined();
     });
+  });
+
+  test('when Contributions has last week’s total, the offering comes from there and is not typed', async () => {
+    mockApi(bulletinFor({
+      lastWeek: { sunday: 250, wednesday: 190, offering: '$6,210', offeringTyped: '$7,125', offeringFromContributions: '$6,210', building: '' },
+    }));
+    render(<WeeklyBulletinView canWrite />);
+    await screen.findByText('May 3, 2026');
+
+    expect(screen.getByText('• Offering: $6,210')).toBeInTheDocument();
+    expect(screen.getByText(/from Contributions\. To change it, change it there/)).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('$7,125')).not.toBeInTheDocument();
+  });
+
+  test('without a total on file, the offering is typed and says where it could come from', async () => {
+    mockApi();
+    render(<WeeklyBulletinView canWrite />);
+    await screen.findByText('May 3, 2026');
+    expect(screen.getByPlaceholderText('$7,125')).toHaveValue('$7,125');
+    expect(screen.getByText(/No total for last week is on the Contributions page yet/)).toBeInTheDocument();
   });
 
   test('moving weeks asks for the Sunday of whatever day is picked', async () => {
@@ -154,5 +189,84 @@ describe('the weekly newsletter screen', () => {
     ));
     render(<WeeklyBulletinView canWrite />);
     expect(await screen.findByText('Nope')).toBeInTheDocument();
+  });
+
+  describe('emailing it', () => {
+    const LISTS = [
+      { key: 'elders', name: 'Elders', reachable: 3, missing: 0 },
+      { key: 'announcements', name: 'Announcements', reachable: 120, missing: 4 },
+    ];
+
+    // Answers each call by what it is for; `sent` is what this week already went to.
+    function mockEmailApi({ bulletin = bulletinFor(), sent = [], sendFails = false } = {}) {
+      const reply = body => Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true, ...body }) });
+      const fetchMock = vi.fn((url, options = {}) => {
+        const u = String(url);
+        if (u.endsWith('/mail-lists')) return reply({ lists: LISTS });
+        if (u.endsWith('/emails'))     return reply({ sent });
+        if (u.endsWith('/email')) {
+          if (sendFails) return Promise.resolve({ ok: false, json: () => Promise.resolve({ success: false, error: 'No such mailing list' }) });
+          return reply({ queued: 120, missing: [], list: { key: 'announcements', name: 'Announcements' },
+                         sent: [{ list: 'announcements', count: 120, at: '2026-05-01 14:00:00' }] });
+        }
+        if (options.method === 'PUT') return reply({ bulletin: { ...bulletin, saved: true } });
+        return reply({ bulletin });
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      return fetchMock;
+    }
+
+    test('is only offered to whoever writes the newsletter', async () => {
+      mockEmailApi();
+      render(<WeeklyBulletinView canWrite={false} />);
+      await screen.findByText('May 3, 2026');
+      expect(screen.queryByRole('button', { name: 'Email newsletter' })).toBeNull();
+    });
+
+    test('picks Announcements, says how many can be reached, and who cannot', async () => {
+      mockEmailApi();
+      render(<WeeklyBulletinView canWrite />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Email newsletter' }));
+
+      expect(await screen.findByRole('button', { name: 'Send to 120 people' })).toBeInTheDocument();
+      expect(screen.getByText(/4 on this list have no email address/)).toBeInTheDocument();
+
+      fireEvent.change(screen.getByRole('combobox'), { target: { value: 'elders' } });
+      expect(screen.getByRole('button', { name: 'Send to 3 people' })).toBeInTheDocument();
+    });
+
+    test('saves what is typed first, then sends to the chosen list', async () => {
+      const fetchMock = mockEmailApi();
+      render(<WeeklyBulletinView canWrite />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Email newsletter' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Send to 120 people' }));
+
+      expect(await screen.findByText(/Queued for 120 people on Announcements/)).toBeInTheDocument();
+      const calls = fetchMock.mock.calls.map(([url, o = {}]) => `${o.method || 'GET'} ${url}`);
+      // The week is whichever Sunday it is today; the order is what matters.
+      const put  = calls.findIndex(c => /^PUT \/api\/bulletin\/\d{4}-\d{2}-\d{2}$/.test(c));
+      const post = calls.findIndex(c => /^POST \/api\/bulletin\/\d{4}-\d{2}-\d{2}\/email$/.test(c));
+      expect(put).toBeGreaterThan(-1);
+      expect(post).toBeGreaterThan(put);
+      const [, options] = fetchMock.mock.calls[post];
+      expect(JSON.parse(options.body)).toEqual({ list: 'announcements' });
+    });
+
+    test('warns before sending the same week to the same list twice', async () => {
+      mockEmailApi({ sent: [{ list: 'announcements', count: 118, at: '2026-05-01 14:00:00' }] });
+      render(<WeeklyBulletinView canWrite />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Email newsletter' }));
+
+      expect(await screen.findByText(/This week already went to Announcements \(118\)/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Send again to 120 people' })).toBeInTheDocument();
+    });
+
+    test('a refusal from the server is shown', async () => {
+      mockEmailApi({ sendFails: true });
+      render(<WeeklyBulletinView canWrite />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Email newsletter' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Send to 120 people' }));
+      expect(await screen.findByText('No such mailing list')).toBeInTheDocument();
+    });
   });
 });

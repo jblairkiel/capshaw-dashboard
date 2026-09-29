@@ -94,6 +94,124 @@ function Line({ label, hint, value, onChange, disabled, placeholder }) {
 // so a wrong reminder is fixed on the announcement board and not here. Saying
 // where each one comes from is what stops somebody retyping it.
 
+// ─── Emailing it ──────────────────────────────────────────────────────────────
+//
+// The newsletter goes to one mailing list at a time, the PDF attached. The
+// panel says how many on the list can actually be reached before anybody
+// presses Send, and what this week has already gone to, so a second send to
+// the same list is a decision rather than an accident.
+// The outbox stamps in SQLite's UTC "YYYY-MM-DD HH:MM:SS".
+function sentAt(stamp) {
+  const when = new Date(`${String(stamp).replace(' ', 'T')}Z`);
+  if (Number.isNaN(when.getTime())) return stamp;
+  return when.toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
+function EmailPanel({ sunday, busy, beforeSend, onClose }) {
+  const [lists,   setLists]   = useState(null);
+  const [sent,    setSent]    = useState([]);
+  const [listKey, setListKey] = useState('announcements');
+  const [sending, setSending] = useState(false);
+  const [error,   setError]   = useState('');
+  const [result,  setResult]  = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    Promise.all([call(`${API}/mail-lists`), call(`${API}/${sunday}/emails`)])
+      .then(([l, s]) => {
+        if (!live) return;
+        setLists(l.lists);
+        setSent(s.sent);
+        setListKey(k => (l.lists.some(x => x.key === k) ? k : l.lists[0]?.key || ''));
+      })
+      .catch(e => live && setError(e.message));
+    return () => { live = false; };
+  }, [sunday]);
+
+  const list = lists?.find(l => l.key === listKey);
+  const already = sent.find(s => s.list === listKey);
+
+  async function send() {
+    setSending(true); setError(''); setResult(null);
+    try {
+      await beforeSend();
+      const r = await call(`${API}/${sunday}/email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ list: listKey }),
+      });
+      setResult(r);
+      setSent(r.sent);
+    } catch (e) { setError(e.message); }
+    finally { setSending(false); }
+  }
+
+  return (
+    <div className="mt-3 rounded border border-church-gold/60 bg-church-cream/40 p-3 space-y-2" role="region" aria-label="Email newsletter">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="font-semibold text-church-navy text-sm">Email the newsletter</h3>
+        <button onClick={onClose} className="text-xs text-gray-500 hover:underline">Close</button>
+      </div>
+      <p className="text-xs text-gray-600">
+        Sends what is saved, as a PDF attachment, to everyone on the list. Unsaved changes are saved first.
+      </p>
+
+      {!lists && !error && <p className="text-sm text-gray-500">Loading lists…</p>}
+
+      {lists && (
+        <label className="block text-sm">
+          <span className="text-gray-700">Mailing list</span>
+          <select
+            value={listKey}
+            onChange={e => { setListKey(e.target.value); setResult(null); }}
+            className="mt-1 block w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-church-gold focus:outline-none"
+          >
+            {lists.map(l => (
+              <option key={l.key} value={l.key}>{l.name} ({l.reachable} {l.reachable === 1 ? 'address' : 'addresses'})</option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      {list && list.missing > 0 && (
+        <p className="text-xs text-amber-700">
+          {list.missing} on this list {list.missing === 1 ? 'has' : 'have'} no email address and will not get it.
+        </p>
+      )}
+      {already && !result && (
+        <p className="text-xs text-amber-700">
+          This week already went to {list?.name ?? already.list} ({already.count}) on {sentAt(already.at)}. Sending again sends a second copy.
+        </p>
+      )}
+      {sent.length > 0 && (
+        <p className="text-xs text-gray-500">
+          Sent this week: {sent.map(s => `${lists?.find(l => l.key === s.list)?.name ?? s.list} (${s.count})`).join(', ')}
+        </p>
+      )}
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {result && (
+        <p className="text-sm text-green-700">
+          Queued for {result.queued} {result.queued === 1 ? 'person' : 'people'} on {result.list.name}.
+          {' '}Delivery shows on Church Office → Emails.
+        </p>
+      )}
+
+      {lists && (
+        <button
+          onClick={send}
+          disabled={sending || busy || !list || list.reachable === 0}
+          className="px-3 py-1.5 text-sm rounded bg-church-navy text-white hover:opacity-90 disabled:opacity-50"
+        >
+          {sending ? 'Sending…'
+            : !list || list.reachable === 0 ? 'Nobody on this list has an email address'
+            : `${already ? 'Send again' : 'Send'} to ${list.reachable} ${list.reachable === 1 ? 'person' : 'people'}`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function AutoSection({ title, source, items, empty }) {
   return (
     <div>
@@ -121,6 +239,7 @@ export default function WeeklyBulletinView({ canWrite = false }) {
   const [error,    setError]    = useState('');
   const [busy,     setBusy]     = useState(false);
   const [saved,    setSaved]    = useState(false);
+  const [emailing, setEmailing] = useState(false);
 
   // The composed week, and the typed half pulled back out of it so the form has
   // something to bind to. Reading a week never writes one, so moving around the
@@ -137,8 +256,8 @@ export default function WeeklyBulletinView({ canWrite = false }) {
         ongoing:     b.prayer.ongoing.join('\n'),
         shut_ins:    b.prayer.shutIns.join('\n'),
         pregnancies: b.prayer.pregnancies.join('\n'),
-        evangelists: b.prayer.evangelists.join('\n'),
-        offering:    b.lastWeek.offering,
+        evangelists: (b.prayer.evangelistLines ?? []).join('\n'),
+        offering:    b.lastWeek.offeringTyped ?? b.lastWeek.offering,
         building:    b.lastWeek.building,
         group_notes: Object.fromEntries(
           b.groups.map((g, i) => [g.key ?? `group-${i + 1}`, { leader: g.leader, note: g.note }])
@@ -162,7 +281,7 @@ export default function WeeklyBulletinView({ canWrite = false }) {
     setSaved(false);
   };
 
-  async function save() {
+  async function save({ rethrow = false } = {}) {
     setBusy(true); setError('');
     try {
       const { bulletin: b } = await call(`${API}/${sunday}`, {
@@ -172,7 +291,10 @@ export default function WeeklyBulletinView({ canWrite = false }) {
       });
       setBulletin(b);
       setSaved(true);
-    } catch (e) { setError(e.message); }
+    } catch (e) {
+      setError(e.message);
+      if (rethrow) throw e;
+    }
     finally { setBusy(false); }
   }
 
@@ -203,7 +325,9 @@ export default function WeeklyBulletinView({ canWrite = false }) {
   const lastWeek = [
     bulletin.lastWeek.sunday    != null ? `Sunday attendance: ${bulletin.lastWeek.sunday}`       : null,
     bulletin.lastWeek.wednesday != null ? `Wednesday attendance: ${bulletin.lastWeek.wednesday}` : null,
+    bulletin.lastWeek.offeringFromContributions ? `Offering: ${bulletin.lastWeek.offeringFromContributions}` : null,
   ].filter(Boolean);
+  const offeringOnFile = bulletin.lastWeek.offeringFromContributions;
 
   // Only the filled slots are worth previewing here — the newsletter itself
   // prints a row for every job, blanks included, so the gaps are visible there.
@@ -269,7 +393,7 @@ export default function WeeklyBulletinView({ canWrite = false }) {
         <div className="mt-3 flex flex-wrap gap-2">
           {canWrite && (
             <button
-              onClick={save}
+              onClick={() => save()}
               disabled={busy}
               className="px-3 py-1.5 text-sm rounded bg-church-navy text-white hover:opacity-90 disabled:opacity-50"
             >{busy ? 'Working…' : saved ? 'Saved' : 'Save'}</button>
@@ -284,7 +408,25 @@ export default function WeeklyBulletinView({ canWrite = false }) {
             disabled={busy}
             className="px-3 py-1.5 text-sm rounded border border-church-navy text-church-navy hover:bg-church-cream disabled:opacity-50"
           >Export PDF</button>
+          {canWrite && (
+            <button
+              onClick={() => setEmailing(e => !e)}
+              disabled={busy}
+              aria-expanded={emailing}
+              className="px-3 py-1.5 text-sm rounded border border-church-navy text-church-navy hover:bg-church-cream disabled:opacity-50"
+            >Email newsletter</button>
+          )}
         </div>
+
+        {canWrite && emailing && (
+          <EmailPanel
+            key={sunday}
+            sunday={sunday}
+            busy={busy}
+            beforeSend={() => (saved ? null : save({ rethrow: true }))}
+            onClose={() => setEmailing(false)}
+          />
+        )}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
@@ -318,10 +460,22 @@ export default function WeeklyBulletinView({ canWrite = false }) {
           <div className="card space-y-3">
             <h3 className="font-semibold text-church-navy">Giving</h3>
             <p className="text-xs text-gray-500 -mt-2">
-              The attendance figures come from the Attendance page. These two do not, so they are typed —
-              and the collection is the one thing a new week does not carry forward.
+              Last week&apos;s offering comes from the Contributions page. Building progress is typed here.
             </p>
-            <Line label="Offering"          placeholder="$7,125"         value={draft.offering} disabled={!canWrite} onChange={v => set('offering', v)} />
+            {offeringOnFile ? (
+              <div className="text-sm">
+                <span className="block text-xs font-semibold text-gray-600">Offering</span>
+                <span className="text-church-navy">{offeringOnFile}</span>
+                <span className="text-xs text-gray-400"> — from Contributions. To change it, change it there.</span>
+              </div>
+            ) : (
+              <>
+                <Line label="Offering" placeholder="$7,125" value={draft.offering} disabled={!canWrite} onChange={v => set('offering', v)} />
+                <p className="text-xs text-amber-700 -mt-2">
+                  No total for last week is on the Contributions page yet. Enter it there, or type it here for this newsletter.
+                </p>
+              </>
+            )}
             <Line label="Building progress" placeholder="$87,450 (35%)"  value={draft.building} disabled={!canWrite} onChange={v => set('building', v)} />
           </div>
 
@@ -362,7 +516,7 @@ export default function WeeklyBulletinView({ canWrite = false }) {
 
             <AutoSection title="Reminders"     source="Announcements"           items={bulletin.reminders}
                          empty="Nothing on the announcement board for the next five weeks." />
-            <AutoSection title="Last Week’s Data" source="Attendance"           items={lastWeek}
+            <AutoSection title="Last Week’s Data" source="Attendance & Contributions" items={lastWeek}
                          empty="No attendance recorded for last week yet." />
             <AutoSection title="Anniversaries" source="Birthdays & Anniversaries" items={bulletin.anniversaries}
                          empty="None this week." />

@@ -740,6 +740,14 @@ function initSchema(db) {
     if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 
+  // Files to send with a queued message, as JSON: [{ file, filename, contentType }],
+  // where `file` names a file in the mail-attachments directory (server/lib/paths.js).
+  addColumn('mail_outbox', 'attachments', "TEXT NOT NULL DEFAULT '[]'");
+  // How many came to a group's meeting, written by its leader afterwards. NULL
+  // until then — which is what the Record Keeping report looks for — and 0 is
+  // a real answer.
+  addColumn('group_events', 'head_count', 'INTEGER');
+
   // Which directory person this login belongs to. Set automatically when the
   // sign-in email matches a directory entry, or assigned by an admin.
   addColumn('users', 'directory_id', 'INTEGER REFERENCES directory(id) ON DELETE SET NULL');
@@ -982,6 +990,62 @@ function initSchema(db) {
     (fromRecords.length ? fromRecords : DEFAULT_SERVICE_TYPES)
       .forEach((name, i) => insertServiceType.run(name, i));
   }
+
+  // ─── Record keeping ───────────────────────────────────────────────────────────
+  // Which services the Record Keeping report expects songs and guests for
+  // (server/lib/recordKeeping.js):
+  //   tracking    'weekly'    — every week on `weekday`; missing if nothing is on file
+  //               'when-held' — only in a week that shows it happened (attendance,
+  //                             guests or songs on file for it)
+  //               ''          — not checked at all
+  //   weekday     0 = Sunday … 6 = Saturday; NULL for a service on no fixed day
+  //   song_names  what the song tracker calls the same service ('AM', 'PM', …),
+  //               comma-separated, since it names services its own way.
+  // A guess from each name is made once, when the columns first appear; after
+  // that the settings are the record keeper's to change.
+  const hadTracking = db.prepare('PRAGMA table_info(service_types)').all().some(c => c.name === 'tracking');
+  addColumn('service_types', 'tracking',   "TEXT NOT NULL DEFAULT ''");
+  addColumn('service_types', 'weekday',    'INTEGER');
+  addColumn('service_types', 'song_names', "TEXT NOT NULL DEFAULT ''");
+  if (!hadTracking) {
+    const guess = name => {
+      if (/gospel\s+meeting/i.test(name)) return ['when-held', null, ''];
+      if (/wednesday/i.test(name) && !/singing/i.test(name)) return ['weekly', 3, 'Wednesday'];
+      if (/sunday/i.test(name) && /\b(pm|evening|night)\b/i.test(name)) return ['when-held', 0, 'PM'];
+      if (/sunday/i.test(name) && /\b(am|morning)\b/i.test(name) && /worship/i.test(name)) return ['weekly', 0, 'AM'];
+      return ['', null, ''];
+    };
+    const set = db.prepare('UPDATE service_types SET tracking = ?, weekday = ?, song_names = ? WHERE id = ?');
+    for (const { id, name } of db.prepare('SELECT id, name FROM service_types').all()) set.run(...guess(name), id);
+  }
+
+  // "There was nothing to record" — no guests at a service, no contribution
+  // one Sunday — or "this service did not happen", so the report can tell a
+  // quiet week from a forgotten one. `service` is '' for the contribution,
+  // which belongs to the Sunday rather than to a service.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS record_checkoffs (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      date       TEXT    NOT NULL,
+      service    TEXT    NOT NULL DEFAULT '',
+      check_id   TEXT    NOT NULL,              -- songs | guests | contribution | not-held
+      note       TEXT    NOT NULL DEFAULT '',
+      user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      user_name  TEXT    NOT NULL DEFAULT '',
+      created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (date, service, check_id)
+    );
+  `);
+
+  // When each recurring job last ran, and for which period — so a restart, or
+  // two server processes, do not send Monday's records reminder twice.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS scheduled_jobs (
+      name        TEXT PRIMARY KEY,               -- 'records-reminder'
+      last_key    TEXT NOT NULL DEFAULT '',       -- the period it last ran for, e.g. a week's Sunday
+      last_run_at TEXT
+    );
+  `);
 
   // ─── Seed the distribution groups ─────────────────────────────────────────────
   // Created empty; an admin fills in who is in each from Admin → Email Groups.
