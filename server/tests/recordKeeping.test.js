@@ -124,7 +124,7 @@ describe('what counts as recorded', () => {
     guest('2026-09-27', 'Sunday AM Worship');
     give('2026-09-27');
     const r = keeping.report({ weeks: 1, today: TODAY });
-    expect(r.missing).toEqual({ songs: 1, guests: 1, contribution: 0 });
+    expect(r.missing).toEqual({ songs: 1, guests: 1, contribution: 0, 'head-count': 0 });
     expect(r.totalMissing).toBe(2);
   });
 });
@@ -203,7 +203,7 @@ describe('the API', () => {
       const res = await request(buildApp(user)).get('/api/record-keeping?weeks=3');
       expect(res.status).toBe(200);
       expect(res.body.weeks).toHaveLength(3);
-      expect(res.body.checks.map(c => c.id)).toEqual(['songs', 'guests', 'contribution']);
+      expect(res.body.checks.map(c => c.id)).toEqual(['songs', 'guests', 'contribution', 'head-count']);
     }
   });
 
@@ -234,5 +234,39 @@ describe('the API', () => {
     const bad = await request(buildApp(ADMIN)).put(`/api/record-keeping/services/${gospel.id}`).send({ tracking: 'weekly' });
     expect(bad.status).toBe(400);
     await request(buildApp(ADMIN)).put(`/api/record-keeping/services/${gospel.id}`).send({ tracking: 'when-held', weekday: null, songNames: '' });
+  });
+});
+
+describe('church group meetings', () => {
+  let groupId;
+  const meeting = (date, { status = 'published', headCount = null, title = 'Fellowship meal' } = {}) =>
+    db.prepare('INSERT INTO group_events (group_id, title, event_date, status, head_count) VALUES (?, ?, ?, ?, ?)')
+      .run(groupId, title, date, status, headCount).lastInsertRowid;
+
+  beforeAll(() => {
+    groupId = db.prepare("INSERT INTO church_groups (key, name) VALUES ('group-report', 'North Harvest')").run().lastInsertRowid;
+  });
+  beforeEach(() => db.prepare('DELETE FROM group_events').run());
+
+  test('a posted meeting that has happened needs its head count', () => {
+    const missing = meeting('2026-09-24');
+    meeting('2026-09-27', { headCount: 12, title: 'Singing' });
+    meeting('2026-09-26', { status: 'cancelled' });
+    meeting('2026-09-25', { status: 'draft' });
+    meeting('2026-10-02');  // not yet
+
+    const r = keeping.report({ weeks: 2, today: TODAY });
+    expect(weekOf(r, '2026-09-20').meetings).toEqual([
+      { eventId: missing, groupId, group: 'North Harvest', title: 'Fellowship meal', date: '2026-09-24', cell: { status: 'missing' } },
+    ]);
+    expect(weekOf(r, '2026-09-27').meetings).toEqual([
+      expect.objectContaining({ title: 'Singing', cell: { status: 'recorded', count: 12 } }),
+    ]);
+    expect(r.missing['head-count']).toBe(1);
+  });
+
+  test('has no "nothing to record" sign-off: 0 is a head count, and a meeting that did not happen is cancelled', () => {
+    expect(keeping.addCheckoff({ date: '2026-09-24', check: 'head-count' }, KEEPER, { today: TODAY }).error)
+      .toBe('That is not something the report checks');
   });
 });

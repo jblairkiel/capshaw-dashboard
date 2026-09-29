@@ -28,7 +28,11 @@ const TRACKING_LABEL = { weekly: 'Every week', 'when-held': 'When held', '': 'No
 
 function Cell({ cell, check, onAdd, onNone, onUndo, busy }) {
   if (cell.status === 'recorded') {
-    return <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">✓ Recorded</span>;
+    return (
+      <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+        ✓ {cell.count != null ? `${cell.count} came` : 'Recorded'}
+      </span>
+    );
   }
   if (cell.status === 'none') {
     return (
@@ -44,18 +48,23 @@ function Cell({ cell, check, onAdd, onNone, onUndo, busy }) {
     <span className="inline-flex items-center gap-2 flex-wrap text-xs">
       <span className="px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">Missing</span>
       <button onClick={onAdd} className="text-church-navy hover:underline">Add</button>
-      <button onClick={onNone} disabled={busy} className="text-gray-500 hover:text-church-navy hover:underline disabled:opacity-50">{check.noneLabel}</button>
+      {check.noneLabel && (
+        <button onClick={onNone} disabled={busy} className="text-gray-500 hover:text-church-navy hover:underline disabled:opacity-50">{check.noneLabel}</button>
+      )}
     </span>
   );
 }
 
 // ─── One week ─────────────────────────────────────────────────────────────────
 
-function Week({ week, checks, busy, onGoToPage, onCheckoff, onUndo }) {
+function Week({ week, checks, busy, onGoToPage, onOpenMeeting, onCheckoff, onUndo }) {
   const serviceChecks = checks.filter(c => c.scope === 'service');
   const contribution = checks.find(c => c.id === 'contribution');
+  const headCount = checks.find(c => c.id === 'head-count');
+  const meetings = week.meetings ?? [];
   const gaps = week.rows.reduce((n, r) => n + Object.values(r.cells).filter(c => c.status === 'missing').length, 0)
-    + (week.contribution?.status === 'missing' ? 1 : 0);
+    + (week.contribution?.status === 'missing' ? 1 : 0)
+    + meetings.filter(m => m.cell.status === 'missing').length;
 
   return (
     <section className="card p-0 overflow-hidden" aria-label={`Week of ${day(week.start, { month: 'long', day: 'numeric' })}`}>
@@ -126,6 +135,29 @@ function Week({ week, checks, busy, onGoToPage, onCheckoff, onUndo }) {
                     Didn&apos;t happen
                   </button>
                 )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {headCount && meetings.length > 0 && (
+        <div className="border-t border-gray-100">
+          <p className="px-4 pt-2 pb-1 text-xs text-gray-400 uppercase tracking-wide">Group meetings</p>
+          {meetings.map(m => (
+            <div key={m.eventId} className="grid grid-cols-1 sm:grid-cols-[1.3fr_2fr] gap-x-3 gap-y-1.5 px-4 py-2.5 border-t border-gray-50 items-start">
+              <div>
+                <span className="block text-church-navy text-sm">{m.group}: {m.title}</span>
+                <span className="block text-xs text-gray-400">{day(m.date)}</span>
+              </div>
+              <div className="flex items-center gap-2 sm:block">
+                <span className="sm:hidden text-xs text-gray-400 w-20 shrink-0">{headCount.label}</span>
+                <Cell
+                  cell={m.cell}
+                  check={headCount}
+                  busy={busy}
+                  onAdd={() => onOpenMeeting?.(m)}
+                />
               </div>
             </div>
           ))}
@@ -296,6 +328,10 @@ export default function RecordKeepingView({ onGoToPage }) {
   }
   const checkoff = body => act(() => call(`${API}/checkoffs`, { method: 'POST', body: JSON.stringify(body) }));
   const undo = id => act(() => call(`${API}/checkoffs/${id}`, { method: 'DELETE' }));
+  // Straight to the meeting, the same deep link the group emails use.
+  const openMeeting = m => {
+    window.location.assign(`/?page=groups&group=${Number(m.groupId)}&event=${Number(m.eventId)}`);
+  };
 
   if (error && !data) return <div className="card text-sm text-red-600">{error}</div>;
   if (!data) return <div className="card text-sm text-gray-500">Loading…</div>;
@@ -305,7 +341,7 @@ export default function RecordKeepingView({ onGoToPage }) {
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h2 className="section-heading mb-1">Record Keeping</h2>
-          <p className="text-sm text-gray-500">Songs and guests for every service, and each Sunday&apos;s contribution.</p>
+          <p className="text-sm text-gray-500">Songs and guests for every service, each Sunday&apos;s contribution, and how many came to each group meeting.</p>
         </div>
         <label className="text-sm text-gray-500 flex items-center gap-2">
           Show
@@ -331,7 +367,7 @@ export default function RecordKeepingView({ onGoToPage }) {
       {notice && <div className="card text-sm text-red-600">{notice}</div>}
 
       {data.weeks.map(week => (
-        <Week key={week.start} week={week} checks={data.checks} busy={busy} onGoToPage={onGoToPage} onCheckoff={checkoff} onUndo={undo} />
+        <Week key={week.start} week={week} checks={data.checks} busy={busy} onGoToPage={onGoToPage} onOpenMeeting={openMeeting} onCheckoff={checkoff} onUndo={undo} />
       ))}
 
       <div className="card">

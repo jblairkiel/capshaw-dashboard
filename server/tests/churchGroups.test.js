@@ -344,6 +344,39 @@ describe('a group meeting', () => {
     expect(notifications.listFor(member.id).some(n => n.kind === 'group-event-cancelled')).toBe(true);
   });
 
+  describe('the head count afterwards', () => {
+    async function postedOn(date) {
+      const event = await draftMeeting({ date });
+      await request(buildApp(leader)).post(`/api/groups/${group.id}/events/${event.id}/publish`);
+      return event;
+    }
+    const headCount = (user, event, count) =>
+      request(buildApp(user)).put(`/api/groups/${group.id}/events/${event.id}/head-count`).send({ count });
+
+    test('a leader writes down how many came, and can take it back', async () => {
+      const event = await postedOn('2026-09-20');
+      const res = await headCount(leader, event, 14);
+      expect(res.status).toBe(200);
+      expect(res.body.event.headCount).toBe(14);
+      // Nobody coming is an answer too.
+      expect((await headCount(leader, event, 0)).body.event.headCount).toBe(0);
+      expect((await headCount(leader, event, null)).body.event.headCount).toBeNull();
+
+      const [log] = db.prepare("SELECT * FROM action_log WHERE area = 'church-groups' ORDER BY id DESC LIMIT 1 OFFSET 1").all();
+      expect(log.summary).toBe('Recorded 0 at "Fellowship meal" (North Harvest)');
+    });
+
+    test('only once it has happened, only if it was posted, and only by a leader', async () => {
+      expect((await headCount(leader, await postedOn('2099-01-04'), 5)).body.error).toBe('The meeting has not happened yet');
+      expect((await headCount(leader, await draftMeeting({ date: '2026-09-20' }), 5)).body.error).toMatch(/posted/);
+
+      const event = await postedOn('2026-09-20');
+      expect((await headCount(member, event, 5)).status).toBe(403);
+      expect((await headCount(leader, event, -1)).status).toBe(400);
+      expect((await headCount(leader, event, 2.5)).status).toBe(400);
+    });
+  });
+
   // ─── The invitation ─────────────────────────────────────────────────────────
 
   describe('answering the invitation', () => {

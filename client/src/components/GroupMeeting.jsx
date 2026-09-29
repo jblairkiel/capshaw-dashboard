@@ -317,6 +317,70 @@ function Attendance({ detail }) {
   );
 }
 
+// ─── How many came ────────────────────────────────────────────────────────────
+//
+// Written by a leader once the meeting is over. The Record Keeping report
+// lists a posted meeting without one as not yet recorded.
+
+function localToday() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function HeadCount({ groupId, event, canManage, onChanged }) {
+  const [value, setValue] = useState(event.headCount ?? '');
+  const [busy,  setBusy]  = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => { setValue(event.headCount ?? ''); }, [event.headCount]);
+
+  if (event.status !== 'published' || !event.date || event.date > localToday()) return null;
+  if (!canManage) {
+    return event.headCount == null ? null : (
+      <p className="text-sm text-church-navy"><strong>{event.headCount}</strong> came</p>
+    );
+  }
+
+  async function save(count) {
+    setBusy(true); setError('');
+    try {
+      await call(`/api/groups/${groupId}/events/${event.id}/head-count`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count }),
+      });
+      onChanged();
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+
+  const unchanged = String(value) === String(event.headCount ?? '');
+  return (
+    <div className="space-y-1.5">
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">How many came</p>
+      <form
+        className="flex items-center gap-2 flex-wrap"
+        onSubmit={e => { e.preventDefault(); if (value !== '') save(Number(value)); }}
+      >
+        <input
+          type="number" min="0" step="1" inputMode="numeric"
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          aria-label="How many came"
+          className="w-24 rounded border border-gray-300 px-2 py-1 text-sm focus:border-church-gold focus:outline-none"
+        />
+        <button type="submit" disabled={busy || value === '' || unchanged}
+          className="text-xs px-2.5 py-1 rounded-lg bg-church-navy text-white hover:bg-opacity-90 disabled:opacity-50">
+          Save
+        </button>
+        {event.headCount == null
+          ? <span className="text-xs text-amber-700">Not written down yet</span>
+          : <button type="button" onClick={() => save(null)} disabled={busy} className="text-xs text-gray-400 hover:text-red-600 underline disabled:opacity-50">clear</button>}
+      </form>
+      {error && <p className="text-sm text-red-600">{error}</p>}
+    </div>
+  );
+}
+
 // ─── The card ─────────────────────────────────────────────────────────────────
 
 export function MeetingCard({ groupId, event, canManage, members, onChanged, onEdit, defaultOpen = false }) {
@@ -446,6 +510,7 @@ export function MeetingCard({ groupId, event, canManage, members, onChanged, onE
                 members={members}
                 onChanged={refresh}
               />
+              <HeadCount groupId={groupId} event={shown} canManage={canManage} onChanged={refresh} />
               <Attendance detail={detail} />
               <div>
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Comments</p>

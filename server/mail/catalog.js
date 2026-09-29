@@ -49,6 +49,7 @@ const SAMPLE = {
       { check: 'songs', date: '2026-09-23', service: 'Wednesday Bible Study' },
       { check: 'guests', date: '2026-09-27', service: 'Sunday AM Worship' },
       { check: 'contribution', date: '2026-09-27', service: '' },
+      { check: 'head-count', date: '2026-09-27', service: 'Sample Group: Fellowship meal' },
     ],
   },
   bulletin: {
@@ -164,7 +165,7 @@ const EMAILS = [
   {
     id: 'records-reminder', category: 'reports',
     name: 'Records to fill in',
-    audience: 'Whoever looks after songs, guests or the contribution — each hears only about their own — and whoever holds Reports & Record Keeping',
+    audience: "Whoever looks after songs, guests or the contribution, and each group's leaders for their meetings' head counts — each hears only about their own — plus whoever holds Reports & Record Keeping",
     trigger: 'Monday morning, when the Record Keeping report shows something from the last eight days is not on file. Also sent from that page on request.',
     like: ['records-reminder:%'],
     preview: () => recordsReminder.compose.recordsReminder(SAMPLE.records),

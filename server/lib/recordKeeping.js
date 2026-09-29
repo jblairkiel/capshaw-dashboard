@@ -15,14 +15,18 @@ const db = require('../db');
 const { parseAnyDate } = require('./contributions');
 
 // What is checked. `scope` says what one cell is about: a service on a date,
-// or the Sunday as a whole. A new kind of check — church group meetings, say —
-// is a new entry here with a scope of its own.
+// the Sunday as a whole, or one church group's meeting. A new kind of check is
+// a new entry here with a scope of its own.
+//
+// A group meeting has no "nothing to record": a meeting nobody came to has a
+// head count of 0, and one that did not happen is cancelled on the group page.
 const CHECKS = [
   { id: 'songs',        label: 'Songs',        scope: 'service', area: 'songs',         page: 'songs',         noneLabel: 'No songs to record' },
   { id: 'guests',       label: 'Guests',       scope: 'service', area: 'visitors',      page: 'visitors',      noneLabel: 'No guests' },
   { id: 'contribution', label: 'Contribution', scope: 'sunday',  area: 'contributions', page: 'contributions', noneLabel: 'No contribution taken' },
+  { id: 'head-count',   label: 'Head count',   scope: 'meeting', area: 'church-groups', page: 'groups',        noneLabel: null },
 ];
-const CHECK_IDS = new Set([...CHECKS.map(c => c.id), 'not-held']);
+const CHECK_IDS = new Set([...CHECKS.filter(c => c.noneLabel).map(c => c.id), 'not-held']);
 const TRACKING = ['weekly', 'when-held', ''];
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -112,6 +116,24 @@ function cell({ done, checkoff }) {
   return { status: 'missing' };
 }
 
+// Every posted group meeting in the window. A cancelled one did not happen,
+// and a draft was never called.
+function meetingsIn(from, to) {
+  return db.prepare(`
+    SELECT e.id, e.group_id, e.title, e.event_date, e.head_count, g.name AS group_name
+      FROM group_events e JOIN church_groups g ON g.id = e.group_id
+     WHERE e.status = 'published' AND e.event_date BETWEEN ? AND ?
+     ORDER BY e.event_date, g.sort_order, g.name, e.id
+  `).all(from, to).map(e => ({
+    eventId: e.id,
+    groupId: e.group_id,
+    group:   e.group_name,
+    title:   e.title,
+    date:    e.event_date,
+    cell:    e.head_count === null ? { status: 'missing' } : { status: 'recorded', count: e.head_count },
+  }));
+}
+
 // ─── The report ───────────────────────────────────────────────────────────────
 
 function report({ weeks = 8, today = churchToday() } = {}) {
@@ -119,6 +141,7 @@ function report({ weeks = 8, today = churchToday() } = {}) {
   const from = addDays(thisWeek, -7 * (weeks - 1));
   const files = onFile(from, today);
   const services = trackedServices();
+  const meetings = meetingsIn(from, today);
   const off = (date, service, check) => files.checkoffs.get(`${date}|${lower(service)}|${check}`) || null;
 
   const out = [];
@@ -152,7 +175,11 @@ function report({ weeks = 8, today = churchToday() } = {}) {
       : null;
     if (sunday?.status === 'missing') missing.contribution++;
 
-    out.push({ start, end: addDays(start, 6), rows, contribution: sunday });
+    const end = addDays(start, 6);
+    const held = meetings.filter(m => m.date >= start && m.date <= end);
+    missing['head-count'] += held.filter(m => m.cell.status === 'missing').length;
+
+    out.push({ start, end, rows, contribution: sunday, meetings: held });
   }
 
   return {

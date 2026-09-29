@@ -503,3 +503,39 @@ describe('writing a meeting', () => {
     expect(fetchMock.mock.calls.some(c => c[1]?.method === 'POST' && String(c[0]).endsWith('/events'))).toBe(false);
   });
 });
+
+describe('how many came', () => {
+  const PAST = { ...UPCOMING[0], date: '2026-01-04', headCount: null };
+  const pastDetail = (extra = {}) => ({ success: true, event: { ...EVENT_DETAIL.event, ...PAST, ...extra } });
+  const LEADS = { manages: false, leads: true, belongs: true, myRole: 'leader', canSeeRoll: true };
+
+  test('a leader writes it down once the meeting is over', async () => {
+    const fetchMock = mockApi({ one: detail({ perms: LEADS, events: [PAST] }), event: pastDetail() });
+    render(<GroupsView user={MEMBER} initialGroupId={1} initialEventId={90} />);
+
+    const box = await screen.findByLabelText('How many came');
+    expect(screen.getByText('Not written down yet')).toBeInTheDocument();
+    fireEvent.change(box, { target: { value: '14' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      const put = fetchMock.mock.calls.find(c => String(c[0]).endsWith('/api/groups/1/events/90/head-count'));
+      expect(put[1].method).toBe('PUT');
+      expect(JSON.parse(put[1].body)).toEqual({ count: 14 });
+    });
+  });
+
+  test('the group sees the number, not the box', async () => {
+    mockApi({ one: detail({ events: [PAST] }), event: pastDetail({ headCount: 14 }) });
+    render(<GroupsView user={MEMBER} initialGroupId={1} initialEventId={90} />);
+    expect(await screen.findByText('came')).toBeInTheDocument();
+    expect(screen.queryByLabelText('How many came')).toBeNull();
+  });
+
+  test('is not asked for a meeting still to come', async () => {
+    mockApi({ one: detail({ perms: LEADS }) });
+    render(<GroupsView user={MEMBER} initialGroupId={1} initialEventId={90} />);
+    await screen.findByText('Come and eat.');
+    expect(screen.queryByLabelText('How many came')).toBeNull();
+  });
+});

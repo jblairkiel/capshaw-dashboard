@@ -6,13 +6,14 @@ const CHECKS = [
   { id: 'songs', label: 'Songs', page: 'songs', noneLabel: 'No songs to record', scope: 'service' },
   { id: 'guests', label: 'Guests', page: 'visitors', noneLabel: 'No guests', scope: 'service' },
   { id: 'contribution', label: 'Contribution', page: 'contributions', noneLabel: 'No contribution taken', scope: 'sunday' },
+  { id: 'head-count', label: 'Head count', page: 'groups', noneLabel: null, scope: 'meeting' },
 ];
 
 const REPORT = {
   success: true,
   today: '2026-09-30',
-  totalMissing: 3,
-  missing: { songs: 1, guests: 1, contribution: 1 },
+  totalMissing: 4,
+  missing: { songs: 1, guests: 1, contribution: 1, 'head-count': 1 },
   checks: CHECKS,
   reminder: { lastRun: { last_key: '2026-09-27', last_run_at: '2026-09-28 14:00:00' }, day: 'Monday', hour: 9 },
   weeks: [
@@ -22,6 +23,10 @@ const REPORT = {
       rows: [
         { date: '2026-09-27', service: 'Sunday AM Worship', tracking: 'weekly', cells: { songs: { status: 'recorded' }, guests: { status: 'missing' } } },
         { date: '2026-09-30', service: 'Wednesday Bible Study', tracking: 'weekly', cells: { songs: { status: 'missing' }, guests: { status: 'none', checkoffId: 5, by: 'Record Keeper', note: '' } } },
+      ],
+      meetings: [
+        { eventId: 90, groupId: 3, group: 'North Harvest', title: 'Fellowship meal', date: '2026-09-27', cell: { status: 'missing' } },
+        { eventId: 91, groupId: 4, group: 'Wall Triana', title: 'Singing', date: '2026-09-28', cell: { status: 'recorded', count: 12 } },
       ],
     },
     {
@@ -66,8 +71,8 @@ describe('RecordKeepingView', () => {
     mockApi();
     render(<RecordKeepingView />);
     const summary = await screen.findByText(/in the last 8 weeks/);
-    expect(summary).toHaveTextContent('3 missing in the last 8 weeks — songs 1, guests 1, contribution 1.');
-    expect(within(week('2026-09-27')).getByText('3 missing')).toBeInTheDocument();
+    expect(summary).toHaveTextContent('4 missing in the last 8 weeks — songs 1, guests 1, contribution 1, head count 1.');
+    expect(within(week('2026-09-27')).getByText('4 missing')).toBeInTheDocument();
     expect(within(week('2026-09-20')).getByText('All recorded')).toBeInTheDocument();
   });
 
@@ -83,7 +88,8 @@ describe('RecordKeepingView', () => {
     await screen.findByText(/in the last 8 weeks/);
     const thisWeek = week('2026-09-27');
     expect(within(thisWeek).getByText('✓ Recorded')).toBeInTheDocument();
-    expect(within(thisWeek).getAllByText('Missing')).toHaveLength(3);
+    // Two services' gaps, the contribution, and a group meeting's head count.
+    expect(within(thisWeek).getAllByText('Missing')).toHaveLength(4);
     expect(within(thisWeek).getByText('No guests · Record Keeper')).toBeInTheDocument();
 
     expect(within(week('2026-09-20')).getByText('Did not happen · Office Admin — Snow')).toBeInTheDocument();
@@ -161,5 +167,23 @@ describe('RecordKeepingView', () => {
     render(<RecordKeepingView onGoToPage={() => {}} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Send reminder now' }));
     expect(await screen.findByText('Nothing is missing, so no reminder was sent.')).toBeInTheDocument();
+  });
+
+  test('lists each group meeting with its head count, and Add opens the meeting', async () => {
+    mockApi();
+    const assign = vi.fn();
+    vi.stubGlobal('location', { ...window.location, assign });
+    render(<RecordKeepingView onGoToPage={() => {}} />);
+    const thisWeek = await waitFor(() => week('2026-09-27'));
+
+    expect(within(thisWeek).getByText('Group meetings')).toBeInTheDocument();
+    expect(within(thisWeek).getByText('North Harvest: Fellowship meal')).toBeInTheDocument();
+    expect(within(thisWeek).getByText('✓ 12 came')).toBeInTheDocument();
+    // A meeting has no "nothing to record" — 0 is a head count.
+    const row = within(thisWeek).getByText('North Harvest: Fellowship meal').closest('div.grid');
+    expect(within(row).getAllByRole('button').map(b => b.textContent)).toEqual(['Add']);
+
+    fireEvent.click(within(row).getByRole('button', { name: 'Add' }));
+    expect(assign).toHaveBeenCalledWith('/?page=groups&group=3&event=90');
   });
 });

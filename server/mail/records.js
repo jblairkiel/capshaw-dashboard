@@ -5,14 +5,17 @@
 // whole of last week and the Sunday just gone — and mentions, without
 // listing, any older gaps. Each person hears only about what they look after:
 // the song tracker hears about songs, the guest book about guests, the
-// counters about the contribution. Whoever holds Reports & Record Keeping
-// hears about all of it. A record nobody looks after goes to the admins, so
-// a gap is never mailed to nobody. When nothing is missing, nothing is sent.
+// counters about the contribution, and a group's leaders about their own
+// meetings' head counts (whoever looks after every group, when a group has no
+// leader with an address). Whoever holds Reports & Record Keeping hears about
+// all of it. A record nobody looks after goes to the admins, so a gap is
+// never mailed to nobody. When nothing is missing, nothing is sent.
 
 const db = require('../db');
 const mailer = require('./mailer');
 const { link } = require('./notify');
 const records = require('../lib/recordKeeping');
+const { leadersOf } = require('../lib/churchGroups');
 
 const JOB = 'records-reminder';
 // Monday, at this hour church time — late enough for Sunday's records to have
@@ -37,6 +40,9 @@ function gaps(through) {
       }
     }
     if (week.contribution?.status === 'missing') found.push({ check: 'contribution', date: week.contribution.date, service: '' });
+    for (const m of week.meetings) {
+      if (m.cell.status === 'missing') found.push({ check: 'head-count', date: m.date, service: `${m.group}: ${m.title}`, groupId: m.groupId });
+    }
     // This week and last are listed; anything older is only counted.
     if (i < 2) items.push(...found); else earlier += found.length;
   });
@@ -63,9 +69,18 @@ compose.recordsReminder = ({ items, earlier = 0, from, through }) => {
         '',
       ]),
       ...(earlier ? [`There ${earlier === 1 ? 'is 1 more gap' : `are ${earlier} more gaps`} from earlier weeks on the report.`, ''] : []),
-      'If there was nothing to record — no guests, or no service — mark it on the Record Keeping page and it will stop being reported:',
-      link('record-keeping'),
-      '',
+      // A group leader may have no way into Record Keeping; the meeting itself
+      // is where a head count is written.
+      ...(items.some(i => i.check !== 'head-count') ? [
+        'If there was nothing to record — no guests, or no service — mark it on the Record Keeping page and it will stop being reported:',
+        link('record-keeping'),
+        '',
+      ] : []),
+      ...(items.some(i => i.check === 'head-count') ? [
+        'A head count is written on the meeting itself, under Groups. If a meeting did not happen, cancel it there instead:',
+        link('groups'),
+        '',
+      ] : []),
       'You are getting this because you look after these records.',
     ].join('\n'),
   };
@@ -83,23 +98,30 @@ function admins() {
   return db.prepare("SELECT id, name, email FROM users WHERE role = 'admin' AND email IS NOT NULL AND email <> ''").all();
 }
 
-// Who hears about which records: email → { person, checks }.
-function recipients(checkIds) {
+// The people a gap is theirs to fill, before anybody is added for cover.
+function responsibleFor(item) {
+  if (item.check !== 'head-count') return holdersOf(records.CHECKS.find(c => c.id === item.check).area);
+  const leaders = leadersOf(item.groupId).filter(l => l.email).map(l => ({ name: l.name, email: l.email }));
+  return leaders.length ? leaders : holdersOf('church-groups');
+}
+
+// Who hears about which gaps: [{ person, items }], one entry per address.
+function recipients(items) {
   const out = new Map();
-  const give = (person, ids) => {
+  const give = (person, item) => {
     const key = person.email.trim().toLowerCase();
-    if (!out.has(key)) out.set(key, { person, checks: new Set() });
-    ids.forEach(id => out.get(key).checks.add(id));
+    if (!out.has(key)) out.set(key, { person, items: [] });
+    const mine = out.get(key).items;
+    if (!mine.includes(item)) mine.push(item);
   };
 
   const overseers = holdersOf('records');
-  overseers.forEach(p => give(p, checkIds));
-
-  for (const id of checkIds) {
-    const check = records.CHECKS.find(c => c.id === id);
-    const holders = holdersOf(check.area);
-    holders.forEach(p => give(p, [id]));
-    if (!holders.length && !overseers.length) admins().forEach(p => give(p, [id]));
+  const everyAdmin = overseers.length ? [] : admins();
+  for (const item of items) {
+    overseers.forEach(p => give(p, item));
+    const responsible = responsibleFor(item);
+    responsible.forEach(p => give(p, item));
+    if (!responsible.length) everyAdmin.forEach(p => give(p, item));
   }
   return [...out.values()];
 }
@@ -111,11 +133,8 @@ function sendReminder({ today = records.churchToday() } = {}) {
   const found = gaps(through);
   if (!found.items.length) return { missing: 0, earlier: found.earlier, sent: [] };
 
-  const checkIds = [...new Set(found.items.map(i => i.check))];
   const sent = [];
-  for (const { person, checks } of recipients(checkIds)) {
-    const mine = found.items.filter(i => checks.has(i.check));
-    if (!mine.length) continue;
+  for (const { person, items: mine } of recipients(found.items)) {
     const queued = mailer.send({
       to: [{ email: person.email, name: person.name }],
       ...compose.recordsReminder({ ...found, items: mine }),

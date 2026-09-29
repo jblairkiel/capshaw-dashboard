@@ -82,7 +82,8 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-  for (const t of ['service_songs', 'song_services', 'songs', 'visitor_visits', 'visitors', 'attendance', 'contributions', 'record_checkoffs', 'mail_outbox', 'scheduled_jobs', 'action_log']) {
+  for (const t of ['service_songs', 'song_services', 'songs', 'visitor_visits', 'visitors', 'attendance', 'contributions', 'record_checkoffs', 'mail_outbox', 'scheduled_jobs', 'action_log',
+                   'group_events', 'church_group_members', 'church_groups', 'directory']) {
     db.prepare(`DELETE FROM ${t}`).run();
   }
   setAreas(Object.fromEntries(PEOPLE.map(p => [p.id, p.areas])));
@@ -155,6 +156,33 @@ describe('who hears about what', () => {
     removeGuests('2026-09-27');
     reminder.sendReminder({ today: MONDAY });
     expect(Object.keys(outbox())).toEqual([emailOf(1)]);
+  });
+
+  test("a meeting's head count goes to that group's leaders, or to whoever looks after every group", () => {
+    const person = (name, email) => db.prepare('INSERT INTO directory (name, email) VALUES (?, ?)').run(name, email).lastInsertRowid;
+    const group = name => db.prepare('INSERT INTO church_groups (key, name) VALUES (?, ?)').run(name.toLowerCase().replace(/\W/g, '-'), name).lastInsertRowid;
+    const north = group('North Harvest');
+    const south = group('South Harvest');
+    db.prepare("INSERT INTO church_group_members (group_id, directory_id, role) VALUES (?, ?, 'leader')").run(north, person('Lee Leader', 'lee@example.invalid'));
+    db.prepare("INSERT INTO church_group_members (group_id, directory_id, role) VALUES (?, ?, 'member')").run(north, person('Jo Member', 'jo@example.invalid'));
+    db.prepare("INSERT INTO user_areas (user_id, area) VALUES (4, 'church-groups')").run();
+    const meeting = (groupId, title) => db.prepare("INSERT INTO group_events (group_id, title, event_date, status) VALUES (?, ?, '2026-09-24', 'published')").run(groupId, title);
+    meeting(north, 'Fellowship meal');
+    meeting(south, 'Singing');
+
+    reminder.sendReminder({ today: MONDAY });
+    const mail = outbox();
+    expect(mail['lee@example.invalid'].body).toContain('Head count:\n  • Thu, Sep 24 — North Harvest: Fellowship meal\n');
+    expect(mail['lee@example.invalid'].body).not.toContain('South Harvest');
+    // A group leader may have no way into Record Keeping, so is pointed at the meeting.
+    expect(mail['lee@example.invalid'].body).toContain('?page=groups');
+    expect(mail['lee@example.invalid'].body).not.toContain('?page=record-keeping');
+    expect(mail['jo@example.invalid']).toBeUndefined();
+    // South Harvest has no leader: whoever looks after every group hears.
+    expect(mail[emailOf(4)].body).toContain('South Harvest: Singing');
+    expect(mail[emailOf(4)].body).not.toContain('North Harvest');
+    expect(mail[emailOf(5)].body).toContain('North Harvest: Fellowship meal');
+    expect(mail[emailOf(5)].body).toContain('South Harvest: Singing');
   });
 
   test('nothing is sent when nothing is missing', () => {

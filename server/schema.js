@@ -743,6 +743,10 @@ function initSchema(db) {
   // Files to send with a queued message, as JSON: [{ file, filename, contentType }],
   // where `file` names a file in the mail-attachments directory (server/lib/paths.js).
   addColumn('mail_outbox', 'attachments', "TEXT NOT NULL DEFAULT '[]'");
+  // How many came to a group's meeting, written by its leader afterwards. NULL
+  // until then — which is what the Record Keeping report looks for — and 0 is
+  // a real answer.
+  addColumn('group_events', 'head_count', 'INTEGER');
 
   // Which directory person this login belongs to. Set automatically when the
   // sign-in email matches a directory entry, or assigned by an admin.
