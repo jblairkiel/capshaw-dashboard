@@ -138,7 +138,7 @@ export default function WeeklyBulletinView({ canWrite = false }) {
         shut_ins:    b.prayer.shutIns.join('\n'),
         pregnancies: b.prayer.pregnancies.join('\n'),
         evangelists: b.prayer.evangelists.join('\n'),
-        offering:    b.lastWeek.offering,
+        offering:    b.lastWeek.offeringTyped ?? b.lastWeek.offering,
         building:    b.lastWeek.building,
         group_notes: Object.fromEntries(
           b.groups.map((g, i) => [g.key ?? `group-${i + 1}`, { leader: g.leader, note: g.note }])
@@ -203,7 +203,9 @@ export default function WeeklyBulletinView({ canWrite = false }) {
   const lastWeek = [
     bulletin.lastWeek.sunday    != null ? `Sunday attendance: ${bulletin.lastWeek.sunday}`       : null,
     bulletin.lastWeek.wednesday != null ? `Wednesday attendance: ${bulletin.lastWeek.wednesday}` : null,
+    bulletin.lastWeek.offeringFromContributions ? `Offering: ${bulletin.lastWeek.offeringFromContributions}` : null,
   ].filter(Boolean);
+  const offeringOnFile = bulletin.lastWeek.offeringFromContributions;
 
   // Only the filled slots are worth previewing here — the newsletter itself
   // prints a row for every job, blanks included, so the gaps are visible there.
@@ -318,10 +320,22 @@ export default function WeeklyBulletinView({ canWrite = false }) {
           <div className="card space-y-3">
             <h3 className="font-semibold text-church-navy">Giving</h3>
             <p className="text-xs text-gray-500 -mt-2">
-              The attendance figures come from the Attendance page. These two do not, so they are typed —
-              and the collection is the one thing a new week does not carry forward.
+              Last week&apos;s offering comes from the Contributions page. Building progress is typed here.
             </p>
-            <Line label="Offering"          placeholder="$7,125"         value={draft.offering} disabled={!canWrite} onChange={v => set('offering', v)} />
+            {offeringOnFile ? (
+              <div className="text-sm">
+                <span className="block text-xs font-semibold text-gray-600">Offering</span>
+                <span className="text-church-navy">{offeringOnFile}</span>
+                <span className="text-xs text-gray-400"> — from Contributions. To change it, change it there.</span>
+              </div>
+            ) : (
+              <>
+                <Line label="Offering" placeholder="$7,125" value={draft.offering} disabled={!canWrite} onChange={v => set('offering', v)} />
+                <p className="text-xs text-amber-700 -mt-2">
+                  No total for last week is on the Contributions page yet. Enter it there, or type it here for this newsletter.
+                </p>
+              </>
+            )}
             <Line label="Building progress" placeholder="$87,450 (35%)"  value={draft.building} disabled={!canWrite} onChange={v => set('building', v)} />
           </div>
 
@@ -362,7 +376,7 @@ export default function WeeklyBulletinView({ canWrite = false }) {
 
             <AutoSection title="Reminders"     source="Announcements"           items={bulletin.reminders}
                          empty="Nothing on the announcement board for the next five weeks." />
-            <AutoSection title="Last Week’s Data" source="Attendance"           items={lastWeek}
+            <AutoSection title="Last Week’s Data" source="Attendance & Contributions" items={lastWeek}
                          empty="No attendance recorded for last week yet." />
             <AutoSection title="Anniversaries" source="Birthdays & Anniversaries" items={bulletin.anniversaries}
                          empty="None this week." />

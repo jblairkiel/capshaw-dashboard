@@ -30,7 +30,7 @@ function buildApp(user = null) {
 const SUNDAY = '2026-05-03';
 
 beforeEach(() => {
-  for (const t of ['bulletin_issues', 'announcements', 'anniversaries', 'attendance', 'elders', 'deacons', 'action_log', 'users']) {
+  for (const t of ['bulletin_issues', 'announcements', 'anniversaries', 'attendance', 'contributions', 'elders', 'deacons', 'action_log', 'users']) {
     db.prepare(`DELETE FROM "${t}"`).run();
   }
   // action_log.user_id is a foreign key into users, so an entry is only written
@@ -90,6 +90,23 @@ describe('the typed half, week to week', () => {
 });
 
 describe('composing the two halves', () => {
+  test('last week’s offering comes from the Contributions page when a total is on file', () => {
+    issues.save(SUNDAY, { offering: '$7,125' });
+    // The newsletter for May 3 reports the week of April 26 — a correction
+    // entered on the Tuesday is part of that week's total.
+    db.prepare('INSERT INTO contributions (date, amount) VALUES (?, ?)').run('2026-04-26', 6200);
+    db.prepare('INSERT INTO contributions (date, amount) VALUES (?, ?)').run('2026-04-28', 10.5);
+    db.prepare('INSERT INTO contributions (date, amount) VALUES (?, ?)').run('2026-05-03', 9999);
+
+    const b = issues.compose(SUNDAY);
+    expect(b.lastWeek).toMatchObject({ offering: '$6,210.50', offeringTyped: '$7,125', offeringFromContributions: '$6,210.50' });
+  });
+
+  test('a whole-dollar total prints without cents', () => {
+    db.prepare('INSERT INTO contributions (date, amount) VALUES (?, ?)').run('2026-04-26', 6577);
+    expect(issues.compose(SUNDAY).lastWeek.offering).toBe('$6,577');
+  });
+
   test('the queried sections and the typed ones arrive together', () => {
     db.prepare('INSERT INTO announcements (title,event_date,active) VALUES (?,?,1)').run('Potluck', '2026-05-10');
     db.prepare('INSERT INTO attendance (date,service,count) VALUES (?,?,?)').run('04/26/26', 'Sunday AM Worship', 250);
@@ -106,7 +123,7 @@ describe('composing the two halves', () => {
     expect(b.quoteRef).toBe('Gal. 6:9');
     expect(b.reminders).toContain('Potluck May 10');
     expect(b.prayer.ongoing).toEqual(['Dean Coffield']);
-    expect(b.lastWeek).toMatchObject({ sunday: 250, offering: '$7,125' });
+    expect(b.lastWeek).toMatchObject({ sunday: 250, offering: '$7,125', offeringTyped: '$7,125', offeringFromContributions: null });
     // The leadership reads as a running paragraph with the names in bold.
     expect(b.leadership.elders).toEqual([{ text: 'Barry Britnell', bold: true }]);
     expect(b.groups[0]).toMatchObject({ name: 'Group 1', leader: 'Hunter Reece', note: 'Meeting May 17' });

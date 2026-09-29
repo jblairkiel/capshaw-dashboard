@@ -122,6 +122,26 @@ describe('the weekly newsletter screen', () => {
     });
   });
 
+  test('when Contributions has last week’s total, the offering comes from there and is not typed', async () => {
+    mockApi(bulletinFor({
+      lastWeek: { sunday: 250, wednesday: 190, offering: '$6,210', offeringTyped: '$7,125', offeringFromContributions: '$6,210', building: '' },
+    }));
+    render(<WeeklyBulletinView canWrite />);
+    await screen.findByText('May 3, 2026');
+
+    expect(screen.getByText('• Offering: $6,210')).toBeInTheDocument();
+    expect(screen.getByText(/from Contributions\. To change it, change it there/)).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText('$7,125')).not.toBeInTheDocument();
+  });
+
+  test('without a total on file, the offering is typed and says where it could come from', async () => {
+    mockApi();
+    render(<WeeklyBulletinView canWrite />);
+    await screen.findByText('May 3, 2026');
+    expect(screen.getByPlaceholderText('$7,125')).toHaveValue('$7,125');
+    expect(screen.getByText(/No total for last week is on the Contributions page yet/)).toBeInTheDocument();
+  });
+
   test('moving weeks asks for the Sunday of whatever day is picked', async () => {
     const fetchMock = mockApi();
     render(<WeeklyBulletinView canWrite />);

@@ -195,6 +195,25 @@ function attendanceFor(sunday) {
   };
 }
 
+// The week's total from the Contributions page. The newsletter reports the
+// same week as its attendance — last Sunday through Saturday — and a week
+// with more than one entry (a correction, a late deposit) is added up. Null,
+// not zero, when nothing is on file, so the typed figure can stand in.
+function contributionFor(sunday) {
+  const end = addDays(sunday, 6);
+  const rows = db.prepare('SELECT date, amount FROM contributions').all()
+    .map(r => ({ date: toIsoDate(r.date), amount: Number(r.amount) || 0 }))
+    .filter(r => withinWeek(r.date, sunday, end));
+  return rows.length ? rows.reduce((total, r) => total + r.amount, 0) : null;
+}
+
+// '$6,577', or '$6,577.50' when there are cents — how the newsletter has
+// always printed the offering.
+function money(amount) {
+  const cents = Math.round(amount * 100) % 100 !== 0;
+  return `$${amount.toLocaleString('en-US', { minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: 2 })}`;
+}
+
 // Birthdays and anniversaries recur, so these rows carry no year — the week is
 // matched on month and day alone. A week that crosses a month boundary is why
 // this walks the seven days rather than comparing a range.
@@ -376,6 +395,7 @@ function gather({ sunday } = {}) {
     lastWeek: {
       sunday:     previous,
       attendance: attendanceFor(previous),
+      contribution: contributionFor(previous),
     },
 
     dutyRoster:    dutyRoster(start),
@@ -388,6 +408,7 @@ function gather({ sunday } = {}) {
 
 module.exports = {
   gather,
+  money,
   dutyRoster,
   // Exported for the tests, and because the date reading is the part most
   // likely to need adjusting when another table changes format.

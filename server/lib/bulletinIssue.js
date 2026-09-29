@@ -207,6 +207,7 @@ function compose(sunday) {
   const { issue, saved, carriedFrom } = draftFor(auto.sunday);
 
   const attendance = auto.lastWeek.attendance;
+  const contribution = auto.lastWeek.contribution;
 
   return {
     sunday:      auto.sunday,
@@ -230,10 +231,15 @@ function compose(sunday) {
       evangelists: nameParagraph(lines(issue.evangelists), { separator: '; ', joiner: ' \u2013 ' }),
     },
 
+    // The offering is last week's total from the Contributions page when one
+    // is on file; the figure typed on the newsletter is only a stand-in for a
+    // week nobody has entered yet. Both are sent so the form can say which.
     lastWeek: {
       sunday:    attendance.sunday    ? attendance.sunday.count    : null,
       wednesday: attendance.wednesday ? attendance.wednesday.count : null,
-      offering:  issue.offering,
+      offering:  contribution !== null ? data.money(contribution) : issue.offering,
+      offeringTyped: issue.offering,
+      offeringFromContributions: contribution !== null ? data.money(contribution) : null,
       building:  issue.building,
     },
 
