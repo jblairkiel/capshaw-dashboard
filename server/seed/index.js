@@ -54,6 +54,7 @@ const BY_ID      = new Map(GENERATORS.map(g => [g.id, g]));
 
 const NOT_FILLED = {
   users:      'Accounts. Made-up sign-ins are not sample data, they are a way in.',
+  record_checkoffs: 'Somebody saying a service had nothing to record. Made-up ones would hide the gaps the report exists to show.',
   user_areas: 'Who may do what, which follows from the accounts.',
   action_log: 'Append-only, and the record of what really happened. Filling it would be a lie about the past, and removing a batch would tear pages out of it.',
   mail_outbox: 'Mail waiting to be sent. Anything put here is liable to actually go out.',

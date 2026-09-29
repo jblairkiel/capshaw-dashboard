@@ -14,7 +14,7 @@ const TABLES = {
     area:      'attendance',
     writeRole: 'admin',
     entity:    'service type',
-    columns:   ['id', 'name', 'sort_order', 'active', 'created_at'],
+    columns:   ['id', 'name', 'sort_order', 'active', 'tracking', 'weekday', 'song_names', 'created_at'],
     writable:  ['name', 'sort_order', 'active'],
     search:    'name',
     order:     'sort_order ASC, name ASC',

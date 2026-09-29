@@ -21,6 +21,7 @@ const profileRoutes              = require('./routes/profile');
 const workflowRoutes             = require('./routes/workflows');
 const mailRoutes                 = require('./routes/mailGroups');
 const emailRoutes                = require('./routes/emails');
+const recordKeepingRoutes        = require('./routes/recordKeeping');
 const livestreamRoutes           = require('./routes/livestreams');
 const adminRoutes                = require('./routes/admin');
 const recordRoutes               = require('./routes/records');
@@ -132,6 +133,7 @@ function createApp() {
   app.use('/api/workflows',       workflowRoutes);
   app.use('/api/mail',            mailRoutes);
   app.use('/api/emails',          emailRoutes);
+  app.use('/api/record-keeping',  recordKeepingRoutes);
   app.use('/api/livestreams',     livestreamRoutes);
   app.use('/api/records',         recordRoutes);
   app.use('/api/serving',         servingRoutes);
