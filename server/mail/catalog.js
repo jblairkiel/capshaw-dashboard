@@ -11,6 +11,7 @@
 const notify = require('./notify');
 const accounts = require('./accounts');
 const newsletter = require('./newsletter');
+const recordsReminder = require('./records');
 
 const CATEGORIES = [
   { id: 'notifications', label: 'Notifications', description: 'Messages to one person about their own account or something waiting on them.' },
@@ -41,6 +42,14 @@ const SAMPLE = {
   event: {
     id: 12, title: 'Fellowship meal', date: '2026-10-02', time: '18:30', location: 'The fellowship hall',
     hostName: 'Sample Member', description: 'Bring a dish to share.', rsvpEnabled: true, signupEnabled: true, signupTitle: 'What to bring',
+  },
+  records: {
+    from: '2026-09-20', through: '2026-09-27', earlier: 2,
+    items: [
+      { check: 'songs', date: '2026-09-23', service: 'Wednesday Bible Study' },
+      { check: 'guests', date: '2026-09-27', service: 'Sunday AM Worship' },
+      { check: 'contribution', date: '2026-09-27', service: '' },
+    ],
   },
   bulletin: {
     sunday: '2026-10-04', masthead: 'Capshaw Church of Christ', sundayLabel: 'Sunday, October 4, 2026',
@@ -151,6 +160,14 @@ const EMAILS = [
     trigger: 'The Monthly Worship Schedule is published.',
     like: ['workflow:%:monthly-report'],
     preview: () => notify.compose.monthlyReport({ draft: SAMPLE.draft }),
+  },
+  {
+    id: 'records-reminder', category: 'reports',
+    name: 'Records to fill in',
+    audience: 'Whoever looks after songs, guests or the contribution — each hears only about their own — and whoever holds Reports & Record Keeping',
+    trigger: 'Monday morning, when the Record Keeping report shows something from the last eight days is not on file. Also sent from that page on request.',
+    like: ['records-reminder:%'],
+    preview: () => recordsReminder.compose.recordsReminder(SAMPLE.records),
   },
 ];
 

@@ -320,7 +320,7 @@ function groupEventChanged({ group, event, attendees = [], what = '' }) {
 }
 
 module.exports = {
-  compose,
+  compose, link,
   taskAssigned, workflowCompleted, recipientsForTask, schedulePublished, monthlyReport,
   groupEventPublished, groupEventCancelled, groupEventChanged,
 };

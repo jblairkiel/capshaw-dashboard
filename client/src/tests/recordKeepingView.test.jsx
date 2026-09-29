@@ -14,6 +14,7 @@ const REPORT = {
   totalMissing: 3,
   missing: { songs: 1, guests: 1, contribution: 1 },
   checks: CHECKS,
+  reminder: { lastRun: { last_key: '2026-09-27', last_run_at: '2026-09-28 14:00:00' }, day: 'Monday', hour: 9 },
   weeks: [
     {
       start: '2026-09-27', end: '2026-10-03',
@@ -42,11 +43,14 @@ const SERVICES = {
   ],
 };
 
+let remindReply = { success: true, missing: 3, earlier: 0, sent: [{ name: 'Song Keeper', items: 1 }, { name: 'Record Keeper', items: 3 }] };
+
 function mockApi(report = REPORT) {
   const fetchMock = vi.fn((url, options) => {
     let body = report;
     if (url.includes('/services')) body = options?.method === 'PUT' ? { success: true, service: {} } : SERVICES;
     else if (url.includes('/checkoffs')) body = { success: true };
+    else if (url.includes('/remind')) body = remindReply;
     return Promise.resolve({ json: () => Promise.resolve(body) });
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -138,5 +142,24 @@ describe('RecordKeepingView', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/record-keeping/services/2', expect.objectContaining({
       method: 'PUT', body: JSON.stringify({ tracking: 'weekly', weekday: 0, songNames: 'PM' }),
     })));
+  });
+
+  test('says when the reminder goes out, and sends it on request', async () => {
+    const fetchMock = mockApi();
+    render(<RecordKeepingView onGoToPage={() => {}} />);
+    expect(await screen.findByText(/Every Monday at 9:00 AM/)).toBeInTheDocument();
+    expect(screen.getByText(/Last checked for the week of/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send reminder now' }));
+    expect(await screen.findByText('Sent to 2 people: Song Keeper, Record Keeper.')).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith('/api/record-keeping/remind', expect.objectContaining({ method: 'POST' }));
+  });
+
+  test('says so when there was nothing to remind anybody about', async () => {
+    remindReply = { success: true, missing: 0, earlier: 0, sent: [] };
+    mockApi();
+    render(<RecordKeepingView onGoToPage={() => {}} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Send reminder now' }));
+    expect(await screen.findByText('Nothing is missing, so no reminder was sent.')).toBeInTheDocument();
   });
 });

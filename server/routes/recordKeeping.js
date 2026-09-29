@@ -3,6 +3,7 @@ const router  = express.Router();
 const keeping = require('../lib/recordKeeping');
 const { requireArea } = require('../middleware/auth');
 const actionLog = require('../lib/actionLog');
+const reminder = require('../mail/records');
 
 // ─── Record Keeping ───────────────────────────────────────────────────────────
 //
@@ -16,7 +17,27 @@ router.use(requireArea('records'));
 
 router.get('/', (req, res) => {
   const weeks = Math.min(26, Math.max(1, Number.parseInt(req.query.weeks, 10) || 8));
-  res.json({ success: true, ...keeping.report({ weeks }) });
+  res.json({
+    success: true,
+    ...keeping.report({ weeks }),
+    reminder: { lastRun: reminder.lastRun(), day: keeping.WEEKDAYS[reminder.SEND_DAY], hour: reminder.SEND_HOUR },
+  });
+});
+
+// ─── POST /api/record-keeping/remind ──────────────────────────────────────────
+// Send the weekly reminder now, rather than waiting for Monday.
+
+router.post('/remind', (req, res) => {
+  const result = reminder.sendReminder();
+  const people = result.sent.length;
+  actionLog.record(req.user, {
+    area: 'records', action: 'other', entity: 'records reminder', entityId: '',
+    summary: result.missing
+      ? `Sent the records reminder (${result.missing} missing) to ${people} ${people === 1 ? 'person' : 'people'}`
+      : 'Asked for the records reminder; nothing was missing, so none was sent',
+    details: result,
+  });
+  res.json({ success: true, ...result });
 });
 
 // ─── POST /api/record-keeping/checkoffs ───────────────────────────────────────

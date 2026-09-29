@@ -1033,6 +1033,16 @@ function initSchema(db) {
     );
   `);
 
+  // When each recurring job last ran, and for which period — so a restart, or
+  // two server processes, do not send Monday's records reminder twice.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS scheduled_jobs (
+      name        TEXT PRIMARY KEY,               -- 'records-reminder'
+      last_key    TEXT NOT NULL DEFAULT '',       -- the period it last ran for, e.g. a week's Sunday
+      last_run_at TEXT
+    );
+  `);
+
   // ─── Seed the distribution groups ─────────────────────────────────────────────
   // Created empty; an admin fills in who is in each from Admin → Email Groups.
 

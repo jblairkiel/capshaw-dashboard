@@ -9,6 +9,7 @@ const app = createApp();
 
 const SCRAPE_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 const MAIL_SWEEP_MS     = 5 * 60 * 1000;      // 5 minutes
+const REMINDER_TICK_MS  = 15 * 60 * 1000;     // 15 minutes
 
 const { validateDefinitions } = require('./workflows/definitions');
 for (const problem of validateDefinitions()) console.error('[workflows] definition problem:', problem);
@@ -35,4 +36,17 @@ app.listen(PORT, () => {
   setInterval(() => {
     mailer.drainOutbox().catch(err => console.error('[mail] sweep failed:', err.message));
   }, MAIL_SWEEP_MS);
+
+  // The Monday records reminder. It keeps its own note of which week it last
+  // sent for, so ticking often — and once on start, in case the server was
+  // down on Monday — never sends it twice.
+  const recordsReminder = require('./mail/records');
+  const remind = () => {
+    try {
+      const result = recordsReminder.tick();
+      if (result) console.log(`[records] reminder: ${result.missing} missing, sent to ${result.sent.length}`);
+    } catch (err) { console.error('[records] reminder failed:', err.message); }
+  };
+  remind();
+  setInterval(remind, REMINDER_TICK_MS);
 });

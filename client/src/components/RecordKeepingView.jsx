@@ -235,6 +235,48 @@ function Settings({ onChanged }) {
 
 // ─── The page ─────────────────────────────────────────────────────────────────
 
+// ─── The weekly reminder ──────────────────────────────────────────────────────
+
+const clock = hour => `${hour % 12 || 12}:00 ${hour < 12 ? 'AM' : 'PM'}`;
+
+function Reminder({ reminder }) {
+  const [busy, setBusy]     = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError]   = useState('');
+
+  async function send() {
+    setBusy(true); setError(''); setResult(null);
+    try { setResult(await call(`${API}/remind`, { method: 'POST' })); }
+    catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  }
+
+  const last = reminder.lastRun?.last_key;
+  return (
+    <div className="card flex flex-col sm:flex-row sm:items-center gap-3">
+      <div className="text-sm text-gray-600 flex-1">
+        <p>
+          Every {reminder.day} at {clock(reminder.hour)}, whoever looks after songs, guests and the contribution is
+          emailed what is still missing from the last eight days — each only their own. Nothing is sent when nothing is missing.
+        </p>
+        {last && <p className="text-xs text-gray-500 mt-1">Last checked for the week of {day(last, { month: 'long', day: 'numeric' })}.</p>}
+        {result && (
+          <p className="text-sm mt-1 text-emerald-700">
+            {result.missing === 0
+              ? 'Nothing is missing, so no reminder was sent.'
+              : `Sent to ${result.sent.length} ${result.sent.length === 1 ? 'person' : 'people'}: ${result.sent.map(p => p.name).join(', ') || 'nobody has an email address on file'}.`}
+          </p>
+        )}
+        {error && <p className="text-sm mt-1 text-red-600">{error}</p>}
+      </div>
+      <button onClick={send} disabled={busy}
+        className="shrink-0 px-3 py-1.5 text-sm rounded border border-church-navy text-church-navy hover:bg-church-cream disabled:opacity-50">
+        {busy ? 'Sending…' : 'Send reminder now'}
+      </button>
+    </div>
+  );
+}
+
 export default function RecordKeepingView({ onGoToPage }) {
   const [weeks, setWeeks]   = useState(8);
   const [data, setData]     = useState(null);
@@ -283,6 +325,8 @@ export default function RecordKeepingView({ onGoToPage }) {
           <p className="text-sm text-emerald-800">Everything is recorded for the last {weeks} weeks.</p>
         )}
       </div>
+
+      {data.reminder && <Reminder reminder={data.reminder} />}
 
       {notice && <div className="card text-sm text-red-600">{notice}</div>}
 

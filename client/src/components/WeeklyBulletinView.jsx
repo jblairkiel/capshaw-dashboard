@@ -167,7 +167,7 @@ function EmailPanel({ sunday, busy, beforeSend, onClose }) {
             className="mt-1 block w-full rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-church-gold focus:outline-none"
           >
             {lists.map(l => (
-              <option key={l.key} value={l.key}>{l.name} ({l.reachable} with an email address)</option>
+              <option key={l.key} value={l.key}>{l.name} ({l.reachable} {l.reachable === 1 ? 'address' : 'addresses'})</option>
             ))}
           </select>
         </label>
