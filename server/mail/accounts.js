@@ -28,10 +28,16 @@ const SIGNATURE = [
   '8941 Wall Triana Hwy · Harvest, AL',
 ].join('\n');
 
-// ─── To the person registering ────────────────────────────────────────────────
+// ─── What each email says ─────────────────────────────────────────────────────
+//
+// The wording, apart from who it goes to — so the Emails page can show each
+// one with sample data (server/mail/catalog.js) without sending anything.
 
-function confirmAddress({ name, email, token }) {
-  const body = [
+const compose = {};
+
+compose.confirmAddress = ({ name, token }) => ({
+  subject: 'Confirm your email for the Capshaw member portal',
+  body: [
     `Hello ${name || 'there'},`,
     '',
     'Somebody — we hope it was you — asked for a Capshaw Church of Christ',
@@ -53,20 +59,10 @@ function confirmAddress({ name, email, token }) {
     'anybody can use, and no one can sign in with this address unless they can',
     'read this mailbox.',
     SIGNATURE,
-  ].join('\n');
+  ].join('\n'),
+});
 
-  return mailer.send({
-    to: [{ email, name: name || '' }],
-    subject: 'Confirm your email for the Capshaw member portal',
-    body,
-    context: 'account:verify',
-  });
-}
-
-// Sent instead of a second account when somebody registers with an address
-// that already has one. It means the reply to "register" can be identical
-// either way, so the form cannot be used to find out who is a member here.
-function addressAlreadyRegistered({ email, name, provider }) {
+compose.addressAlreadyRegistered = ({ name, provider }) => {
   const howTheySignIn = provider === 'google'
     ? 'You already have an account here, and it signs in with Google. Use the\n"Sign in with Google" button rather than a password.'
     : provider === 'facebook'
@@ -89,11 +85,71 @@ function addressAlreadyRegistered({ email, name, provider }) {
     'If this was not you, nothing has changed and there is nothing to do.',
     SIGNATURE,
   ].join('\n');
+  return { subject: 'You already have a Capshaw member portal account', body };
+};
 
+compose.awaitingApproval = ({ user }) => ({
+  subject: `Waiting for approval: ${user.name}`,
+  body: [
+    `${user.name} has confirmed their email address and is waiting to be let`,
+    'into the member portal.',
+    '',
+    `  Name:  ${user.name}`,
+    `  Email: ${user.email}`,
+    '  Signed up with: an email address and password',
+    '',
+    'They cannot sign in at all until somebody approves them. Approving is',
+    'also where you say who they are: either pick their existing entry in the',
+    'member directory or create one for them, so their household and worship',
+    'preferences are theirs to keep up to date.',
+    '',
+    `Approve them here: ${clientUrl()} → Church Office → Members & Access`,
+    SIGNATURE,
+  ].join('\n'),
+});
+
+compose.approved = ({ user, personName }) => {
+  const linkedNote = personName
+    ? [
+        `Your account is connected to ${personName} in the member directory, so`,
+        'you can keep your household\'s details and worship preferences up to',
+        'date from "My Household & Preferences".',
+        '',
+      ]
+    : [];
+
+  const body = [
+    `Hello ${user.name},`,
+    '',
+    'Your Capshaw Church of Christ member portal account has been approved.',
+    'You can sign in now with your email address and password:',
+    '',
+    `  ${clientUrl()}`,
+    '',
+    ...linkedNote,
+    'We are glad to have you here.',
+    SIGNATURE,
+  ].join('\n');
+  return { subject: 'Your Capshaw member portal account is ready', body };
+};
+
+// ─── To the person registering ────────────────────────────────────────────────
+
+function confirmAddress({ name, email, token }) {
   return mailer.send({
     to: [{ email, name: name || '' }],
-    subject: 'You already have a Capshaw member portal account',
-    body,
+    ...compose.confirmAddress({ name, token }),
+    context: 'account:verify',
+  });
+}
+
+// Sent instead of a second account when somebody registers with an address
+// that already has one. It means the reply to "register" can be identical
+// either way, so the form cannot be used to find out who is a member here.
+function addressAlreadyRegistered({ email, name, provider }) {
+  return mailer.send({
+    to: [{ email, name: name || '' }],
+    ...compose.addressAlreadyRegistered({ name, provider }),
     context: 'account:duplicate',
   });
 }
@@ -116,27 +172,9 @@ function awaitingApproval({ user }) {
     return [];
   }
 
-  const body = [
-    `${user.name} has confirmed their email address and is waiting to be let`,
-    'into the member portal.',
-    '',
-    `  Name:  ${user.name}`,
-    `  Email: ${user.email}`,
-    '  Signed up with: an email address and password',
-    '',
-    'They cannot sign in at all until somebody approves them. Approving is',
-    'also where you say who they are: either pick their existing entry in the',
-    'member directory or create one for them, so their household and worship',
-    'preferences are theirs to keep up to date.',
-    '',
-    `Approve them here: ${clientUrl()} → Church Office → Members & Access`,
-    SIGNATURE,
-  ].join('\n');
-
   return mailer.send({
     to: recipients,
-    subject: `Waiting for approval: ${user.name}`,
-    body,
+    ...compose.awaitingApproval({ user }),
     context: `account:${user.id}:awaiting-approval`,
   });
 }
@@ -146,37 +184,15 @@ function awaitingApproval({ user }) {
 function approved({ user, personName }) {
   if (!user.email) return [];
 
-  const linkedNote = personName
-    ? [
-        `Your account is connected to ${personName} in the member directory, so`,
-        'you can keep your household\'s details and worship preferences up to',
-        'date from "My Household & Preferences".',
-        '',
-      ]
-    : [];
-
-  const body = [
-    `Hello ${user.name},`,
-    '',
-    'Your Capshaw Church of Christ member portal account has been approved.',
-    'You can sign in now with your email address and password:',
-    '',
-    `  ${clientUrl()}`,
-    '',
-    ...linkedNote,
-    'We are glad to have you here.',
-    SIGNATURE,
-  ].join('\n');
-
   return mailer.send({
     to: [{ email: user.email, name: user.name }],
-    subject: 'Your Capshaw member portal account is ready',
-    body,
+    ...compose.approved({ user, personName }),
     context: `account:${user.id}:approved`,
   });
 }
 
 module.exports = {
+  compose,
   verifyUrl,
   confirmAddress,
   addressAlreadyRegistered,

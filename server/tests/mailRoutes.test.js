@@ -107,26 +107,3 @@ describe('membership', () => {
     expect(res.body.candidates.map(c => c.name)).toEqual(['Ray Harris']);
   });
 });
-
-describe('outbox', () => {
-  test('shows what was queued, with counts', async () => {
-    db.prepare("INSERT INTO mail_outbox (to_email, subject, status) VALUES (?,?,'pending')")
-      .run('jblairkiel@gmail.com', 'Action needed: Kitchen');
-    db.prepare("INSERT INTO mail_outbox (to_email, subject, status) VALUES (?,?,'sent')")
-      .run('jblairkiel@gmail.com', 'Approved: Kitchen');
-
-    const res = await request(buildApp(ADMIN)).get('/api/mail/outbox');
-    expect(res.body.counts).toEqual({ pending: 1, sent: 1 });
-    expect(res.body.messages).toHaveLength(2);
-  });
-
-  test('a manual send leaves messages queued when no server is configured', async () => {
-    delete process.env.SMTP_HOST;
-    db.prepare("INSERT INTO mail_outbox (to_email, subject) VALUES (?,?)").run('jblairkiel@gmail.com', 'Queued');
-
-    const res = await request(buildApp(ADMIN)).post('/api/mail/outbox/send');
-    expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ sent: 0, skipped: 1 });
-    expect(db.prepare('SELECT status FROM mail_outbox').get().status).toBe('pending');
-  });
-});

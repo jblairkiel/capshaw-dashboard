@@ -66,10 +66,15 @@ function recipientsForTask(task) {
     .map(u => ({ email: u.email, name: u.name }));
 }
 
-function taskAssigned({ instance, definition, task }) {
-  const recipients = recipientsForTask(task);
-  if (!recipients.length) return [];
+// ─── What each email says ─────────────────────────────────────────────────────
+//
+// The wording of every message, apart from who it goes to and when. Kept as
+// plain functions so the Emails page can show any of them with sample data
+// (server/mail/catalog.js) without anything being sent.
 
+const compose = {};
+
+compose.taskAssigned = ({ instance, definition, task }) => {
   const step = definition.steps?.[task.step_id];
   const body = [
     `A ${definition.title.toLowerCase()} needs you.`,
@@ -80,11 +85,65 @@ function taskAssigned({ instance, definition, task }) {
     '',
     `Open it here: ${link('inbox', { workflow: instance.id })}`,
   ].filter(Boolean).join('\n');
+  return { subject: `Action needed: ${instance.title}`, body };
+};
+
+compose.workflowCompleted = ({ instance, definition, outcomeId, actorName }) => {
+  const outcome = definition.outcomes?.[outcomeId];
+  const body = [
+    `${definition.title}: ${outcome?.label || outcomeId}`,
+    '',
+    `  ${instance.title}`,
+    actorName ? `  Closed by: ${actorName}` : '',
+    '',
+    `See the full history here: ${link('inbox', { workflow: instance.id })}`,
+  ].filter(Boolean).join('\n');
+  return { subject: `${outcome?.label || 'Finished'}: ${instance.title}`, body };
+};
+
+// One person's own turns in the month.
+compose.servingAssignments = ({ draft, mine }) => ({
+  subject: `Your worship assignments for ${draft.month}`,
+  body: [
+    `You are down to help with worship in ${draft.month}.`,
+    '',
+    ...mine.map(r => `  ${r.date} · ${r.service} · ${r.job}`),
+    '',
+    'If you cannot make one of these, take yourself off it on the Serving',
+    `Schedule and let the coordinator know it needs covering: ${link('assignments')}`,
+  ].join('\n'),
+});
+
+compose.monthlyReport = ({ draft }) => {
+  const byDate = new Map();
+  for (const row of draft?.rows || []) {
+    const key = `${row.date} · ${row.service}`;
+    if (!byDate.has(key)) byDate.set(key, []);
+    byDate.get(key).push(`    ${row.job}: ${row.name || '(nobody yet)'}`);
+  }
+  const body = [
+    `Worship assignments for ${draft.month}.`,
+    '',
+    ...[...byDate.entries()].flatMap(([heading, lines]) => [`  ${heading}`, ...lines, '']),
+    draft.unfilled?.length ? `${draft.unfilled.length} slot(s) still need somebody.` : '',
+    '',
+    `The full schedule is on the dashboard: ${link('assignments')}`,
+    '',
+    'To stop receiving this summary, turn off "Monthly schedule summary"',
+    'under My Info on the dashboard.',
+  ].filter(Boolean).join('\n');
+  return { subject: `Worship schedule for ${draft.month}`, body };
+};
+
+// ─── Workflows ────────────────────────────────────────────────────────────────
+
+function taskAssigned({ instance, definition, task }) {
+  const recipients = recipientsForTask(task);
+  if (!recipients.length) return [];
 
   return mailer.enqueue({
     to: recipients,
-    subject: `Action needed: ${instance.title}`,
-    body,
+    ...compose.taskAssigned({ instance, definition, task }),
     context: `workflow:${instance.id}:task:${task.id}`,
   });
 }
@@ -113,19 +172,9 @@ function workflowCompleted({ instance, definition, outcomeId, actorName }) {
   }
   if (!people.length) return [];
 
-  const body = [
-    `${definition.title}: ${outcome?.label || outcomeId}`,
-    '',
-    `  ${instance.title}`,
-    actorName ? `  Closed by: ${actorName}` : '',
-    '',
-    `See the full history here: ${link('inbox', { workflow: instance.id })}`,
-  ].filter(Boolean).join('\n');
-
   return mailer.enqueue({
     to: people,
-    subject: `${outcome?.label || 'Finished'}: ${instance.title}`,
-    body,
+    ...compose.workflowCompleted({ instance, definition, outcomeId, actorName }),
     context: `workflow:${instance.id}:completed`,
   });
 }
@@ -147,20 +196,9 @@ function schedulePublished({ draft, instanceId }) {
 
     if (!person?.email) { unreachable.push(name); continue; }
 
-    const mine = assignmentsFor(draft, name);
-    const body = [
-      `You are down to help with worship in ${draft.month}.`,
-      '',
-      ...mine.map(r => `  ${r.date} · ${r.service} · ${r.job}`),
-      '',
-      'If you cannot make one of these, take yourself off it on the Serving',
-      `Schedule and let the coordinator know it needs covering: ${link('assignments')}`,
-    ].join('\n');
-
     queued.push(...mailer.enqueue({
       to: [{ email: person.email, name: person.name }],
-      subject: `Your worship assignments for ${draft.month}`,
-      body,
+      ...compose.servingAssignments({ draft, mine: assignmentsFor(draft, name) }),
       context: `workflow:${instanceId}:schedule`,
     }));
   }
@@ -178,29 +216,9 @@ function monthlyReport({ draft, instanceId }) {
 
   if (!readers.length) return [];
 
-  const byDate = new Map();
-  for (const row of draft?.rows || []) {
-    const key = `${row.date} · ${row.service}`;
-    if (!byDate.has(key)) byDate.set(key, []);
-    byDate.get(key).push(`    ${row.job}: ${row.name || '(nobody yet)'}`);
-  }
-
-  const body = [
-    `Worship assignments for ${draft.month}.`,
-    '',
-    ...[...byDate.entries()].flatMap(([heading, lines]) => [`  ${heading}`, ...lines, '']),
-    draft.unfilled?.length ? `${draft.unfilled.length} slot(s) still need somebody.` : '',
-    '',
-    `The full schedule is on the dashboard: ${link('assignments')}`,
-    '',
-    'To stop receiving this summary, turn off "Monthly schedule summary"',
-    'under My Info on the dashboard.',
-  ].filter(Boolean).join('\n');
-
   return mailer.enqueue({
     to: readers,
-    subject: `Worship schedule for ${draft.month}`,
-    body,
+    ...compose.monthlyReport({ draft }),
     context: `workflow:${instanceId}:monthly-report`,
   });
 }
@@ -226,13 +244,7 @@ function groupLink(group, event) {
   return link('groups', { group: group.id, event: event?.id });
 }
 
-function groupEventPublished({ group, event }) {
-  const { recipients, missing } = recipientsFor(group.key);
-  if (missing.length) {
-    console.log(`[mail] ${group.key}: no address on file for ${missing.join(', ')}`);
-  }
-  if (!recipients.length) return [];
-
+compose.groupEventPublished = ({ group, event }) => {
   const body = [
     `${group.name} is meeting.`,
     '',
@@ -243,11 +255,42 @@ function groupEventPublished({ group, event }) {
     event.signupEnabled ? `and take something off the ${event.signupTitle.toLowerCase()} list` : '',
     `here: ${groupLink(group, event)}`,
   ].filter(Boolean).join('\n');
+  return { subject: `${group.name}: ${event.title}`, body };
+};
+
+compose.groupEventCancelled = ({ group, event }) => {
+  const body = [
+    `${group.name}'s meeting is off.`,
+    '',
+    ...eventLines(event),
+    '',
+    `Details, and anything the leaders have said about it: ${groupLink(group, event)}`,
+  ].join('\n');
+  return { subject: `Cancelled — ${group.name}: ${event.title}`, body };
+};
+
+compose.groupEventChanged = ({ group, event, what = '' }) => {
+  const body = [
+    `${group.name}'s meeting has changed.`,
+    what ? `  ${what}` : '',
+    '',
+    ...eventLines(event),
+    '',
+    `The current details are here: ${groupLink(group, event)}`,
+  ].filter(Boolean).join('\n');
+  return { subject: `Changed — ${group.name}: ${event.title}`, body };
+};
+
+function groupEventPublished({ group, event }) {
+  const { recipients, missing } = recipientsFor(group.key);
+  if (missing.length) {
+    console.log(`[mail] ${group.key}: no address on file for ${missing.join(', ')}`);
+  }
+  if (!recipients.length) return [];
 
   return mailer.enqueue({
     to: recipients,
-    subject: `${group.name}: ${event.title}`,
-    body,
+    ...compose.groupEventPublished({ group, event }),
     context: `group-event:${event.id}:published`,
   });
 }
@@ -256,18 +299,9 @@ function groupEventCancelled({ group, event }) {
   const { recipients } = recipientsFor(group.key);
   if (!recipients.length) return [];
 
-  const body = [
-    `${group.name}'s meeting is off.`,
-    '',
-    ...eventLines(event),
-    '',
-    `Details, and anything the leaders have said about it: ${groupLink(group, event)}`,
-  ].join('\n');
-
   return mailer.enqueue({
     to: recipients,
-    subject: `Cancelled — ${group.name}: ${event.title}`,
-    body,
+    ...compose.groupEventCancelled({ group, event }),
     context: `group-event:${event.id}:cancelled`,
   });
 }
@@ -278,24 +312,15 @@ function groupEventChanged({ group, event, attendees = [], what = '' }) {
   const recipients = attendees.filter(a => a.email).map(a => ({ email: a.email, name: a.name }));
   if (!recipients.length) return [];
 
-  const body = [
-    `${group.name}'s meeting has changed.`,
-    what ? `  ${what}` : '',
-    '',
-    ...eventLines(event),
-    '',
-    `The current details are here: ${groupLink(group, event)}`,
-  ].filter(Boolean).join('\n');
-
   return mailer.enqueue({
     to: recipients,
-    subject: `Changed — ${group.name}: ${event.title}`,
-    body,
+    ...compose.groupEventChanged({ group, event, what }),
     context: `group-event:${event.id}:changed`,
   });
 }
 
 module.exports = {
+  compose,
   taskAssigned, workflowCompleted, recipientsForTask, schedulePublished, monthlyReport,
   groupEventPublished, groupEventCancelled, groupEventChanged,
 };

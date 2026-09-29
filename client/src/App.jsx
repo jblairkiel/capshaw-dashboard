@@ -21,6 +21,7 @@ import MobileNav from './components/MobileNav';
 import InboxView from './components/InboxView';
 import WorkflowDialogButton from './components/WorkflowDialogButton';
 import MailGroupsView from './components/MailGroupsView';
+import EmailsView from './components/EmailsView';
 import ServingSchedule from './components/ServingSchedule';
 import ServiceRosterView from './components/ServiceRosterView';
 import ActionHistoryView from './components/ActionHistoryView';
@@ -97,6 +98,7 @@ const OFFICE_ITEMS = [
   { id: 'service-roster', label: 'Service Roster',    when: user => hasArea(user, 'serving-schedule') },
   { id: 'directory',      label: 'Member Directory',  when: user => hasArea(user, 'directory') },
   { id: 'mail-groups',    label: 'Email Groups',      when: user => hasArea(user, 'mail-groups') },
+  { id: 'emails',         label: 'Emails',            when: user => hasArea(user, 'mail-groups') },
   { id: 'bulletin',       label: 'Weekly Newsletter', when: user => hasArea(user, 'bulletin') },
 ];
 
@@ -142,7 +144,7 @@ function deepLinkFromUrl() {
 // scraped payload the app holds.
 const STANDALONE_TABS = new Set([
   'bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database',
-  'directory', 'profile', 'inbox', 'mail-groups', 'livestreams',
+  'directory', 'profile', 'inbox', 'mail-groups', 'emails', 'livestreams',
   'assignments', 'visitors', 'leadership', 'action-history','service-roster', 'bulletin',
   'groups', 'bug-reports', 'how-it-works', 'member-match', 'contributions',
 ]);
@@ -503,6 +505,11 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       {!updating && activeTab === 'mail-groups' && hasArea(user, 'mail-groups') && (
         <main className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
           <MailGroupsView />
+        </main>
+      )}
+      {!updating && activeTab === 'emails' && hasArea(user, 'mail-groups') && (
+        <main className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
+          <EmailsView />
         </main>
       )}
       {!updating && activeTab === 'directory' && hasArea(user, 'directory') && (

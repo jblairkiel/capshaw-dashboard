@@ -22,12 +22,11 @@ const DETAIL = {
 };
 
 function mockApi(overrides = {}) {
-  const routes = { groups: GROUPS, detail: DETAIL, outbox: { success: true, messages: [], counts: {} }, ...overrides };
+  const routes = { groups: GROUPS, detail: DETAIL, ...overrides };
   const fetchMock = vi.fn(url => {
     let body = routes.groups;
-    if (url.includes('/outbox'))              body = routes.outbox;
     // Adding or removing returns the updated member list, as the API does.
-    else if (url.includes('/members'))        body = routes.members ?? { success: true, members: DETAIL.members };
+    if (url.includes('/members'))             body = routes.members ?? { success: true, members: DETAIL.members };
     else if (/\/groups\/[a-z-]+$/.test(url))  body = routes.detail;
     return Promise.resolve({ json: () => Promise.resolve(body) });
   });
