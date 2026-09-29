@@ -229,6 +229,10 @@ function compose(sunday) {
       // The one prayer block the newsletter sets as a paragraph rather than a
       // list, because it is long and every entry is the same shape.
       evangelists: nameParagraph(lines(issue.evangelists), { separator: '; ', joiner: ' \u2013 ' }),
+      // The same list as typed, one entry per line, for the form to edit. The
+      // segments above are for the exports; joining those back into text is
+      // what used to write "[object Object]" over the real list (#94).
+      evangelistLines: lines(issue.evangelists),
     },
 
     // The offering is last week's total from the Contributions page when one

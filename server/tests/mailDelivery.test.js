@@ -254,3 +254,59 @@ describe('send', () => {
       .toMatchObject({ status: 'pending', attempts: 1 });
   });
 });
+
+// ─── Attachments ──────────────────────────────────────────────────────────────
+
+describe('attachments', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const pdf = Buffer.from('%PDF-1.4 sample newsletter');
+
+  test('a file is stored once, by its content, however many messages carry it', () => {
+    const a = mailer.saveAttachment({ buffer: pdf, filename: 'Newsletter 2026-09-27.pdf', contentType: 'application/pdf' });
+    const b = mailer.saveAttachment({ buffer: pdf, filename: 'Newsletter 2026-09-27.pdf', contentType: 'application/pdf' });
+    expect(a).toEqual(b);
+    expect(a.file).toMatch(/^[a-f0-9]{64}\.pdf$/);
+    expect(a.filename).toBe('Newsletter 2026-09-27.pdf');
+    expect(fs.readFileSync(mailer.attachmentPath(a.file))).toEqual(pdf);
+  });
+
+  test('queued messages carry the attachment, and it goes out with each one', async () => {
+    const attachment = mailer.saveAttachment({ buffer: pdf, filename: 'Newsletter.pdf', contentType: 'application/pdf' });
+    mailer.enqueue({
+      to: [{ email: 'ray@example.com' }, { email: 'jo@example.com' }],
+      subject: 'This week', body: 'Attached.', context: 'bulletin:2026-09-27:announcements', attachments: [attachment],
+    });
+    expect(JSON.parse(outbox()[0].attachments)).toEqual([attachment]);
+
+    await mailer.drainOutbox();
+    expect(sendMail).toHaveBeenCalledTimes(2);
+    expect(sendMail.mock.calls[0][0].attachments).toEqual([
+      { filename: 'Newsletter.pdf', contentType: 'application/pdf', path: mailer.attachmentPath(attachment.file) },
+    ]);
+  });
+
+  test('a message without attachments sends none', async () => {
+    queue();
+    await mailer.drainOutbox();
+    expect(sendMail.mock.calls[0][0].attachments).toBeUndefined();
+  });
+
+  test('a missing file fails the message rather than sending it without', async () => {
+    const attachment = mailer.saveAttachment({ buffer: Buffer.from('gone soon'), filename: 'x.pdf', contentType: 'application/pdf' });
+    mailer.enqueue({ to: [{ email: 'ray@example.com' }], subject: 's', body: 'b', attachments: [attachment] });
+    fs.unlinkSync(mailer.attachmentPath(attachment.file));
+
+    await mailer.drainOutbox();
+    expect(sendMail).not.toHaveBeenCalled();
+    expect(outbox()[0].error).toMatch(/attachment x\.pdf is missing/);
+  });
+
+  test('the stored name can never point outside the attachments folder', () => {
+    for (const bad of ['../../server/data/bible_questions.db', '/etc/passwd', 'notahash.pdf', '']) {
+      expect(mailer.attachmentPath(bad)).toBeNull();
+    }
+    const good = 'a'.repeat(64) + '.pdf';
+    expect(path.dirname(mailer.attachmentPath(`../../${good}`))).toBe(path.dirname(mailer.attachmentPath(good)));
+  });
+});

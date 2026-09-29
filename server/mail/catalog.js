@@ -10,6 +10,7 @@
 
 const notify = require('./notify');
 const accounts = require('./accounts');
+const newsletter = require('./newsletter');
 
 const CATEGORIES = [
   { id: 'notifications', label: 'Notifications', description: 'Messages to one person about their own account or something waiting on them.' },
@@ -40,6 +41,10 @@ const SAMPLE = {
   event: {
     id: 12, title: 'Fellowship meal', date: '2026-10-02', time: '18:30', location: 'The fellowship hall',
     hostName: 'Sample Member', description: 'Bring a dish to share.', rsvpEnabled: true, signupEnabled: true, signupTitle: 'What to bring',
+  },
+  bulletin: {
+    sunday: '2026-10-04', masthead: 'Capshaw Church of Christ', sundayLabel: 'Sunday, October 4, 2026',
+    reminders: ['Fellowship meal Sunday evening after services', 'Ladies Bible class meets Tuesday at 10:00'],
   },
 };
 
@@ -92,6 +97,16 @@ const EMAILS = [
     trigger: 'A workflow reaches its outcome.',
     like: ['workflow:%:completed'],
     preview: () => notify.compose.workflowCompleted({ instance: SAMPLE.instance, definition: SAMPLE.followUp, outcomeId: 'reached', actorName: SAMPLE.user.name }),
+  },
+
+  // ── Bulletin ───────────────────────────────────────────────────────────────
+  {
+    id: 'newsletter', category: 'bulletin',
+    name: 'Weekly newsletter',
+    audience: 'The mailing list it is sent to',
+    trigger: 'Somebody presses Email newsletter on the Weekly Bulletin page. The PDF is attached.',
+    like: ['bulletin:%'],
+    preview: () => newsletter.compose.newsletter({ bulletin: SAMPLE.bulletin, listName: 'Announcements' }),
   },
 
   // ── Groups ─────────────────────────────────────────────────────────────────

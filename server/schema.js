@@ -740,6 +740,10 @@ function initSchema(db) {
     if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 
+  // Files to send with a queued message, as JSON: [{ file, filename, contentType }],
+  // where `file` names a file in the mail-attachments directory (server/lib/paths.js).
+  addColumn('mail_outbox', 'attachments', "TEXT NOT NULL DEFAULT '[]'");
+
   // Which directory person this login belongs to. Set automatically when the
   // sign-in email matches a directory entry, or assigned by an admin.
   addColumn('users', 'directory_id', 'INTEGER REFERENCES directory(id) ON DELETE SET NULL');

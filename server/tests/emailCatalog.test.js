@@ -34,7 +34,7 @@ function contextsWritten() {
 
 test('finds the senders it is meant to be checking', () => {
   const files = new Set(contextsWritten().map(c => c.file));
-  expect(files).toEqual(new Set([path.join('mail', 'accounts.js'), path.join('mail', 'notify.js')]));
+  expect(files).toEqual(new Set([path.join('mail', 'accounts.js'), path.join('mail', 'newsletter.js'), path.join('mail', 'notify.js')]));
 });
 
 test('every email a sender writes is in the catalogue', () => {

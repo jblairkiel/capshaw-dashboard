@@ -18,6 +18,7 @@ const data      = require('../lib/bulletinData');
 const docx      = require('../lib/bulletinDocx');
 const pdf       = require('../lib/bulletinPdf');
 const actionLog = require('../lib/actionLog');
+const newsletter = require('../mail/newsletter');
 
 const requireBulletin = requireArea('bulletin');
 
@@ -40,6 +41,12 @@ function badWeek(res) {
 // GET /api/bulletin — the weeks somebody has written, newest first.
 router.get('/issues', (req, res) => {
   res.json({ success: true, issues: issues.list() });
+});
+
+// GET /api/bulletin/mail-lists — where the newsletter can be emailed, and how
+// many on each list have an address. Before /:week, which would take it as a date.
+router.get('/mail-lists', requireBulletin, (req, res) => {
+  res.json({ success: true, lists: newsletter.lists() });
 });
 
 // GET /api/bulletin/:week — the composed newsletter for the week containing
@@ -115,5 +122,43 @@ router.get('/:week/export.docx', requireBulletin,
 
 router.get('/:week/export.pdf', requireBulletin,
   exportAs(pdf, 'application/pdf'));
+
+// GET /api/bulletin/:week/emails — which lists this week has already gone to.
+router.get('/:week/emails', requireBulletin, (req, res) => {
+  const sunday = weekOf(req.params.week);
+  if (!sunday) return badWeek(res);
+  res.json({ success: true, sent: newsletter.sentFor(sunday) });
+});
+
+// POST /api/bulletin/:week/email { list } — email the week's newsletter to a
+// mailing list, the PDF attached. It sends what is saved, the same as an export.
+router.post('/:week/email', requireBulletin, async (req, res) => {
+  const sunday = weekOf(req.params.week);
+  if (!sunday) return badWeek(res);
+  const listKey = String(req.body?.list || '');
+  if (!listKey) return res.status(400).json({ success: false, error: 'Choose a mailing list' });
+
+  let bulletin, buffer;
+  try {
+    bulletin = issues.compose(sunday);
+    buffer   = await pdf.render(bulletin);
+  } catch (err) {
+    console.error('[bulletin] could not render for email', sunday, '-', err.message);
+    return res.status(500).json({ success: false, error: 'The newsletter could not be built. Please try again.' });
+  }
+
+  const result = newsletter.sendNewsletter({ bulletin, pdf: buffer, filename: pdf.filename(bulletin), listKey });
+  if (result.error) return res.status(400).json({ success: false, error: result.error });
+
+  actionLog.record(req.user, {
+    area:     'bulletin',
+    action:   'other',
+    entity:   'newsletter',
+    entityId: sunday,
+    summary:  `Emailed the newsletter for ${data.longDate(sunday)} to the ${result.list.name} list (${result.queued})`,
+    details:  { list: result.list.key, queued: result.queued, missing: result.missing },
+  });
+  res.json({ success: true, ...result, sent: newsletter.sentFor(sunday) });
+});
 
 module.exports = router;
