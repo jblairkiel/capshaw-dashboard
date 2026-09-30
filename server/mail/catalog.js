@@ -12,6 +12,7 @@ const notify = require('./notify');
 const accounts = require('./accounts');
 const newsletter = require('./newsletter');
 const recordsReminder = require('./records');
+const leaderReminders = require('./worshipReminders');
 
 const CATEGORIES = [
   { id: 'notifications', label: 'Notifications', description: 'Messages to one person about their own account or something waiting on them.' },
@@ -42,6 +43,17 @@ const SAMPLE = {
   event: {
     id: 12, title: 'Fellowship meal', date: '2026-10-02', time: '18:30', location: 'The fellowship hall',
     hostName: 'Sample Member', description: 'Bring a dish to share.', rsvpEnabled: true, signupEnabled: true, signupTitle: 'What to bring',
+  },
+  plan: {
+    id: 9, date: '2026-10-04', service: 'Sunday AM Worship', leader: 'Sample Member',
+    submittedByName: 'Sample Member', notes: 'Ending with the song we sang at the gospel meeting.',
+    items: [
+      { partName: 'Song', song: { title: 'How Great Thou Art', hymnal: 'Songs of Faith and Praise', number: '12' }, person: '', detail: '' },
+      { partName: 'Opening prayer', song: null, person: 'Another Member', detail: '' },
+      { partName: 'Scripture reading', song: null, person: 'Another Member', detail: 'Psalm 23' },
+      { partName: 'Sermon', song: null, person: 'Sample Preacher', detail: 'The Good Shepherd' },
+      { partName: 'Invitation song', song: { title: 'Just As I Am', hymnal: 'Songs of Faith and Praise', number: '915' }, person: '', detail: '' },
+    ],
   },
   records: {
     from: '2026-09-20', through: '2026-09-27', earlier: 2,
@@ -117,6 +129,27 @@ const EMAILS = [
     trigger: 'Somebody presses Email newsletter on the Weekly Bulletin page. The PDF is attached.',
     like: ['bulletin:%'],
     preview: () => newsletter.compose.newsletter({ bulletin: SAMPLE.bulletin, listName: 'Announcements' }),
+  },
+
+  {
+    id: 'worship-plan-submitted', category: 'notifications',
+    name: 'Service submitted',
+    audience: 'Whoever looks after the worship order (the admins, if nobody does)',
+    trigger: 'A song leader submits a service on the Upcoming Service page.',
+    like: ['worship-plan:%:submitted'],
+    preview: () => notify.compose.worshipPlanSubmitted({ plan: SAMPLE.plan }),
+  },
+
+  {
+    id: 'song-leader-reminder', category: 'notifications',
+    name: 'You are leading singing',
+    audience: 'The song leader on the Serving Schedule for that service',
+    trigger: 'Four days (96 hours) before each service, and a final reminder the day before (24 hours). It says whether the service has been submitted yet, and links straight to it.',
+    like: ['worship-reminder:%'],
+    preview: () => leaderReminders.compose.songLeaderReminder({
+      kind: 'first', date: SAMPLE.plan.date, service: SAMPLE.plan.service, time: '09:50', leader: SAMPLE.user.name,
+      plan: null, requests: [{ song: { title: 'Just As I Am' }, forDate: '' }],
+    }),
   },
 
   // ── Groups ─────────────────────────────────────────────────────────────────

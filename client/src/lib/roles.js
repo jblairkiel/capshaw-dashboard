@@ -43,16 +43,16 @@ export const ROLES = [
 export const AREAS = [
   {
     id:          'worship-order',
-    label:       'Worship Order',
-    page:        'This Sunday',
-    description: 'Upload, replace and remove the order of service for this Sunday.',
+    label:       'Worship Organizer',
+    page:        'Upcoming Service',
+    description: 'Confirm or change the services song leaders submit, keep the list of service parts, and upload the printed order of service.',
     tone:        'bg-indigo-100 text-indigo-800',
   },
   {
     id:          'songs',
     label:       'Song Tracker',
-    page:        'Songs We Sing',
-    description: 'Add songs, record what was sung, and keep the song of the week.',
+    page:        'Upcoming Service',
+    description: 'Submit any service\'s songs, tidy the song library (fix or merge songs), answer song requests, and import history from capshawchurch.org.',
     tone:        'bg-sky-100 text-sky-800',
   },
   {

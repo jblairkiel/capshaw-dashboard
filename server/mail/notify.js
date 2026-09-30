@@ -319,8 +319,53 @@ function groupEventChanged({ group, event, attendees = [], what = '' }) {
   });
 }
 
+// ─── A service submitted ───────────────────────────────────────────────────────
+//
+// A song leader has sent in a whole service; whoever looks after the worship
+// order confirms it. The message carries the service itself, so it can be read
+// and checked from the email alone, and links to where it is confirmed.
+
+const serviceDay = iso => new Date(`${iso}T12:00:00Z`)
+  .toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+
+function planLines(plan) {
+  return plan.items.map((item, i) => {
+    const what = [
+      item.song ? `${item.song.title}${item.song.number ? ` (${[item.song.hymnal, item.song.number].filter(Boolean).join(' ')})` : ''}` : '',
+      item.person,
+      item.detail ? `"${item.detail}"` : '',
+    ].filter(Boolean).join(' — ');
+    return `  ${String(i + 1).padStart(2)}. ${item.partName}${what ? `: ${what}` : ''}`;
+  });
+}
+
+compose.worshipPlanSubmitted = ({ plan }) => ({
+  subject: `Service submitted: ${plan.service}, ${serviceDay(plan.date)}`,
+  body: [
+    `${plan.submittedByName || 'A song leader'} has submitted the ${plan.service} service for ${serviceDay(plan.date)}.`,
+    plan.leader ? `Song leader: ${plan.leader}` : '',
+    '',
+    ...planLines(plan),
+    plan.notes ? `\nNotes: ${plan.notes}` : '',
+    '',
+    `Confirm it, or change it, here: ${link('upcoming', { tab: 'service', plan: plan.id })}`,
+    '',
+    'You are getting this because you look after the worship order.',
+  ].join('\n').replace(/\n{3,}/g, '\n\n'),
+});
+
+function worshipPlanSubmitted({ plan, to }) {
+  const recipients = (to || []).filter(u => u.email).map(u => ({ email: u.email, name: u.name }));
+  if (!recipients.length) return [];
+  return mailer.send({
+    to: recipients,
+    ...compose.worshipPlanSubmitted({ plan }),
+    context: `worship-plan:${plan.id}:submitted`,
+  });
+}
+
 module.exports = {
-  compose, link,
+  compose, link, worshipPlanSubmitted, planLines, serviceDay,
   taskAssigned, workflowCompleted, recipientsForTask, schedulePublished, monthlyReport,
   groupEventPublished, groupEventCancelled, groupEventChanged,
 };

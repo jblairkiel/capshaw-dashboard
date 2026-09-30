@@ -1,71 +1,6 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { hasArea } from '../lib/roles';
-
-// ─── Song search typeahead ─────────────────────────────────────────────────────
-
-function SongSearch({ value, onChange, onSelect, placeholder = 'Search songs…', className = '' }) {
-  const [query,   setQuery]   = useState(value || '');
-  const [results, setResults] = useState([]);
-  const [open,    setOpen]    = useState(false);
-  const timer = useRef(null);
-
-  useEffect(() => { setQuery(value || ''); }, [value]);
-
-  const search = q => {
-    clearTimeout(timer.current);
-    setQuery(q);
-    onChange?.(q);
-    if (q.trim().length < 2) { setResults([]); setOpen(false); return; }
-    timer.current = setTimeout(async () => {
-      try {
-        const r = await fetch(`/api/songs/search?q=${encodeURIComponent(q.trim())}`);
-        const j = await r.json();
-        if (j.success) { setResults(j.results); setOpen(true); }
-      } catch { /* ignore */ }
-    }, 250);
-  };
-
-  const pick = song => {
-    setQuery(song.title + (song.number ? ` (${song.number})` : ''));
-    setResults([]);
-    setOpen(false);
-    onSelect?.(song);
-  };
-
-  return (
-    <div className={`relative ${className}`}>
-      <input
-        type="text"
-        value={query}
-        onChange={e => search(e.target.value)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-        onFocus={() => results.length > 0 && setOpen(true)}
-        placeholder={placeholder}
-        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-church-navy"
-      />
-      {open && results.length > 0 && (
-        <ul className="absolute z-20 left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-52 overflow-y-auto">
-          {results.map(s => (
-            <li key={s.id}>
-              <button
-                type="button"
-                onMouseDown={() => pick(s)}
-                className="w-full text-left px-3 py-2 text-sm hover:bg-church-cream"
-              >
-                <span className="font-medium text-church-navy">{s.title}</span>
-                {(s.number || s.hymnal) && (
-                  <span className="ml-2 text-gray-400 text-xs">
-                    {[s.number, s.hymnal].filter(Boolean).join(' — ')}
-                  </span>
-                )}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
+import LibraryView from './upcoming/LibraryView';
 
 // ─── Analytics view ────────────────────────────────────────────────────────────
 
@@ -310,7 +245,8 @@ function ServiceCard({ record, canWrite }) {
               </li>
             ))}
           </ul>
-          {canWrite && (
+          {/* Only an imported record has anywhere to refresh from. */}
+          {canWrite && record.source !== 'portal' && (
             <button
               onClick={refresh}
               disabled={refreshing}
@@ -333,201 +269,19 @@ function ServiceCard({ record, canWrite }) {
   );
 }
 
-// ─── Add service form ──────────────────────────────────────────────────────────
-
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-function AddServiceForm({ onBack, onAdded }) {
-  const [options,    setOptions]    = useState(null);
-  const [optErr,     setOptErr]     = useState('');
-  const [serviceId,  setServiceId]  = useState('');
-  const [leaderId,   setLeaderId]   = useState('');
-  const [leaderQ,    setLeaderQ]    = useState('');
-  const [day,        setDay]        = useState(String(new Date().getDate()));
-  const [month,      setMonth]      = useState(String(new Date().getMonth() + 1));
-  const [year,       setYear]       = useState(String(new Date().getFullYear()));
-  const [songs,      setSongs]      = useState([]);
-  const [submitting, setSubmitting] = useState(false);
-  const [error,      setError]      = useState('');
-
-  useEffect(() => {
-    fetch('/api/songs/options')
-      .then(r => r.json())
-      .then(j => {
-        if (j.success) {
-          setOptions(j);
-          if (j.services?.length) setServiceId(String(j.services[0].id));
-        } else {
-          setOptErr(j.error || 'Failed to load form options');
-        }
-      })
-      .catch(e => setOptErr(e.message));
-  }, []);
-
-  const filteredLeaders = options?.leaders?.filter(l =>
-    !leaderQ || l.name.toLowerCase().includes(leaderQ.toLowerCase())
-  ) ?? [];
-
-  const addSong  = song => { if (!songs.find(s => s.id === song.id)) setSongs(p => [...p, song]); };
-  const removeSong = id => setSongs(p => p.filter(s => s.id !== id));
-
-  const submit = async () => {
-    if (!serviceId)        { setError('Select a service type.'); return; }
-    if (!leaderId)         { setError('Select a leader.'); return; }
-    if (songs.length === 0){ setError('Add at least one song.'); return; }
-    setError('');
-    setSubmitting(true);
-    try {
-      const r = await fetch('/api/songs/add', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          day: Number(day), month: Number(month), year: Number(year),
-          serviceId: Number(serviceId), leaderId: Number(leaderId),
-          songIds: songs.map(s => s.id),
-        }),
-      });
-      const j = await r.json();
-      if (!j.success) throw new Error(j.error);
-      onAdded?.();
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const days  = Array.from({ length: 31 }, (_, i) => i + 1);
-  const years = Array.from({ length: 5 },  (_, i) => new Date().getFullYear() - i);
-
-  return (
-    <div className="space-y-5">
-      <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-church-navy hover:text-church-gold transition-colors">
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-        </svg>
-        Back to history
-      </button>
-
-      <div className="card space-y-5">
-        <h3 className="section-heading mb-0">Add Service Record</h3>
-
-        {optErr && <p className="text-sm text-red-600">{optErr}</p>}
-        {!options && !optErr && (
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <span className="animate-spin inline-block w-4 h-4 border-2 border-church-gold border-t-transparent rounded-full" />
-            Loading form options…
-          </div>
-        )}
-
-        {options && (
-          <>
-            <div>
-              <label className="block text-sm font-semibold text-church-navy mb-1">Date</label>
-              <div className="flex gap-2">
-                <select value={month} onChange={e => setMonth(e.target.value)}
-                  className="border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-church-navy">
-                  {MONTHS.map((m, i) => <option key={i} value={i + 1}>{m}</option>)}
-                </select>
-                <select value={day} onChange={e => setDay(e.target.value)}
-                  className="border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-church-navy">
-                  {days.map(d => <option key={d} value={d}>{d}</option>)}
-                </select>
-                <select value={year} onChange={e => setYear(e.target.value)}
-                  className="border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-church-navy">
-                  {years.map(y => <option key={y} value={y}>{y}</option>)}
-                </select>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-church-navy mb-1">Service Type</label>
-              <select value={serviceId} onChange={e => setServiceId(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-church-navy">
-                {options.services.map(s => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-church-navy mb-1">Leader</label>
-              <input
-                type="text"
-                value={leaderQ}
-                onChange={e => { setLeaderQ(e.target.value); setLeaderId(''); }}
-                placeholder="Search leaders…"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-church-navy mb-1"
-              />
-              {leaderQ && (
-                <div className="border border-gray-200 rounded-lg max-h-40 overflow-y-auto">
-                  {filteredLeaders.length === 0 && (
-                    <p className="px-3 py-2 text-sm text-gray-400 italic">No matches</p>
-                  )}
-                  {filteredLeaders.slice(0, 20).map(l => (
-                    <button key={l.id} type="button"
-                      onClick={() => { setLeaderId(String(l.id)); setLeaderQ(l.name); }}
-                      className={`w-full text-left px-3 py-1.5 text-sm hover:bg-church-cream ${
-                        leaderId === String(l.id) ? 'bg-church-cream font-medium text-church-navy' : 'text-gray-700'
-                      }`}
-                    >
-                      {l.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-              {leaderId && <p className="text-xs text-green-700 mt-0.5">Leader selected</p>}
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-church-navy mb-1">Songs</label>
-              <SongSearch placeholder="Search and add songs…" onSelect={addSong} />
-              {songs.length > 0 && (
-                <ul className="mt-2 space-y-1">
-                  {songs.map((s, i) => (
-                    <li key={s.id} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-1.5">
-                      <span className="text-sm text-church-navy">
-                        <span className="text-church-gold font-bold mr-1.5">{i + 1}.</span>
-                        {s.title}
-                        {s.number && <span className="ml-1 text-gray-400 text-xs">#{s.number}</span>}
-                      </span>
-                      <button type="button" onClick={() => removeSong(s.id)}
-                        className="text-gray-400 hover:text-red-500 transition-colors ml-2">
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </>
-        )}
-
-        {error && <p className="text-sm text-red-600">{error}</p>}
-
-        {options && (
-          <button onClick={submit} disabled={submitting}
-            className="btn-primary w-full sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed">
-            {submitting ? 'Submitting…' : 'Submit Service Record'}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ─── Service filter chips ──────────────────────────────────────────────────────
 
 const SERVICE_FILTERS = ['All', 'Sun AM', 'Sun PM', 'Wed', 'Singing', 'Other'];
 
 // ─── Main view ─────────────────────────────────────────────────────────────────
 
-export default function SongTrackerView({ user }) {
+// The Upcoming Service page's history of what was sung. Services are added by
+// submitting them (the Submit a Service tab); "Add" goes there. Older history
+// can still be imported from capshawchurch.org's song database.
+export default function SongTrackerView({ user, onSubmitService, version = 0 }) {
   const canWrite = hasArea(user, 'songs');
 
-  const [view,     setView]     = useState('history');  // 'history' | 'analytics' | 'add'
+  const [view,     setView]     = useState('history');  // 'history' | 'analytics' | 'library'
   const [records,  setRecords]  = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [filter,   setFilter]   = useState('All');
@@ -555,7 +309,7 @@ export default function SongTrackerView({ user }) {
     finally { setLoading(false); }
   }, [filter, searchQ]);
 
-  useEffect(() => { loadRecords(0); }, [loadRecords]);
+  useEffect(() => { loadRecords(0); }, [loadRecords, version]);
 
   const sync = async () => {
     setSyncing(true);
@@ -566,7 +320,7 @@ export default function SongTrackerView({ user }) {
       });
       const j = await r.json();
       if (!j.success) throw new Error(j.error);
-      setSyncInfo(`Synced ${j.synced} records`);
+      setSyncInfo(`Imported ${j.synced} records`);
       loadRecords(0);
     } catch (e) {
       setSyncInfo(`Sync failed: ${e.message}`);
@@ -575,22 +329,13 @@ export default function SongTrackerView({ user }) {
     }
   };
 
-  if (view === 'add') {
-    return (
-      <AddServiceForm
-        onBack={() => setView('history')}
-        onAdded={() => { setView('history'); loadRecords(0); }}
-      />
-    );
-  }
-
   return (
     <div className="space-y-5">
 
       {/* View toggle + action buttons */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex gap-1">
-          {['history', 'analytics'].map(v => (
+          {['history', 'analytics', 'library'].map(v => (
             <button
               key={v}
               onClick={() => setView(v)}
@@ -600,7 +345,7 @@ export default function SongTrackerView({ user }) {
                   : 'border-gray-200 text-gray-600 hover:border-gray-400'
               }`}
             >
-              {v === 'history' ? 'History' : 'Analytics'}
+              {{ history: 'History', analytics: 'Analytics', library: 'Library' }[v]}
             </button>
           ))}
         </div>
@@ -620,10 +365,10 @@ export default function SongTrackerView({ user }) {
                     d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
               )}
-              Sync
+              Import from capshawchurch.org
             </button>
             <button
-              onClick={() => setView('add')}
+              onClick={() => onSubmitService?.()}
               className="flex items-center gap-1.5 text-xs btn-primary py-1.5 px-2.5"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -637,6 +382,8 @@ export default function SongTrackerView({ user }) {
 
       {/* Analytics panel */}
       {view === 'analytics' && <AnalyticsView />}
+
+      {view === 'library' && <LibraryView version={version} />}
 
       {/* History panel */}
       {view === 'history' && (
@@ -688,7 +435,7 @@ export default function SongTrackerView({ user }) {
               <p className="text-gray-400 text-sm">No service records found.</p>
               {canWrite && (
                 <p className="text-gray-400 text-xs mt-1">
-                  Click <strong>Sync</strong> to pull records from capshawchurch.org.
+                  Submit a service to start the history, or import it from capshawchurch.org.
                 </p>
               )}
             </div>

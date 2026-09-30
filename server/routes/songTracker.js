@@ -4,8 +4,10 @@ const router  = express.Router();
 const https   = require('https');
 const qs      = require('querystring');
 
-const { requireArea } = require('../middleware/auth');
+const { requireArea, requireApproved } = require('../middleware/auth');
+const { holdsArea } = require('../lib/areas');
 const actionLog = require('../lib/actionLog');
+const library   = require('../lib/songLibrary');
 
 // Keeping the song list and what was sung when belongs to whoever looks after
 // the song tracker; everybody signed in can still read it.
@@ -160,32 +162,6 @@ function toIso(dateStr) {
   return `${2000 + parseInt(yy)}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
 }
 
-// ─── Form options cache (leaders + services) ──────────────────────────────────
-
-let _options       = null;
-let _optionsExpiry = 0;
-
-async function getFormOptions() {
-  if (_options && Date.now() < _optionsExpiry) return _options;
-
-  const r = await fetchAdmin('/admin/songsdb/add');
-
-  // Leader select
-  const leaderBlock = r.body.match(/song_track\[leader_id\][\s\S]*?<\/select>/)?.[0] || '';
-  const leaders = [...leaderBlock.matchAll(/<option value="(\d+)">([^<]+)<\/option>/g)]
-    .filter(m => m[2].includes(','))
-    .map(m => ({ id: parseInt(m[1]), name: m[2].trim() }));
-
-  // Service select
-  const serviceBlock = r.body.match(/song_track\[service_id\][\s\S]*?<\/select>/)?.[0] || '';
-  const services = [...serviceBlock.matchAll(/<option value="(\d+)">([^<]+)<\/option>/g)]
-    .map(m => ({ id: parseInt(m[1]), name: m[2].trim() }));
-
-  _options       = { leaders, services };
-  _optionsExpiry = Date.now() + 60 * 60 * 1000;
-  return _options;
-}
-
 // ─── Upsert helpers ───────────────────────────────────────────────────────────
 
 function upsertSongs(songData) {
@@ -207,32 +183,55 @@ function upsertServiceSongs(serviceId, songData) {
 
 // ─── Routes — specific paths MUST come before /:id ────────────────────────────
 
-// GET /api/songs/options — leaders + services for the add form
-router.get('/options', async (req, res) => {
-  try {
-    res.json({ success: true, ...(await getFormOptions()) });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+// ─── The song library ─────────────────────────────────────────────────────────
+// The list every tab picks songs from (server/lib/songLibrary.js). Anybody
+// approved may add a song; whoever keeps the songs may correct or merge them.
+
+// GET /api/songs/search?q= — the library, most-sung first
+router.get('/search', (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (!q) return res.json({ success: true, results: [] });
+  res.json({ success: true, results: library.search(q, { limit: 20 }) });
 });
 
-// GET /api/songs/search?q= — proxy admin tokenize endpoint
-router.get('/search', async (req, res) => {
-  const q = (req.query.q || '').trim();
-  if (!q) return res.json({ success: true, results: [] });
-  try {
-    const ck  = await getAdminSession();
-    const r   = await adminGet(
-      `https://capshawchurch.org/admin/songsdb/tokenize?q=${encodeURIComponent(q)}`, ck,
-      { 'X-Requested-With': 'XMLHttpRequest', Accept: 'application/json' }
-    );
-    const raw = JSON.parse(r.body);
-    // tokenize returns [{id, name}] — parse name into title/number/hymnal
-    const results = raw.map(s => ({ id: s.id, ...parseSongName(s.name) }));
-    res.json({ success: true, results });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
+// GET /api/songs/library?q=&limit= — the whole list, for browsing and tidying
+router.get('/library', (req, res) => {
+  res.json({ success: true, songs: library.search(req.query.q || '', { limit: req.query.limit || 200 }), canManage: holdsArea(req.user, 'songs') });
+});
+
+// POST /api/songs/library { title, hymnal, number }
+router.post('/library', requireApproved, (req, res) => {
+  const result = library.add(req.body || {}, req.user);
+  if (result.error) return res.status(400).json({ success: false, error: result.error });
+  if (!result.existing) {
+    actionLog.record(req.user, {
+      area: 'songs', action: 'create', entity: 'song', entityId: result.song.id,
+      summary: `Added "${result.song.title}" to the song list`, details: result.song,
+    });
   }
+  res.status(result.existing ? 200 : 201).json({ success: true, ...result });
+});
+
+// PUT /api/songs/library/:id { title, hymnal, number }
+router.put('/library/:id', requireSongs, (req, res) => {
+  const result = library.update(req.params.id, req.body || {});
+  if (result.error) return res.status(result.error === 'No such song' ? 404 : 400).json({ success: false, error: result.error });
+  actionLog.record(req.user, {
+    area: 'songs', action: 'update', entity: 'song', entityId: result.song.id,
+    summary: `Corrected "${result.song.title}" in the song list`, details: { before: result.before, after: result.song },
+  });
+  res.json({ success: true, song: result.song });
+});
+
+// POST /api/songs/library/:id/merge { into } — this one is a duplicate of `into`
+router.post('/library/:id/merge', requireSongs, (req, res) => {
+  const result = library.merge(req.params.id, req.body?.into);
+  if (result.error) return res.status(400).json({ success: false, error: result.error });
+  actionLog.record(req.user, {
+    area: 'songs', action: 'delete', entity: 'song', entityId: result.from.id,
+    summary: `Merged "${result.from.title}" into "${result.into.title}"`, details: result,
+  });
+  res.json({ success: true, song: result.into });
 });
 
 // GET /api/songs/analytics
@@ -282,7 +281,10 @@ router.get('/analytics', (req, res) => {
   res.json({ success: true, topSongs, byService, byLeader, monthly, totals });
 });
 
-// POST /api/songs/sync — scrape latest records from admin panel
+// POST /api/songs/sync — import history from capshawchurch.org's song database.
+// One way: the portal owns the records now, and a record made here is numbered
+// clear of that site's ids (server/lib/songLibrary.js), so an import never
+// overwrites one.
 router.post('/sync', requireSongs, async (req, res) => {
   const pages    = Math.min(parseInt(req.body?.pages || 5), 20);
   const warnings = [];
@@ -334,67 +336,6 @@ router.post('/sync', requireSongs, async (req, res) => {
   }
 });
 
-// POST /api/songs/add — submit new service record to admin + cache locally
-router.post('/add', requireSongs, async (req, res) => {
-  const { day, month, year, serviceId, leaderId, songIds } = req.body;
-  if (!day || !month || !year || !serviceId || !leaderId || !Array.isArray(songIds) || !songIds.length)
-    return res.status(400).json({ success: false, error: 'day, month, year, serviceId, leaderId, and songIds are required' });
-
-  const date = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-
-  try {
-    const ck      = await getAdminSession();
-    const addPage = await adminFollow('https://capshawchurch.org/admin/songsdb/add', ck);
-    const csrf    = addPage.body.match(/name="_token"\s+value="([^"]+)"/)?.[1];
-    if (!csrf) throw new Error('Could not get CSRF token');
-
-    const body = qs.stringify({
-      _token:                    csrf,
-      'song_track[date][year]':  year,
-      'song_track[date][month]': parseInt(month).toString(),
-      'song_track[date][day]':   parseInt(day).toString(),
-      'song_track[leader_id]':   leaderId.toString(),
-      'song_track[service_id]':  serviceId.toString(),
-      'song_track[songs]':       songIds.join(','),
-    });
-
-    const postRes = await adminPost('/admin/songsdb/add', body, ck);
-    if (postRes.status !== 302)
-      throw new Error('Admin panel rejected the submission');
-
-    const newId = parseInt(postRes.location?.match(/\/edit\/(\d+)/)?.[1] ?? 0);
-
-    // Look up service name for SQLite storage
-    const opts        = await getFormOptions();
-    const serviceName = opts.services.find(s => s.id === parseInt(serviceId))?.name || serviceId.toString();
-    const leaderName  = opts.leaders.find(l => l.id === parseInt(leaderId))?.name || leaderId.toString();
-
-    if (newId) {
-      db.prepare('INSERT OR REPLACE INTO song_services (id, date, service, leader) VALUES (?, ?, ?, ?)')
-        .run(newId, date, serviceName, leaderName);
-
-      // Fetch the edit page so we have song names too
-      try {
-        const editPage = await fetchAdmin(`/admin/songsdb/edit/${newId}`);
-        const songData = parsePrePopulate(editPage.body);
-        if (songData.length) upsertServiceSongs(newId, songData);
-      } catch { /* non-fatal */ }
-    }
-
-    actionLog.record(req.user, {
-      area:     'songs',
-      action:   'create',
-      entity:   'song service',
-      entityId: newId,
-      summary:  `Recorded ${songIds.length} song${songIds.length === 1 ? '' : 's'} for ${serviceName} on ${date}, led by ${leaderName}`,
-      details:  { date, service: serviceName, leader: leaderName, songs: songIds.length },
-    });
-    res.json({ success: true, id: newId });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
 // GET /api/songs — list cached service records with optional filters
 router.get('/', (req, res) => {
   const { service = '', q = '', limit = 50, offset = 0 } = req.query;
@@ -415,7 +356,7 @@ router.get('/', (req, res) => {
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const records = db.prepare(`
-    SELECT ss.id, ss.date, ss.service, ss.leader,
+    SELECT ss.id, ss.date, ss.service, ss.leader, ss.source,
            COUNT(sx.song_id) AS song_count
     FROM   song_services ss
     LEFT   JOIN service_songs sx ON sx.service_id = ss.id
@@ -449,7 +390,8 @@ router.get('/:id', async (req, res) => {
     ORDER  BY sx.position
   `).all(id);
 
-  if (cached.length) return res.json({ success: true, record, songs: cached });
+  // Made here, or with no songs: there is nothing on the other site to ask.
+  if (cached.length || record.source === 'portal') return res.json({ success: true, record, songs: cached });
 
   // Not cached — fetch from admin
   try {

@@ -1,9 +1,10 @@
-// /api/songs keeps a local copy of the congregation's song records, which live
-// in the church website's admin panel. Everything that leaves the process goes
-// through the https mock, so these tests cover the login dance, the HTML
-// parsing, the caching rules and the analytics without a network.
+// /api/songs is the portal's song tracker. Its history can still be imported
+// from the church website's admin panel; everything that leaves the process
+// goes through the https mock, so these tests cover the login dance, the HTML
+// parsing, the caching rules, the analytics and the song library without a
+// network.
 //
-// The route caches its admin session and the add-form options in module state,
+// The route caches its admin session in module state,
 // so each test re-requires the router from a clean module registry. Both mocks
 // are pinned to globalThis so that reset hands back the same database and the
 // same request log the test is holding.
@@ -43,18 +44,6 @@ const listRow = ({ id, date, service, count, leader }) =>
 
 const editPage = songs =>
   `<script>$('#songs').tokenInput({ prePopulate: ${JSON.stringify(songs)}, theme: 'facebook' });</script>`;
-
-const ADD_FORM = `
-  <input name="_token" value="csrf-add">
-  <select name="song_track[leader_id]">
-    <option value="0">-- choose --</option>
-    <option value="7">Nelson, Tom</option>
-    <option value="9">Harris, Ray</option>
-  </select>
-  <select name="song_track[service_id]">
-    <option value="1">Sunday AM</option>
-    <option value="2">Sunday PM</option>
-  </select>`;
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -384,165 +373,57 @@ describe('POST /api/songs/sync', () => {
   });
 });
 
-// ─── GET /options and GET /search ─────────────────────────────────────────────
+// ─── The song library ─────────────────────────────────────────────────────────
 
-describe('GET /api/songs/options', () => {
-  test('reads the leaders and services off the add form', async () => {
-    https.__route('GET', '/admin/songsdb/add', () => ({ body: ADD_FORM }));
-
-    const res = await request(buildApp(MEMBER)).get('/api/songs/options');
-    expect(res.status).toBe(200);
-    // Only entries that look like a person's name ("Last, First") are leaders,
-    // which leaves the placeholder option out
-    expect(res.body.leaders).toEqual([{ id: 7, name: 'Nelson, Tom' }, { id: 9, name: 'Harris, Ray' }]);
-    expect(res.body.services).toEqual([{ id: 1, name: 'Sunday AM' }, { id: 2, name: 'Sunday PM' }]);
+describe('the song library', () => {
+  const KEEPER = { id: 3, role: 'approved', areas: ['songs'] };
+  const PENDING = { id: 4, role: 'pending' };
+  beforeEach(() => {
+    // Who added a song is a foreign key into users.
+    for (const u of [ADMIN, MEMBER, KEEPER, PENDING]) {
+      db.prepare("INSERT OR IGNORE INTO users (id, provider, provider_id, name, role) VALUES (?, 'local', ?, ?, ?)").run(u.id, `u${u.id}`, `User ${u.id}`, u.role);
+    }
+    db.prepare("INSERT INTO songs (id, title, hymnal, number) VALUES (10, 'Amazing Grace', 'Praise for the Lord', '123')").run();
+    db.prepare("INSERT INTO songs (id, title, hymnal, number) VALUES (11, 'Be With Me Lord', 'Praise for the Lord', '44')").run();
   });
 
-  test('an add form without the selects yields empty lists rather than an error', async () => {
-    https.__route('GET', '/admin/songsdb/add', () => ({ body: '<html>nothing</html>' }));
-    const res = await request(buildApp(MEMBER)).get('/api/songs/options');
-    expect(res.status).toBe(200);
-    expect(res.body).toMatchObject({ leaders: [], services: [] });
-  });
-
-  test('500 when the admin panel cannot be reached', async () => {
-    https.__route('GET', '/admin/login', () => ({ error: new Error('ENOTFOUND') }));
-    const res = await request(buildApp(MEMBER)).get('/api/songs/options');
-    expect(res.status).toBe(500);
-    expect(res.body.error).toBe('ENOTFOUND');
-  });
-});
-
-describe('GET /api/songs/search', () => {
-  test('an empty query returns nothing without calling the admin panel', async () => {
-    const res = await request(buildApp(MEMBER)).get('/api/songs/search?q=%20%20');
-    expect(res.status).toBe(200);
-    expect(res.body.results).toEqual([]);
+  test('search reads the portal\'s own list, and never calls the other site', async () => {
+    expect((await request(buildApp(MEMBER)).get('/api/songs/search?q=%20%20')).body.results).toEqual([]);
+    const res = await request(buildApp(MEMBER)).get('/api/songs/search?q=grace');
+    expect(res.body.results.map(s => s.title)).toEqual(['Amazing Grace']);
+    expect((await request(buildApp(MEMBER)).get('/api/songs/search?q=44')).body.results.map(s => s.id)).toEqual([11]);
     expect(https.__calls).toHaveLength(0);
   });
 
-  test('passes the query through and splits each result name into its parts', async () => {
-    https.__route('GET', /^\/admin\/songsdb\/tokenize/, () => ({
-      body: JSON.stringify([{ id: 10, name: 'AMAZING GRACE (123 - Praise for the Lord)' }]),
-    }));
+  test('any approved member can add a song, numbered clear of the other site\'s ids', async () => {
+    const res = await request(buildApp(MEMBER)).post('/api/songs/library').send({ title: '  Sing to Me of Heaven ', hymnal: 'Songs of Faith and Praise', number: '731' });
+    expect(res.status).toBe(201);
+    expect(res.body.song).toMatchObject({ title: 'Sing to Me of Heaven', number: '731', source: 'portal' });
+    expect(res.body.song.id).toBeGreaterThanOrEqual(1_000_000);
+    expect((await request(buildApp(PENDING)).post('/api/songs/library').send({ title: 'x' })).status).toBe(403);
+    expect((await request(buildApp(MEMBER)).post('/api/songs/library').send({ title: ' ' })).status).toBe(400);
+  });
 
-    const res = await request(buildApp(MEMBER)).get('/api/songs/search?q=amazing%20grace');
+  test('adding a song already on the list hands back that one', async () => {
+    const res = await request(buildApp(MEMBER)).post('/api/songs/library').send({ title: 'amazing grace!', number: '123' });
     expect(res.status).toBe(200);
-    expect(res.body.results).toEqual([
-      { id: 10, title: 'AMAZING GRACE', number: '123', hymnal: 'Praise for the Lord' },
-    ]);
-    expect(https.__calls.some(c => c.path.includes('q=amazing%20grace'))).toBe(true);
+    expect(res.body).toMatchObject({ existing: true, song: { id: 10 } });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM songs').get().n).toBe(2);
   });
 
-  test('500 when the admin panel answers with something that is not JSON', async () => {
-    https.__route('GET', /^\/admin\/songsdb\/tokenize/, () => ({ body: '<html>session expired</html>' }));
-    const res = await request(buildApp(MEMBER)).get('/api/songs/search?q=grace');
-    expect(res.status).toBe(500);
-  });
-});
+  test('whoever keeps the songs can correct one, and merge a duplicate into another', async () => {
+    db.prepare("INSERT INTO song_services (id, date, service, leader) VALUES (5, '2026-09-20', 'AM', 'x')").run();
+    db.prepare('INSERT INTO service_songs (service_id, song_id, position) VALUES (5, 11, 0)').run();
 
-// ─── POST /add ────────────────────────────────────────────────────────────────
+    expect((await request(buildApp(MEMBER)).put('/api/songs/library/11').send({ title: 'Be With Me, Lord' })).status).toBe(403);
+    const fixed = await request(buildApp(KEEPER)).put('/api/songs/library/11').send({ title: 'Be With Me, Lord' });
+    expect(fixed.body.song).toMatchObject({ id: 11, title: 'Be With Me, Lord', number: '44' });
 
-describe('POST /api/songs/add', () => {
-  const body = { day: 5, month: 1, year: 2025, serviceId: 1, leaderId: 7, songIds: [10, 11] };
-
-  function routeAddForm() {
-    https.__route('GET', '/admin/songsdb/add', () => ({ body: ADD_FORM }));
-  }
-
-  test('401 signed out, 403 for a member — adding is admin-only', async () => {
-    expect((await request(buildApp(null)).post('/api/songs/add').send(body)).status).toBe(401);
-    expect((await request(buildApp(MEMBER)).post('/api/songs/add').send(body)).status).toBe(403);
-  });
-
-  test('400 when any required part of the record is missing', async () => {
-    const bad = [
-      { ...body, day: undefined }, { ...body, month: undefined }, { ...body, year: undefined },
-      { ...body, serviceId: undefined }, { ...body, leaderId: undefined },
-      { ...body, songIds: [] }, { ...body, songIds: 'not an array' },
-    ];
-    for (const b of bad) {
-      const res = await request(buildApp(ADMIN)).post('/api/songs/add').send(b);
-      expect(res.status).toBe(400);
-      expect(res.body.error).toMatch(/required/);
-    }
-  });
-
-  test('submits the record and caches it under the id the admin panel assigns', async () => {
-    routeAddForm();
-    https.__route('POST', '/admin/songsdb/add', () => ({ status: 302, location: '/admin/songsdb/edit/77' }));
-    https.__route('GET',  '/admin/songsdb/edit/77', () => ({ body: editPage([{ id: 10, name: 'AMAZING GRACE (123 - Praise for the Lord)' }]) }));
-
-    const res = await request(buildApp(ADMIN)).post('/api/songs/add').send(body);
-    expect(res.status).toBe(200);
-    expect(res.body.id).toBe(77);
-
-    // Stored with the readable service and leader names, not their ids
-    expect(db.prepare('SELECT * FROM song_services WHERE id = 77').get())
-      .toMatchObject({ date: '2025-01-05', service: 'Sunday AM', leader: 'Nelson, Tom' });
-    expect(db.prepare('SELECT song_id FROM service_songs WHERE service_id = 77').all())
-      .toEqual([{ song_id: 10 }]);
-
-    // The form carries the CSRF token and the chosen songs
-    const post = https.__calls.find(c => c.method === 'POST' && c.path === '/admin/songsdb/add');
-    expect(post.body).toContain('_token=csrf-add');
-    expect(post.body).toContain(encodeURIComponent('song_track[songs]') + '=10%2C11');
-  });
-
-  test('pads a single-digit day and month into the stored date', async () => {
-    routeAddForm();
-    https.__route('POST', '/admin/songsdb/add', () => ({ status: 302, location: '/admin/songsdb/edit/78' }));
-    https.__route('GET',  '/admin/songsdb/edit/78', () => ({ body: '' }));
-
-    await request(buildApp(ADMIN)).post('/api/songs/add').send({ ...body, day: 3, month: 7 });
-    expect(db.prepare('SELECT date FROM song_services WHERE id = 78').get().date).toBe('2025-07-03');
-  });
-
-  test('falls back to the ids when the form offers no matching names', async () => {
-    https.__route('GET', '/admin/songsdb/add', () => ({ body: '<input name="_token" value="csrf-add">' }));
-    https.__route('POST', '/admin/songsdb/add', () => ({ status: 302, location: '/admin/songsdb/edit/79' }));
-    https.__route('GET',  '/admin/songsdb/edit/79', () => ({ body: '' }));
-
-    await request(buildApp(ADMIN)).post('/api/songs/add').send(body);
-    expect(db.prepare('SELECT * FROM song_services WHERE id = 79').get())
-      .toMatchObject({ service: '1', leader: '7' });
-  });
-
-  test('500 when the add form carries no CSRF token', async () => {
-    https.__route('GET', '/admin/songsdb/add', () => ({ body: '<html>signed out</html>' }));
-    const res = await request(buildApp(ADMIN)).post('/api/songs/add').send(body);
-    expect(res.status).toBe(500);
-    expect(res.body.error).toMatch(/CSRF token/);
-  });
-
-  test('500 when the admin panel refuses the submission', async () => {
-    routeAddForm();
-    https.__route('POST', '/admin/songsdb/add', () => ({ status: 200, body: 'Validation failed' }));
-    const res = await request(buildApp(ADMIN)).post('/api/songs/add').send(body);
-    expect(res.status).toBe(500);
-    expect(res.body.error).toMatch(/rejected the submission/);
-  });
-
-  test('a redirect with no new id reports success but caches nothing', async () => {
-    routeAddForm();
-    https.__route('POST', '/admin/songsdb/add', () => ({ status: 302, location: '/admin/songsdb' }));
-
-    const res = await request(buildApp(ADMIN)).post('/api/songs/add').send(body);
-    expect(res.status).toBe(200);
-    expect(res.body.id).toBe(0);
-    expect(db.prepare('SELECT COUNT(*) AS n FROM song_services').get().n).toBe(0);
-  });
-
-  test('a failure fetching the new record afterwards is not fatal', async () => {
-    routeAddForm();
-    https.__route('POST', '/admin/songsdb/add', () => ({ status: 302, location: '/admin/songsdb/edit/80' }));
-    https.__route('GET',  '/admin/songsdb/edit/80', () => ({ error: new Error('timed out') }));
-
-    const res = await request(buildApp(ADMIN)).post('/api/songs/add').send(body);
-    expect(res.status).toBe(200);
-    expect(res.body.id).toBe(80);
-    // The header is cached even though the song list could not be read
-    expect(db.prepare('SELECT COUNT(*) AS n FROM song_services').get().n).toBe(1);
+    const merged = await request(buildApp(KEEPER)).post('/api/songs/library/11/merge').send({ into: 10 });
+    expect(merged.status).toBe(200);
+    expect(db.prepare('SELECT id FROM songs').all()).toEqual([{ id: 10 }]);
+    expect(db.prepare('SELECT song_id FROM service_songs WHERE service_id = 5').all()).toEqual([{ song_id: 10 }]);
+    expect((await request(buildApp(KEEPER)).post('/api/songs/library/10/merge').send({ into: 10 })).status).toBe(400);
   });
 });
 
