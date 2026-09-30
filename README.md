@@ -456,6 +456,21 @@ can correct a song or merge a duplicate into the song it repeats.
    Record Keeping report read. The organizer can still change it afterwards,
    and the tracker follows.
 
+**The song leader is reminded.** Whoever the Serving Schedule has leading
+singing at a service is emailed four days (96 hours) before it and again the
+day before (24 hours), counted from the service type's start time (church
+time; kept on the Service Parts tab, and 9:00 when none is set). The email
+says whether the service is submitted, waiting for the organizer, or
+confirmed — the last two with the service itself — lists songs members have
+asked for, and links straight to that service on *Submit a Service*
+(`?page=upcoming&tab=service&date=…&service=…`). The leader's address is the
+directory's, or their own account's. Each reminder is claimed in
+`worship_reminders` before it is sent, so the timer in `server/index.js` can
+tick every 15 minutes and a restart sends nothing twice; a server that was
+down past the four-day mark sends only the final one, and a leader with no
+address is tried again on the next tick. The code is
+`server/mail/worshipReminders.js`.
+
 **Parts** (`worship_parts`) each say what they collect — a song, a person, a
 line of detail such as the passage or the sermon title — and, optionally,
 which Serving Schedule job already names the person. The usual order
@@ -1371,6 +1386,9 @@ one copy.
 - **A service is submitted** — whoever holds `worship-order` (the admins, if
   nobody does), the first time a song leader submits it. Changes after that
   go to their bell rather than their inbox.
+- **You are leading singing** — the song leader on the Serving Schedule, four
+  days and one day before the service, linking to it (see
+  [Upcoming Service](#upcoming-service)).
 
 ---
 

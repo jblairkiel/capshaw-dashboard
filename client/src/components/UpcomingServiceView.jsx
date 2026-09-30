@@ -21,12 +21,12 @@ import { call } from './upcoming/api';
 // here and handed to every tab, so a change on one shows on the others. A song
 // can be added from the header or from any song picker.
 
-export default function UpcomingServiceView({ user, tab = 'order', onTabChange, initialPlanId = null }) {
+export default function UpcomingServiceView({ user, tab = 'order', onTabChange, initialPlanId = null, initialSelection = null }) {
   const [overview, setOverview] = useState(null);
   const [error, setError]       = useState('');
   const [busy, setBusy]         = useState(false);
   const [notice, setNotice]     = useState(null);  // { text, error }
-  const [selection, setSelection] = useState(null);
+  const [selection, setSelection] = useState(initialSelection);
   const [adding, setAdding]     = useState(false);
   const [version, setVersion]   = useState(0);
 

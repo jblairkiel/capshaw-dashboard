@@ -203,6 +203,16 @@ describe('Submit a Service', () => {
   });
 });
 
+describe('a link to one service', () => {
+  test('the song leader\'s reminder opens that service on the Submit tab', async () => {
+    const fetchMock = mockApi();
+    render(<Page tab="service" initialSelection={{ date: '2026-10-07', service: 'Wednesday Bible Study' }} />);
+    await screen.findByLabelText('Order of the service');
+    expect(screen.getByLabelText('Which service')).toHaveValue('2026-10-07|Wednesday Bible Study');
+    expect(fetchMock.mock.calls.some(([u]) => u === '/api/worship/plans/for?date=2026-10-07&service=Wednesday%20Bible%20Study')).toBe(true);
+  });
+});
+
 describe('Song Requests', () => {
   test('any member can ask for a song', async () => {
     const fetchMock = mockApi();
@@ -245,7 +255,10 @@ describe('adding a song from the header', () => {
 describe('Service Parts', () => {
   const OUTLINES = {
     default: [1, 2, 1],
-    services: [{ id: 2, name: 'Sunday AM Worship', partIds: [1, 2, 1], own: false }, { id: 4, name: 'Wednesday Bible Study', partIds: [1, 1], own: true }],
+    services: [
+      { id: 2, name: 'Sunday AM Worship', startTime: '09:50', partIds: [1, 2, 1], own: false },
+      { id: 4, name: 'Wednesday Bible Study', startTime: '19:00', partIds: [1, 1], own: true },
+    ],
   };
 
   function partsApi() {
@@ -296,6 +309,21 @@ describe('Service Parts', () => {
     await waitFor(() => {
       const [[, opts]] = calls(fetchMock, 'POST', '/api/worship/parts');
       expect(JSON.parse(opts.body)).toMatchObject({ name: 'Welcome', takesPerson: true, takesSong: false });
+    });
+  });
+
+  test('each service\'s start time, which the song leader\'s reminders count back from', async () => {
+    const fetchMock = partsApi();
+    render(<Page tab="parts" />);
+    const times = await screen.findByRole('region', { name: 'Service times' });
+    expect(within(times).getByText(/emailed four days \(96 hours\) before/)).toBeInTheDocument();
+    const am = within(times).getByLabelText('Sunday AM Worship starts at');
+    expect(am).toHaveValue('09:50');
+    fireEvent.change(am, { target: { value: '10:00' } });
+    fireEvent.click(within(am.closest('li')).getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      const [[, opts]] = calls(fetchMock, 'PUT', '/api/worship/services/2/start-time');
+      expect(JSON.parse(opts.body)).toEqual({ time: '10:00' });
     });
   });
 });

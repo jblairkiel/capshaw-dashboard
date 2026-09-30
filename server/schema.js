@@ -1058,6 +1058,24 @@ function initSchema(db) {
   addColumn('songs', 'added_at',      'TEXT');
   addColumn('song_services', 'source', "TEXT NOT NULL DEFAULT 'capshawchurch'");
 
+  // When each service starts ('HH:MM', church time), so the song leader can be
+  // reminded a set number of hours before it. Guessed once from the name and
+  // the newsletter's printed times; the worship organizer changes them on the
+  // Service Parts tab.
+  const hadStartTime = db.prepare('PRAGMA table_info(service_types)').all().some(c => c.name === 'start_time');
+  addColumn('service_types', 'start_time', "TEXT NOT NULL DEFAULT ''");
+  if (!hadStartTime) {
+    const guessTime = name => {
+      if (/wednesday/i.test(name)) return '19:00';
+      if (/sunday/i.test(name) && /\b(pm|evening|night)\b/i.test(name)) return '17:00';
+      if (/sunday/i.test(name) && /worship/i.test(name)) return '09:50';
+      if (/sunday/i.test(name) && /(bible|class|study)/i.test(name)) return '09:00';
+      return '';
+    };
+    const setTime = db.prepare('UPDATE service_types SET start_time = ? WHERE id = ?');
+    for (const { id, name } of db.prepare('SELECT id, name FROM service_types').all()) setTime.run(guessTime(name), id);
+  }
+
   db.exec(`
     -- The parts a service is made of, kept by whoever looks after the worship
     -- order. Each says what it collects: a song, a person, and/or a line of
@@ -1135,6 +1153,19 @@ function initSchema(db) {
       updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_song_requests_song ON song_requests(song_id, status);
+
+    -- The song leader's reminders before a service ('first' four days out,
+    -- 'final' the day before), claimed before sending so each goes once.
+    CREATE TABLE IF NOT EXISTS worship_reminders (
+      id       INTEGER PRIMARY KEY AUTOINCREMENT,
+      date     TEXT    NOT NULL,
+      service  TEXT    NOT NULL,
+      kind     TEXT    NOT NULL,               -- first | final
+      leader   TEXT    NOT NULL DEFAULT '',
+      email    TEXT    NOT NULL DEFAULT '',     -- '' when the leader has no address on file
+      sent_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (date, service, kind)
+    );
   `);
 
   // A usual Church of Christ service to start from; the organizer changes it

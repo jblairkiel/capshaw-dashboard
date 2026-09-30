@@ -127,7 +127,7 @@ const ALL_TAB_IDS = new Set([
   ...OFFICE_ITEMS.map(i => i.id),
 ]);
 
-// A generated email points here with ?page=&group=&event=&workflow=&plan=&tab= (see
+// A generated email points here with ?page=&group=&event=&workflow=&plan=&tab=&date=&service= (see
 // server/mail/notify.js). Read once on load and then the URL is stripped, so
 // a later remount — impersonation starting or stopping, say — does not jump
 // the person back to the same link a second time.
@@ -149,6 +149,12 @@ function deepLinkFromUrl() {
     eventId:    toId(params.get('event')),
     workflowId: toId(params.get('workflow')),
     planId:     toId(params.get('plan')),
+    // A service by its day and name (the song leader's reminder links here).
+    // Only a real date and a short name are kept; the page looks the service
+    // up, so anything else simply finds nothing.
+    service:    /^\d{4}-\d{2}-\d{2}$/.test(params.get('date') || '') && /^[\w .,&'()/-]{1,80}$/.test(params.get('service') || '')
+      ? { date: params.get('date'), service: params.get('service') }
+      : null,
     // Only a known tab name is kept; anything else opens the page's first.
     tab:        alias ? alias.tab : (/^[a-z-]{1,20}$/.test(params.get('tab') || '') ? params.get('tab') : null),
   };
@@ -416,7 +422,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       {/* Standalone tabs (no scraped data needed) */}
       {!updating && activeTab === 'upcoming' && (
         <main className="w-full max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
-          <UpcomingServiceView user={user} tab={upcomingTab} onTabChange={setUpcomingTab} initialPlanId={deepLink?.planId} />
+          <UpcomingServiceView user={user} tab={upcomingTab} onTabChange={setUpcomingTab} initialPlanId={deepLink?.planId} initialSelection={deepLink?.service} />
         </main>
       )}
       {!updating && activeTab === 'bible-class' && (

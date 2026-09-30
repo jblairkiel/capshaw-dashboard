@@ -180,6 +180,18 @@ router.put('/outlines/:serviceTypeId', requireOrganizer, (req, res) => {
   res.json({ success: true, outlines: plans.outlines() });
 });
 
+// PUT /api/worship/services/:id/start-time { time: 'HH:MM' | '' }
+router.put('/services/:id/start-time', requireOrganizer, (req, res) => {
+  const result = plans.setStartTime(req.params.id, req.body?.time);
+  if (result.error) return fail(res, result);
+  actionLog.record(req.user, {
+    area: 'worship-order', action: 'update', entity: 'service type', entityId: result.service.id,
+    summary: `Set ${result.service.name} to start at ${result.service.startTime || 'no set time'}`,
+    details: { before: result.before, after: result.service.startTime },
+  });
+  res.json({ success: true, service: result.service });
+});
+
 // ─── Song requests ────────────────────────────────────────────────────────────
 
 router.get('/requests', (req, res) => {

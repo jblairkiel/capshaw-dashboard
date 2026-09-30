@@ -120,6 +120,47 @@ function OrderEditor({ parts, outlines, onSaved }) {
   );
 }
 
+// When each service starts. The song leader is reminded by email four days
+// and one day before it, counted from this time.
+function ServiceTimes({ services, onSaved }) {
+  const [times, setTimes] = useState(() => Object.fromEntries(services.map(s => [s.id, s.startTime || ''])));
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState('');
+
+  async function save(service) {
+    setError(''); setSaved('');
+    try {
+      await call(`/api/worship/services/${service.id}/start-time`, { method: 'PUT', body: JSON.stringify({ time: times[service.id] }) });
+      setSaved(service.name);
+      onSaved();
+    } catch (e) { setError(e.message); }
+  }
+
+  return (
+    <section className="card space-y-3 max-w-2xl" aria-label="Service times">
+      <div>
+        <h3 className="font-semibold text-church-navy">Service times</h3>
+        <p className="text-xs text-gray-500 mt-0.5">
+          The song leader on the Serving Schedule is emailed four days (96 hours) before the service they lead, and again the day before (24 hours), with a link to submit it. Those count back from these times.
+        </p>
+      </div>
+      <ul className="space-y-2">
+        {services.map(s => (
+          <li key={s.id} className="flex items-center gap-2 text-sm">
+            <span className="flex-1 min-w-0 text-church-navy">{s.name}</span>
+            <input type="time" value={times[s.id]} onChange={e => setTimes(t => ({ ...t, [s.id]: e.target.value }))}
+              aria-label={`${s.name} starts at`} className="border border-gray-300 rounded-lg px-2 py-1 text-sm" />
+            <button onClick={() => save(s)} disabled={times[s.id] === (s.startTime || '')}
+              className="btn-primary text-xs py-1.5 px-3 disabled:opacity-40">Save</button>
+          </li>
+        ))}
+      </ul>
+      {saved && <p className="text-xs text-emerald-700" role="status">Saved the time for {saved}.</p>}
+      {error && <p className="text-xs text-red-600" role="alert">{error}</p>}
+    </section>
+  );
+}
+
 export default function PartsTab({ onChanged }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -164,6 +205,7 @@ export default function PartsTab({ onChanged }) {
         </div>
       </section>
       <OrderEditor parts={data.parts} outlines={data.outlines} onSaved={changed} />
+      <ServiceTimes key={data.outlines.services.map(s => `${s.id}:${s.startTime}`).join('|')} services={data.outlines.services} onSaved={changed} />
     </div>
   );
 }

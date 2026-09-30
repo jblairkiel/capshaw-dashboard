@@ -365,7 +365,7 @@ function worshipPlanSubmitted({ plan, to }) {
 }
 
 module.exports = {
-  compose, link, worshipPlanSubmitted,
+  compose, link, worshipPlanSubmitted, planLines, serviceDay,
   taskAssigned, workflowCompleted, recipientsForTask, schedulePublished, monthlyReport,
   groupEventPublished, groupEventCancelled, groupEventChanged,
 };

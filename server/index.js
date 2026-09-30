@@ -49,4 +49,16 @@ app.listen(PORT, () => {
   };
   remind();
   setInterval(remind, REMINDER_TICK_MS);
+
+  // The song leader's reminders, four days and one day before each service.
+  // Each is claimed before it is sent (worship_reminders), so ticking often is
+  // safe and a restart sends nothing twice.
+  const leaderReminders = require('./mail/worshipReminders');
+  const remindLeaders = () => {
+    try {
+      for (const r of leaderReminders.tick()) console.log(`[worship] ${r.kind} reminder to ${r.leader} for ${r.service} on ${r.date}`);
+    } catch (err) { console.error('[worship] song leader reminder failed:', err.message); }
+  };
+  remindLeaders();
+  setInterval(remindLeaders, REMINDER_TICK_MS);
 });

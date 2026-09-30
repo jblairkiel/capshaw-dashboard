@@ -52,7 +52,19 @@ function serviceType(name) {
 }
 
 function activeServices() {
-  return db.prepare('SELECT id, name, weekday, tracking, song_names FROM service_types WHERE active = 1 ORDER BY sort_order, name').all();
+  return db.prepare('SELECT id, name, weekday, tracking, song_names, start_time FROM service_types WHERE active = 1 ORDER BY sort_order, name').all();
+}
+
+// When a service starts, which is when the song leader's reminders count back
+// from (server/mail/worshipReminders.js).
+function setStartTime(serviceTypeId, time) {
+  const row = db.prepare('SELECT * FROM service_types WHERE id = ?').get(Number(serviceTypeId));
+  if (!row) return { error: 'No such service', status: 404 };
+  const value = String(time ?? '').trim();
+  if (value && !/^([01]?\d|2[0-3]):[0-5]\d$/.test(value)) return { error: 'A start time is written like 09:50 or 19:00' };
+  const normal = value ? value.padStart(5, '0') : '';
+  db.prepare('UPDATE service_types SET start_time = ? WHERE id = ?').run(normal, row.id);
+  return { before: row.start_time, service: { id: row.id, name: row.name, startTime: normal } };
 }
 
 // The Serving Schedule names its services its own way.
@@ -163,7 +175,7 @@ function outlineFor(serviceTypeId) {
 function outlines() {
   return {
     default: outlineFor(null).partIds,
-    services: activeServices().map(s => ({ id: s.id, name: s.name, ...outlineFor(s.id) })),
+    services: activeServices().map(s => ({ id: s.id, name: s.name, startTime: s.start_time, ...outlineFor(s.id) })),
   };
 }
 
@@ -497,9 +509,9 @@ function holdersOfOrganizer() {
 
 module.exports = {
   STATUSES, REQUEST_STATUSES,
-  canOrganize, keepsSongs, canSubmit, canEdit, isScheduledLeader,
+  canOrganize, keepsSongs, canSubmit, canEdit, isScheduledLeader, nameKey, serviceType,
   servingFor, servingServiceFor, trackerName,
-  listParts, addPart, updatePart, outlines, outlineFor, setOutline,
+  listParts, addPart, updatePart, outlines, outlineFor, setOutline, setStartTime,
   getPlan, planFor, plansBetween, template, submit, confirm, remove,
   getRequest, listRequests, addRequest, setRequestStatus,
   upcoming, holdersOfOrganizer,

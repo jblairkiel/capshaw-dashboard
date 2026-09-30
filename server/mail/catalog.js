@@ -12,6 +12,7 @@ const notify = require('./notify');
 const accounts = require('./accounts');
 const newsletter = require('./newsletter');
 const recordsReminder = require('./records');
+const leaderReminders = require('./worshipReminders');
 
 const CATEGORIES = [
   { id: 'notifications', label: 'Notifications', description: 'Messages to one person about their own account or something waiting on them.' },
@@ -137,6 +138,18 @@ const EMAILS = [
     trigger: 'A song leader submits a service on the Upcoming Service page.',
     like: ['worship-plan:%:submitted'],
     preview: () => notify.compose.worshipPlanSubmitted({ plan: SAMPLE.plan }),
+  },
+
+  {
+    id: 'song-leader-reminder', category: 'notifications',
+    name: 'You are leading singing',
+    audience: 'The song leader on the Serving Schedule for that service',
+    trigger: 'Four days (96 hours) before each service, and a final reminder the day before (24 hours). It says whether the service has been submitted yet, and links straight to it.',
+    like: ['worship-reminder:%'],
+    preview: () => leaderReminders.compose.songLeaderReminder({
+      kind: 'first', date: SAMPLE.plan.date, service: SAMPLE.plan.service, time: '09:50', leader: SAMPLE.user.name,
+      plan: null, requests: [{ song: { title: 'Just As I Am' }, forDate: '' }],
+    }),
   },
 
   // ── Groups ─────────────────────────────────────────────────────────────────
