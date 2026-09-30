@@ -165,8 +165,8 @@ implicitly, and nobody else holds one until an admin grants it.
 
 | Area | The page it unlocks | What the holder can do |
 |---|---|---|
-| `worship-order` | This Sunday | Upload, replace and remove the order of service |
-| `songs` | Songs We Sing | Add songs, record what was sung, keep the song of the week |
+| `worship-order` | Upcoming Service | Confirm or change the services song leaders submit, keep the list of service parts and their usual order, and upload the printed order of service — see [Upcoming Service](#upcoming-service) |
+| `songs` | Upcoming Service | Submit any service's songs, tidy the song library (correct or merge songs), answer song requests, and import history from capshawchurch.org |
 | `announcements` | Announcements | Write, edit and retire announcements and events |
 | `serving-schedule` | Serving Schedule, Service Roster | Build a month of worship jobs, fill or clear any slot, and record what each man will volunteer for and the days he is away |
 | `attendance` | Attendance | Record attendance counts and correct earlier ones (the list of services they pick from is an admin's — see [Service types](#service-types)) |
@@ -416,6 +416,63 @@ day, and among people with equally few turns it takes the one who said *glad
 to* first. See [Monthly Worship Schedule](#monthly-worship-schedule).
 
 ---
+
+## Upcoming Service
+
+**Worship → Upcoming Service** is Sunday's worship on one page, a tab each:
+
+| Tab | What it is |
+|---|---|
+| Order of Worship | The services coming up (every weekly service on its day — see [Service types](#service-types) and Record Keeping's settings), each as it was submitted, and the printed order of service underneath |
+| Submit a Service | The song leader lays out a whole service, part by part |
+| Song Tracker | What was sung, when, and who led it; analytics; and the song library |
+| Song Requests | Anybody asking for a song, for a particular Sunday or any time |
+| Service Parts | The worship organizer's list of parts, and the usual order of them (only for `worship-order`) |
+
+The old **This Sunday** and **Songs We Sing** pages are tabs of it now; links
+to `?page=order` and `?page=songs` still land on the right tab.
+
+**The song library is the portal's.** Songs and service records imported from
+capshawchurch.org's song database keep that site's ids; anything made here is
+numbered from 1,000,000 (`PORTAL_IDS_FROM` in `server/lib/songLibrary.js`), so
+an import — now one-way, from the Song Tracker's *Import* button — can never
+land on top of it. Any approved member can add a song, from the header or from
+any song picker, and it can be chosen everywhere at once. Whoever holds `songs`
+can correct a song or merge a duplicate into the song it repeats.
+
+**A service goes from submitted to confirmed.**
+
+1. The song leader on the Serving Schedule for that service (or anybody holding
+   `songs` or `worship-order`) opens it on *Submit a Service*. It starts in the
+   usual order for that service, with the names the Serving Schedule already
+   has against the parts that say which job fills them.
+2. Submitting saves it and emails the worship organizer (`worship-order`),
+   with the whole service in the message and a link straight to it. The
+   leader can keep changing it until it is confirmed.
+3. The organizer confirms it, from the email's link or the Order of Worship
+   tab. Confirming writes its songs into the song tracker (`song_services` /
+   `service_songs`, named the way the tracker names that service — the service
+   type's *song names*), which is what the history, the analytics and the
+   Record Keeping report read. The organizer can still change it afterwards,
+   and the tracker follows.
+
+**Parts** (`worship_parts`) each say what they collect — a song, a person, a
+line of detail such as the passage or the sermon title — and, optionally,
+which Serving Schedule job already names the person. The usual order
+(`worship_outlines`) is one list for every service, and a service that runs
+differently (Wednesday) can have its own. A plan copies each part's name, so a
+renamed or retired part does not change a service already submitted.
+
+**Requests** (`song_requests`) go *open* → *planned* when a submitted service
+has the song (the asker is told in their bell) → *done* when that service is
+confirmed. Changing the service so it no longer has the song puts the request
+back to open. The asker can withdraw it; `songs` or `worship-order` can
+decline it, mark it sung, or reopen it.
+
+The code is `server/lib/worshipPlans.js` and `server/routes/worship.js`
+(`/api/worship`), `server/lib/songLibrary.js` and the library routes in
+`server/routes/songTracker.js`, and `client/src/components/UpcomingServiceView.jsx`
+with its tabs in `client/src/components/upcoming/`.
 
 ## Service types
 
@@ -1311,6 +1368,9 @@ one copy.
   posted meeting tells only the people who said they were coming, because
   telling a whole group about a meeting they never answered is how a list gets
   muted.
+- **A service is submitted** — whoever holds `worship-order` (the admins, if
+  nobody does), the first time a song leader submits it. Changes after that
+  go to their bell rather than their inbox.
 
 ---
 

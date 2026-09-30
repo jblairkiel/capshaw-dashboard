@@ -17,6 +17,7 @@ const lessonPlannerRoutes        = require('./routes/lessonPlanner');
 const announcementRoutes         = require('./routes/announcements');
 const authRoutes                 = require('./routes/auth');
 const songRoutes                 = require('./routes/songTracker');
+const worshipRoutes              = require('./routes/worship');
 const profileRoutes              = require('./routes/profile');
 const workflowRoutes             = require('./routes/workflows');
 const mailRoutes                 = require('./routes/mailGroups');
@@ -128,6 +129,7 @@ function createApp() {
   app.use('/api/lesson-planner',  lessonPlannerRoutes);
   app.use('/api/announcements',   announcementRoutes);
   app.use('/api/songs',           songRoutes);
+  app.use('/api/worship',         worshipRoutes);
   app.use('/api/admin',           adminRoutes);
   app.use('/api/profile',         profileRoutes);
   app.use('/api/workflows',       workflowRoutes);

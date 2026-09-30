@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import SongTrackerView from '../components/SongTrackerView';
 
@@ -213,131 +213,95 @@ describe('SongTrackerView — syncing (admin)', () => {
     render(<SongTrackerView user={ADMIN} />);
     await screen.findByText('Sun AM');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Sync' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Import from capshawchurch.org' }));
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       '/api/songs/sync', expect.objectContaining({ method: 'POST' })
     ));
-    expect(await screen.findByText('Synced 3 records')).toBeInTheDocument();
+    expect(await screen.findByText('Imported 3 records')).toBeInTheDocument();
   });
 
   test('reports a sync that failed', async () => {
     mockApi({ sync: { success: false, error: 'Admin session expired' } });
     render(<SongTrackerView user={ADMIN} />);
     await screen.findByText('Sun AM');
-    fireEvent.click(screen.getByRole('button', { name: 'Sync' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Import from capshawchurch.org' }));
     expect(await screen.findByText('Sync failed: Admin session expired')).toBeInTheDocument();
   });
 });
 
 // ─── Add service form ─────────────────────────────────────────────────────────
 
-describe('SongTrackerView — adding a record (admin)', () => {
-  test('opens the form and lists the service options', async () => {
+describe('SongTrackerView — adding a record', () => {
+  test('Add goes to the Submit a Service tab rather than a form of its own', async () => {
     mockApi();
-    render(<SongTrackerView user={ADMIN} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Add' }));
-
-    expect(await screen.findByText('Add Service Record')).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Sunday AM' })).toBeInTheDocument();
+    const onSubmitService = vi.fn();
+    render(<SongTrackerView user={ADMIN} onSubmitService={onSubmitService} />);
+    await screen.findByText('Sun AM');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(onSubmitService).toHaveBeenCalled();
   });
 
-  test('reports a failure to load the form options', async () => {
-    mockApi({ options: { success: false, error: 'Could not reach admin panel' } });
+  test('a record made here has nothing to refresh from', async () => {
+    mockApi({ records: { success: true, records: [RECORD({ source: 'portal' })], total: 1 } });
     render(<SongTrackerView user={ADMIN} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Add' }));
-    expect(await screen.findByText('Could not reach admin panel')).toBeInTheDocument();
+    // "Sun AM" is also a filter chip; the leader's name is the row's own.
+    fireEvent.click(await screen.findByText('Tom Nelson'));
+    await screen.findByText('Amazing Grace');
+    expect(screen.queryByRole('button', { name: /Refresh from server/ })).toBeNull();
   });
+});
 
-  test('filters leaders as you type, and picking one confirms the choice', async () => {
-    mockApi();
-    render(<SongTrackerView user={ADMIN} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Add' }));
-    await screen.findByText('Add Service Record');
+describe('SongTrackerView — the library', () => {
+  const LIBRARY = {
+    success: true, canManage: true,
+    songs: [
+      { id: 10, title: 'Amazing Grace', hymnal: 'Praise', number: '123', source: 'capshawchurch', timesSung: 4 },
+      { id: 1000001, title: 'Amazing Grace!', hymnal: '', number: '', source: 'portal', timesSung: 0 },
+    ],
+  };
 
-    fireEvent.change(screen.getByPlaceholderText('Search leaders…'), { target: { value: 'Tom' } });
-    fireEvent.click(await screen.findByRole('button', { name: 'Tom Nelson' }));
-    expect(screen.getByText('Leader selected')).toBeInTheDocument();
-  });
-
-  test('a search with no matches says so', async () => {
-    mockApi();
-    render(<SongTrackerView user={ADMIN} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Add' }));
-    await screen.findByText('Add Service Record');
-    fireEvent.change(screen.getByPlaceholderText('Search leaders…'), { target: { value: 'zzz' } });
-    expect(await screen.findByText('No matches')).toBeInTheDocument();
-  });
-
-  test('refuses to submit without a leader or a song', async () => {
-    mockApi();
-    render(<SongTrackerView user={ADMIN} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Add' }));
-    await screen.findByText('Add Service Record');
-
-    fireEvent.click(screen.getByRole('button', { name: /Submit Service Record/i }));
-    expect(await screen.findByText(/Select a leader/i)).toBeInTheDocument();
-  });
-
-  test('adding a song lists it, and removing it clears the list again', async () => {
-    mockApi();
-    render(<SongTrackerView user={ADMIN} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Add' }));
-    await screen.findByText('Add Service Record');
-
-    fireEvent.change(screen.getByPlaceholderText('Search and add songs…'), { target: { value: 'grace' } });
-    fireEvent.mouseDown(await screen.findByText('Amazing Grace'));
-    const listedSong = await screen.findByText('#123');
-    expect(listedSong).toBeInTheDocument();
-
-    // The remove control is the only button inside that song's own row.
-    const songRow = listedSong.closest('li');
-    fireEvent.click(within(songRow).getByRole('button'));
-    expect(screen.queryByText('#123')).not.toBeInTheDocument();
-  });
-
-  test('a complete submission goes through and returns to history', async () => {
+  function libraryApi(library = LIBRARY) {
     const fetchMock = mockApi();
-    render(<SongTrackerView user={ADMIN} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Add' }));
-    await screen.findByText('Add Service Record');
+    const inner = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation((url, opts = {}) => {
+      if (String(url).startsWith('/api/songs/library')) {
+        const body = (opts.method || 'GET') === 'GET' ? library : { success: true, song: library.songs[0] };
+        return Promise.resolve({ json: () => Promise.resolve(body) });
+      }
+      return inner(url, opts);
+    });
+    return fetchMock;
+  }
 
-    fireEvent.change(screen.getByPlaceholderText('Search leaders…'), { target: { value: 'Tom' } });
-    fireEvent.click(await screen.findByRole('button', { name: 'Tom Nelson' }));
-
-    fireEvent.change(screen.getByPlaceholderText('Search and add songs…'), { target: { value: 'grace' } });
-    fireEvent.mouseDown(await screen.findByText('Amazing Grace'));
-
-    fireEvent.click(screen.getByRole('button', { name: /Submit Service Record/i }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      '/api/songs/add', expect.objectContaining({ method: 'POST' })
-    ));
-    // Back on the history list — "Sun AM" also names a filter chip, so check
-    // the record itself came back via its leader.
-    expect(await screen.findByText('Tom Nelson')).toBeInTheDocument();
+  test('lists every song, how often it was sung, and which were added here', async () => {
+    libraryApi();
+    render(<SongTrackerView user={MEMBER} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Library' }));
+    expect(await screen.findByText('sung 4×')).toBeInTheDocument();
+    expect(screen.getByText('not sung yet')).toBeInTheDocument();
+    expect(screen.getByText('added here')).toBeInTheDocument();
   });
 
-  test('a refused submission is shown, and the form stays open', async () => {
-    mockApi({ add: { success: false, error: 'Admin panel rejected the submission' } });
+  test('whoever keeps the songs can merge a duplicate into the song it repeats', async () => {
+    const fetchMock = libraryApi();
+    vi.stubGlobal('confirm', () => true);
     render(<SongTrackerView user={ADMIN} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Add' }));
-    await screen.findByText('Add Service Record');
-
-    fireEvent.change(screen.getByPlaceholderText('Search leaders…'), { target: { value: 'Tom' } });
-    fireEvent.click(await screen.findByRole('button', { name: 'Tom Nelson' }));
-    fireEvent.change(screen.getByPlaceholderText('Search and add songs…'), { target: { value: 'grace' } });
-    fireEvent.mouseDown(await screen.findByText('Amazing Grace'));
-    fireEvent.click(screen.getByRole('button', { name: /Submit Service Record/i }));
-
-    expect(await screen.findByText('Admin panel rejected the submission')).toBeInTheDocument();
-    expect(screen.getByText('Add Service Record')).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Library' }));
+    await screen.findByText('Amazing Grace!');
+    fireEvent.click(screen.getAllByRole('button', { name: 'Edit' })[1]);
+    fireEvent.change(screen.getByLabelText('Merge into'), { target: { value: '10' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Merge' }));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([u, o]) => u === '/api/songs/library/1000001/merge' && o?.method === 'POST');
+      expect(JSON.parse(call[1].body)).toEqual({ into: 10 });
+    });
   });
 
-  test('going back returns to history without saving', async () => {
-    mockApi();
-    render(<SongTrackerView user={ADMIN} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Add' }));
-    await screen.findByText('Add Service Record');
-    fireEvent.click(screen.getByRole('button', { name: /Back to history/i }));
-    expect(await screen.findByText('Tom Nelson')).toBeInTheDocument();
+  test('a member sees no Edit button', async () => {
+    libraryApi({ ...LIBRARY, canManage: false });
+    render(<SongTrackerView user={MEMBER} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Library' }));
+    await screen.findByText('sung 4×');
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
   });
 });

@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Header from './components/Header';
-import OrderOfService from './components/OrderOfService';
 import CalendarView from './components/CalendarView';
 import AttendanceView from './components/AttendanceView';
 import LivestreamsView from './components/LivestreamsView';
@@ -13,7 +12,7 @@ import AnnouncementsView from './components/AnnouncementsView';
 import AnnouncementsDisplay from './components/AnnouncementsDisplay';
 import LoginPage from './components/LoginPage';
 import UsersView from './components/UsersView';
-import SongTrackerView from './components/SongTrackerView';
+import UpcomingServiceView from './components/UpcomingServiceView';
 import DatabaseAdminView from './components/DatabaseAdminView';
 import DirectoryView from './components/DirectoryView';
 import MyProfileView from './components/MyProfileView';
@@ -38,15 +37,15 @@ import { hasWriteAccess, isAdmin, hasArea } from './lib/roles';
 
 const API = '/api/members';
 
-// Every tab id is unchanged — only the wording is, so the portal reads as a
-// place for the whole church family rather than an internal staff tool.
+// The wording is for the whole church family rather than an internal staff
+// tool. "This Sunday" and "Songs We Sing" are now tabs of Upcoming Service
+// (see PAGE_ALIASES below, which keeps their old ids working).
 const BASE_GROUPS = [
   {
     id: 'worship',
     label: 'Worship',
     items: [
-      { id: 'order',         label: 'This Sunday' },
-      { id: 'songs',         label: 'Songs We Sing' },
+      { id: 'upcoming',      label: 'Upcoming Service' },
       { id: 'announcements', label: 'Announcements' },
     ],
   },
@@ -114,20 +113,30 @@ function officeGroupFor(user) {
 // rather than against what officeGroupFor(user) happens to return, since an
 // office item a link points at but this user cannot use should fall back to
 // the default tab, not silently render nothing.
+// Pages that became tabs of Upcoming Service. Old links, the bell, and any
+// page that still sends people to "songs" land on the right tab.
+const PAGE_ALIASES = {
+  order: { page: 'upcoming', tab: 'order' },
+  songs: { page: 'upcoming', tab: 'tracker' },
+};
+
 const ALL_TAB_IDS = new Set([
   ...BASE_GROUPS.flatMap(g => g.items).map(i => i.id),
+  ...Object.keys(PAGE_ALIASES),
   ...PROFILE_GROUP.items.map(i => i.id),
   ...OFFICE_ITEMS.map(i => i.id),
 ]);
 
-// A generated email points here with ?page=&group=&event=&workflow= (see
+// A generated email points here with ?page=&group=&event=&workflow=&plan=&tab= (see
 // server/mail/notify.js). Read once on load and then the URL is stripped, so
 // a later remount — impersonation starting or stopping, say — does not jump
 // the person back to the same link a second time.
 function deepLinkFromUrl() {
   const params = new URLSearchParams(window.location.search);
-  const page = params.get('page');
-  if (!page || !ALL_TAB_IDS.has(page)) return null;
+  const asked = params.get('page');
+  if (!asked || !ALL_TAB_IDS.has(asked)) return null;
+  const alias = PAGE_ALIASES[asked];
+  const page = alias ? alias.page : asked;
 
   const toId = value => {
     const n = Number(value);
@@ -139,13 +148,16 @@ function deepLinkFromUrl() {
     groupId:    toId(params.get('group')),
     eventId:    toId(params.get('event')),
     workflowId: toId(params.get('workflow')),
+    planId:     toId(params.get('plan')),
+    // Only a known tab name is kept; anything else opens the page's first.
+    tab:        alias ? alias.tab : (/^[a-z-]{1,20}$/.test(params.get('tab') || '') ? params.get('tab') : null),
   };
 }
 
 // Pages that fetch what they need themselves, rather than waiting on the
 // scraped payload the app holds.
 const STANDALONE_TABS = new Set([
-  'bible-class', 'announcements', 'order', 'calendar', 'users', 'songs', 'database',
+  'bible-class', 'announcements', 'upcoming', 'calendar', 'users', 'database',
   'directory', 'profile', 'inbox', 'mail-groups', 'emails', 'record-keeping', 'livestreams',
   'assignments', 'visitors', 'leadership', 'action-history','service-roster', 'bulletin',
   'groups', 'bug-reports', 'how-it-works', 'member-match', 'contributions',
@@ -215,7 +227,15 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
   // clicking anywhere else in the nav after landing must behave exactly like
   // it always has.
   const [deepLink] = useState(deepLinkFromUrl);
-  const [activeTab,   setActiveTab]   = useState(deepLink?.page || 'order');
+  const [activeTab,   setActiveTab]   = useState(deepLink?.page || 'upcoming');
+  const [upcomingTab, setUpcomingTab] = useState(deepLink?.tab || 'order');
+  // Every way of moving between pages goes through here, so a page that became
+  // a tab ("songs", "order") still arrives where it should.
+  const goTo = useCallback(id => {
+    const alias = PAGE_ALIASES[id];
+    if (alias) setUpcomingTab(alias.tab);
+    setActiveTab(alias ? alias.page : id);
+  }, []);
   const [siteData,    setSiteData]    = useState(null);
 
   useEffect(() => {
@@ -276,7 +296,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       )}
       {/* The bell opens whatever it mentions, which is why the header needs
           to be able to change the tab. */}
-      <Header user={user} onLogout={onLogout} onGoToPage={setActiveTab} />
+      <Header user={user} onLogout={onLogout} onGoToPage={goTo} />
 
       {/* Pending approval banner */}
       {user?.role === 'pending' && (
@@ -295,7 +315,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
         <div className="max-w-6xl mx-auto flex items-center">
           {/* Phones: one folder menu. Tablets up: the full dropdown row. */}
           <div className="flex md:hidden flex-1 min-w-0">
-            <MobileNav groups={GROUPS} activeTab={activeTab} onSelect={setActiveTab} />
+            <MobileNav groups={GROUPS} activeTab={activeTab} onSelect={goTo} />
           </div>
           <div className="hidden md:flex flex-1 min-w-0">
             {GROUPS.map(group => (
@@ -303,7 +323,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
                 key={group.id}
                 group={group}
                 activeTab={activeTab}
-                onSelect={setActiveTab}
+                onSelect={goTo}
               />
             ))}
           </div>
@@ -394,9 +414,9 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       )}
 
       {/* Standalone tabs (no scraped data needed) */}
-      {!updating && activeTab === 'songs' && (
-        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
-          <SongTrackerView user={user} />
+      {!updating && activeTab === 'upcoming' && (
+        <main className="w-full max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <UpcomingServiceView user={user} tab={upcomingTab} onTabChange={setUpcomingTab} initialPlanId={deepLink?.planId} />
         </main>
       )}
       {!updating && activeTab === 'bible-class' && (
@@ -407,11 +427,6 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       {!updating && activeTab === 'announcements' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           <AnnouncementsView user={user} />
-        </main>
-      )}
-      {!updating && activeTab === 'order' && (
-        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
-          <OrderOfService user={user} />
         </main>
       )}
       {!updating && activeTab === 'calendar' && (
@@ -481,7 +496,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       )}
       {!updating && activeTab === 'inbox' && user && (
         <main className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
-          <InboxView onGoToPage={setActiveTab} initialInstanceId={deepLink?.workflowId} />
+          <InboxView onGoToPage={goTo} initialInstanceId={deepLink?.workflowId} />
         </main>
       )}
       {!updating && activeTab === 'profile' && user && (
@@ -516,7 +531,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       )}
       {!updating && activeTab === 'record-keeping' && hasArea(user, 'records') && (
         <main className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
-          <RecordKeepingView onGoToPage={setActiveTab} />
+          <RecordKeepingView onGoToPage={goTo} />
         </main>
       )}
       {!updating && activeTab === 'directory' && hasArea(user, 'directory') && (

@@ -27,6 +27,9 @@ const KINDS = {
   'group-membership':      'You were added to a church group',
   'bug-report-new':        'Somebody filed a bug report',
   'bug-report-status':     'A bug report you filed has an update',
+  'worship-plan-submitted': 'A song leader submitted a service',
+  'worship-plan-confirmed': 'A service you submitted was confirmed',
+  'song-request-planned':   'A song you asked for is going to be sung',
 };
 
 const KIND_IDS = Object.keys(KINDS);
@@ -36,6 +39,8 @@ const PAGE_FOR_SUBJECT = {
   'group-event':  'groups',
   'church-group': 'groups',
   'announcement': 'announcements',
+  'worship-plan': 'upcoming',
+  'song-request': 'upcoming',
 };
 
 function pageForSubject(subjectType) {

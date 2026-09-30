@@ -1047,6 +1047,123 @@ function initSchema(db) {
     );
   `);
 
+  // ─── Upcoming service: the song library, worship plans, song requests ────────
+  // The portal owns the song list and the record of what was sung. Rows that
+  // came from capshawchurch.org's song database keep that site's ids (a sync is
+  // now a one-way import of its history); anything made here is numbered from
+  // PORTAL_IDS_FROM in server/lib/songLibrary.js, clear of that site's range, so
+  // a later import can never land on top of it.
+  addColumn('songs', 'source',        "TEXT NOT NULL DEFAULT 'capshawchurch'");  // capshawchurch | portal
+  addColumn('songs', 'added_by',      'INTEGER REFERENCES users(id) ON DELETE SET NULL');
+  addColumn('songs', 'added_at',      'TEXT');
+  addColumn('song_services', 'source', "TEXT NOT NULL DEFAULT 'capshawchurch'");
+
+  db.exec(`
+    -- The parts a service is made of, kept by whoever looks after the worship
+    -- order. Each says what it collects: a song, a person, and/or a line of
+    -- detail (the passage, the sermon title). serving_job names the Serving
+    -- Schedule job that already says who does it, so the form can fill it in.
+    CREATE TABLE IF NOT EXISTS worship_parts (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      name         TEXT    NOT NULL UNIQUE,
+      takes_song   INTEGER NOT NULL DEFAULT 0,
+      takes_person INTEGER NOT NULL DEFAULT 0,
+      detail_label TEXT    NOT NULL DEFAULT '',
+      serving_job  TEXT    NOT NULL DEFAULT '',
+      active       INTEGER NOT NULL DEFAULT 1,
+      sort_order   INTEGER NOT NULL DEFAULT 0
+    );
+
+    -- The usual order of a service: the parts, in order, repeats allowed (a
+    -- service has several songs). service_type_id NULL is the order used by
+    -- any service without one of its own.
+    CREATE TABLE IF NOT EXISTS worship_outlines (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      service_type_id INTEGER REFERENCES service_types(id) ON DELETE CASCADE,
+      part_id         INTEGER NOT NULL REFERENCES worship_parts(id) ON DELETE CASCADE,
+      position        INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_worship_outlines_service ON worship_outlines(service_type_id, position);
+
+    -- One service as its song leader submitted it. Confirming it (the worship
+    -- organizer) writes its songs into song_services/service_songs, which is
+    -- what the song tracker and the Record Keeping report read.
+    CREATE TABLE IF NOT EXISTS worship_plans (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      date              TEXT    NOT NULL,              -- YYYY-MM-DD
+      service           TEXT    NOT NULL,              -- a service_types name
+      leader            TEXT    NOT NULL DEFAULT '',
+      notes             TEXT    NOT NULL DEFAULT '',
+      status            TEXT    NOT NULL DEFAULT 'submitted',  -- submitted | confirmed
+      submitted_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      submitted_by_name TEXT    NOT NULL DEFAULT '',
+      submitted_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+      confirmed_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      confirmed_by_name TEXT    NOT NULL DEFAULT '',
+      confirmed_at      TEXT,
+      updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+      song_service_id   INTEGER REFERENCES song_services(id) ON DELETE SET NULL,
+      UNIQUE (date, service)
+    );
+
+    -- Its parts, in order. The part's name is copied so a plan still reads
+    -- right after the part is renamed or retired.
+    CREATE TABLE IF NOT EXISTS worship_plan_items (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      plan_id   INTEGER NOT NULL REFERENCES worship_plans(id) ON DELETE CASCADE,
+      position  INTEGER NOT NULL,
+      part_id   INTEGER REFERENCES worship_parts(id) ON DELETE SET NULL,
+      part_name TEXT    NOT NULL,
+      song_id   INTEGER REFERENCES songs(id),
+      person    TEXT    NOT NULL DEFAULT '',
+      detail    TEXT    NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_worship_plan_items_plan ON worship_plan_items(plan_id, position);
+
+    -- A member asking for a song. open → planned (a submitted service has it)
+    -- → done once that service is confirmed; or withdrawn / declined.
+    CREATE TABLE IF NOT EXISTS song_requests (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      song_id        INTEGER NOT NULL REFERENCES songs(id),
+      requested_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      requester_name TEXT    NOT NULL DEFAULT '',
+      for_date       TEXT    NOT NULL DEFAULT '',     -- YYYY-MM-DD, or '' for any time
+      note           TEXT    NOT NULL DEFAULT '',
+      status         TEXT    NOT NULL DEFAULT 'open', -- open | planned | done | withdrawn | declined
+      plan_id        INTEGER REFERENCES worship_plans(id) ON DELETE SET NULL,
+      created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_song_requests_song ON song_requests(song_id, status);
+  `);
+
+  // A usual Church of Christ service to start from; the organizer changes it
+  // from the Service Parts tab.
+  if (!db.prepare('SELECT COUNT(*) AS n FROM worship_parts').get().n) {
+    const PARTS = [
+      // name, song, person, detail label, serving job
+      ['Song',              1, 0, '',             ''],
+      ['Opening prayer',    0, 1, '',             'Opening Prayer'],
+      ['Scripture reading', 0, 1, 'Passage',      'Scripture Reading'],
+      ["Lord's Supper",     0, 1, '',             'Communion'],
+      ['Sermon',            0, 1, 'Title',        ''],
+      ['Invitation song',   1, 0, '',             ''],
+      ['Announcements',     0, 1, '',             ''],
+      ['Closing prayer',    0, 1, '',             'Closing Prayer'],
+    ];
+    const addPart = db.prepare('INSERT INTO worship_parts (name, takes_song, takes_person, detail_label, serving_job, sort_order) VALUES (?, ?, ?, ?, ?, ?)');
+    const ids = Object.fromEntries(PARTS.map((row, i) => [row[0], addPart.run(...row, i).lastInsertRowid]));
+
+    const addStep = db.prepare('INSERT INTO worship_outlines (service_type_id, part_id, position) VALUES (?, ?, ?)');
+    const outline = (serviceTypeId, names) => names.forEach((n, i) => addStep.run(serviceTypeId, ids[n], i));
+    outline(null, [
+      'Song', 'Song', 'Opening prayer', 'Song', 'Scripture reading', 'Song', "Lord's Supper",
+      'Song', 'Sermon', 'Invitation song', 'Announcements', 'Song', 'Closing prayer',
+    ]);
+    const wednesday = db.prepare("SELECT id FROM service_types WHERE name LIKE '%Wednesday%' ORDER BY sort_order LIMIT 1").get();
+    if (wednesday) outline(wednesday.id, ['Song', 'Opening prayer', 'Song', 'Song', 'Invitation song', 'Closing prayer']);
+  }
+
   // ─── Seed the distribution groups ─────────────────────────────────────────────
   // Created empty; an admin fills in who is in each from Admin → Email Groups.
 

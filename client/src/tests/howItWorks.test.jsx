@@ -72,7 +72,7 @@ describe('HowItWorksView', () => {
   test('every area is named, so the permissions section stays complete on its own', () => {
     mockDefinitions();
     render(<HowItWorksView />);
-    expect(screen.getByText('Worship Order')).toBeInTheDocument();
+    expect(screen.getByText('Worship Organizer')).toBeInTheDocument();
     expect(screen.getByText('Serving Schedule')).toBeInTheDocument();
     expect(screen.getByText('Weekly Newsletter')).toBeInTheDocument();
   });

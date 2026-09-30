@@ -28,7 +28,7 @@ module.exports = {
     end: {
       heading: 'One place for the whole church family',
       items: [
-        'This Sunday', 'Serving Schedule & time away', 'Church Groups & RSVPs',
+        'Upcoming Service', 'Serving Schedule & time away', 'Church Groups & RSVPs',
         'Song Tracker', 'Weekly Newsletter', 'Inbox & follow-ups',
         'Member Directory', 'Guests', 'Church Calendar',
         'Member Match', 'Email links to the exact thing', 'Announcements on the foyer TV',
@@ -76,14 +76,14 @@ module.exports = {
         await page.getByText('Order of Worship').first().waitFor({ timeout: 15000 });
         await d.sleep(500);
 
-        d.mark('this-sunday');
-        await d.caption({ chip: 'THIS SUNDAY', title: 'The order of service', text: 'Whoever plans worship uploads a Word document, and it shows up here, readable on any screen.' });
-        await d.callout(page.locator('main table').first(), 'Uploaded as a Word file', { where: 'above' });
+        d.mark('upcoming-service');
+        await d.caption({ chip: 'UPCOMING SERVICE', title: 'Sunday, planned ahead', text: 'The song leader submits the whole service, part by part. The worship organizer is emailed and confirms it.' });
+        await d.callout(page.getByRole('region', { name: /Sunday AM Worship/ }).first(), 'As the song leader submitted it', { where: 'above' });
         await d.hold(3000);
         await d.clear();
 
         d.mark('songs');
-        await d.nav('Worship', 'Songs We Sing');
+        await d.click(page.getByRole('tab', { name: 'Song Tracker' }));
         await d.caption({ chip: 'SONG TRACKER', title: 'Songs we sing', text: 'Every service: what was sung, who led it, and where to find it in the hymnal.' });
         await d.click(page.locator('main div.card.py-3 > button').nth(1));
         await d.sleep(700);
