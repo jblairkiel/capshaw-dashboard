@@ -1178,20 +1178,41 @@ logs any action pointing at a step or outcome that does not exist.
 
 ### Keeping "How It Works" current
 
-`client/src/components/HowItWorksView.jsx` (**My Church → How It Works** in
-the app, open to anyone signed in) is the plain-language version of this
-document — what actually drives data around the site, and who is allowed to
-drive it.
+**My Church → How It Works** is the plain-language version of this document —
+what each part of the site does, where to find it, what drives data around it,
+and who is allowed to drive it. Its words live in `server/lib/howItWorks.js`
+as a list of sections, each for `everyone` or for `admins`:
 
-Two of its diagrams are pulled live from `GET /api/workflows/definitions` and
-rendered with the same `WorkflowChart` component the workflow inbox uses, so
-changing a step in `server/workflows/definitions/worshipSchedule.js` or
-`visitorFollowUp.js` updates that picture with no separate diagram to
-maintain. The rest of the page is not that automatic:
+- `GET /api/how-it-works` sends a reader the sections they may read. The admin
+  sections (accounts and View as, Record Keeping, running Upcoming Service,
+  email and test mode, what runs on its own, Action History / Church Records /
+  Bug Reports) are only ever sent to an admin — holding areas is not enough.
+- `GET /api/how-it-works/pdf` is the same sections as a PDF
+  (`server/lib/howItWorksPdf.js`, pdfkit): a cover, a table of contents whose
+  every line links to its section, page numbers, and bookmarks. An admin's copy
+  includes the admin part and is named `capshaw-how-it-works-admin.pdf`.
+- `client/src/components/HowItWorksView.jsx` lays out whatever it is sent, with
+  contents that jump to each section and a **Download PDF** button.
 
-- **Add, rename or remove an area** (`server/lib/areas.js` / `client/src/lib/roles.js`) → the areas listed under "Who can do what" come straight from `AREAS`, so nothing to touch there, but re-read the surrounding prose if what an area does changed.
-- **Change what feeds the Monthly Worship Schedule draft** (`worshipSchedule.js`'s `buildDraft`) → update the hand-drawn `ROSTER_INPUTS_FLOW` diagram and its prose.
-- **Add another flow that actually writes data** the way bug reports or time away do → give it the same treatment: a short plain-language paragraph and, if it branches or has more than one step, a diagram built the same way (see `PERMISSIONS_FLOW` / `BUG_REPORT_FLOW` for the pattern — a `chart` object handed to `WorkflowChart`, every step marked `visited` since nothing on this page is "in progress").
+A section is a list of blocks: a paragraph (`**bold**` works), a list,
+numbered steps, a note, a table, or a flowchart. Three things fill themselves
+in and need nothing: the **areas** (from `server/lib/areas.js`), the **emails
+the portal sends** (from `server/mail/catalog.js`), and the **Monthly Worship
+Schedule** and **Guest Follow-Up** flowcharts (from the live workflow
+definitions). The PDF lays flowcharts out with `server/lib/flowLayout.js`, a
+copy of `client/src/lib/flowLayout.js`; `server/tests/flowLayout.test.js` fails
+if the two drift.
+
+Everything else is written by hand, so:
+
+- **Add a page, or a flow that writes data or sends mail** → add or update its
+  section: a short plain-language paragraph and, if it has more than one step,
+  a `chart` (a straight chain can use the `flow()` helper). Admin-only
+  machinery goes in an `admins` section.
+- **Change what an area does** → the area table fills itself in, but re-read
+  the prose that mentions it.
+- A chart label has to fit two lines of about 22 characters;
+  `server/tests/howItWorks.test.js` fails on one that would not.
 
 Treat this the same as updating a test: if a PR changes one of the things
 above, updating this page is part of that PR, not a follow-up.

@@ -29,7 +29,9 @@ export function wrap(text, max = 22) {
   return lines.slice(0, 2);
 }
 
-export default function WorkflowChart({ chart, currentStepId = '', visited = [], outcome = '', status = 'active' }) {
+// `legend` is for a workflow somebody is following; a chart that only explains
+// how something works (How It Works) has nothing in progress, so leaves it off.
+export default function WorkflowChart({ chart, currentStepId = '', visited = [], outcome = '', status = 'active', legend = true }) {
   if (!chart?.nodes?.length) return null;
 
   const { width, height, nodes, edges } = layoutFlow(chart);
@@ -104,7 +106,7 @@ export default function WorkflowChart({ chart, currentStepId = '', visited = [],
         })}
       </svg>
 
-      <div className="flex items-center gap-4 mt-2 text-xs text-gray-400 flex-wrap">
+      {legend && <div className="flex items-center gap-4 mt-2 text-xs text-gray-400 flex-wrap">
         <span className="flex items-center gap-1.5">
           <span className="w-3 h-3 rounded border-2 border-church-gold bg-amber-50 inline-block" /> Where it is now
         </span>
@@ -114,7 +116,7 @@ export default function WorkflowChart({ chart, currentStepId = '', visited = [],
         <span className="flex items-center gap-1.5">
           <span className="w-3 h-3 rounded border border-gray-200 bg-white inline-block" /> Not reached
         </span>
-      </div>
+      </div>}
     </div>
   );
 }

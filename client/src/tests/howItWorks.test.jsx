@@ -1,106 +1,92 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, within } from '@testing-library/react';
 import { describe, test, expect, vi, afterEach } from 'vitest';
-import HowItWorksView, { PERMISSIONS_FLOW, ROSTER_INPUTS_FLOW, BUG_REPORT_FLOW } from '../components/HowItWorksView';
-import { wrap } from '../components/WorkflowChart';
+import HowItWorksView from '../components/HowItWorksView';
 
-// The hand-drawn diagrams (permissions, roster inputs, bug reports) need no
-// data and should always be there. The two workflow diagrams are drawn from
-// whatever the server currently defines, so they only appear once that load
-// resolves — and degrade quietly if it does not.
+// The words come from the server, which decides who gets the admin sections;
+// the page's job is to lay out whatever it is sent, with contents that jump to
+// each section and a download for the PDF.
 
-const DEFINITIONS = [
-  {
-    id: 'worship-schedule', page: 'assignments', title: 'Monthly Worship Schedule',
-    chart: {
-      id: 'worship-schedule', title: 'Monthly Worship Schedule', start: 'review',
-      nodes: [
-        { id: 'review', kind: 'step', label: 'Review the draft' },
-        { id: 'published', kind: 'outcome', tone: 'good', label: 'Published to the roster' },
-        { id: 'cancelled', kind: 'outcome', tone: 'neutral', label: 'Abandoned' },
-      ],
-      edges: [{ from: 'review', to: 'published' }, { from: 'review', to: 'cancelled' }],
-    },
-  },
-  {
-    id: 'visitor-follow-up', page: 'visitors', title: 'Guest Follow-Up',
-    chart: {
-      id: 'visitor-follow-up', title: 'Guest Follow-Up', start: 'reach-out',
-      nodes: [
-        { id: 'reach-out', kind: 'step', label: 'Reach out' },
-        { id: 'contacted', kind: 'outcome', tone: 'good', label: 'Contacted' },
-      ],
-      edges: [{ from: 'reach-out', to: 'contacted' }],
-    },
-  },
+const CHART = {
+  title: 'A service, start to finish', start: 'a',
+  nodes: [{ id: 'a', kind: 'step', label: 'The song leader submits it' }, { id: 'b', kind: 'outcome', tone: 'good', label: 'Its songs are recorded' }],
+  edges: [{ from: 'a', to: 'b' }],
+};
+
+const EVERYONE = [
+  { id: 'getting-started', title: 'Getting started', audience: 'everyone', blocks: [
+    { p: 'Sign in with **Google** or an email address.' },
+    { list: ['**My Church → My Inbox** — anything waiting on you'] },
+  ] },
+  { id: 'upcoming-service', title: 'Upcoming Service', audience: 'everyone', blocks: [
+    { chart: CHART },
+    { table: { head: ['Tab', 'What it is'], rows: [['Song Requests', 'Ask for a song']] } },
+    { note: 'Nobody\'s individual giving is recorded.' },
+  ] },
+  { id: 'guests', title: 'Guests and following up', audience: 'everyone', blocks: [
+    { workflow: 'visitor-follow-up', intro: 'The **Follow up** button asks somebody.', chart: { ...CHART, title: 'Guest Follow-Up' } },
+  ] },
+];
+const ADMINS = [
+  { id: 'admin-accounts', title: 'Accounts and access', audience: 'admins', blocks: [{ steps: ['Open the waiting account', 'Approve it'] }] },
 ];
 
-function mockDefinitions(definitions = DEFINITIONS) {
+function mockDocs({ admin = false } = {}) {
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({
-    json: () => Promise.resolve({ success: true, definitions }),
+    json: () => Promise.resolve({ success: true, admin, sections: admin ? [...EVERYONE, ...ADMINS] : EVERYONE }),
   })));
 }
 
 afterEach(() => { vi.unstubAllGlobals(); });
 
-// WorkflowChart wraps a label onto at most two lines and silently drops
-// whatever does not fit — no ellipsis, no warning. Every hand-drawn label on
-// this page has to fit inside that, or a word just vanishes off the diagram.
-describe('the hand-drawn charts fit WorkflowChart’s label limit', () => {
-  const charts = { PERMISSIONS_FLOW, ROSTER_INPUTS_FLOW, BUG_REPORT_FLOW };
-
-  for (const [chartName, chart] of Object.entries(charts)) {
-    for (const node of chart.nodes) {
-      test(`${chartName} → "${node.label}" is not truncated`, () => {
-        const words = node.label.split(/\s+/);
-        const wrapped = wrap(node.label).join(' ').split(/\s+/);
-        expect(wrapped).toEqual(words);
-      });
-    }
-  }
-});
-
 describe('HowItWorksView', () => {
-  test('the hand-drawn diagrams render without waiting on anything', () => {
-    mockDefinitions();
+  test('lays out every kind of block it is sent', async () => {
+    mockDocs();
     render(<HowItWorksView />);
-
-    expect(screen.getByRole('img', { name: 'Flowchart for How permissions work' })).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Flowchart for What feeds the roster' })).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Flowchart for Reporting a problem' })).toBeInTheDocument();
-  });
-
-  test('every area is named, so the permissions section stays complete on its own', () => {
-    mockDefinitions();
-    render(<HowItWorksView />);
-    expect(screen.getByText('Worship Organizer')).toBeInTheDocument();
-    expect(screen.getByText('Serving Schedule')).toBeInTheDocument();
-    expect(screen.getByText('Weekly Newsletter')).toBeInTheDocument();
-  });
-
-  test('the live workflow charts appear once the definitions load', async () => {
-    mockDefinitions();
-    render(<HowItWorksView />);
-
-    expect(await screen.findByRole('img', { name: 'Flowchart for Monthly Worship Schedule' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Getting started' })).toBeInTheDocument();
+    expect(screen.getByText('Google').tagName).toBe('STRONG');
+    expect(screen.getByText('My Church → My Inbox')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Flowchart for A service, start to finish' })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Flowchart for Guest Follow-Up' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'What it is' })).toBeInTheDocument();
+    expect(screen.getByText('Nobody\'s individual giving is recorded.')).toBeInTheDocument();
+    // Nothing on this page is in progress, so no "where it is now" key.
+    expect(screen.queryByText('Where it is now')).toBeNull();
   });
 
-  test('a workflow nobody may currently start is simply left out, not shown broken', async () => {
-    mockDefinitions([DEFINITIONS[1]]);
+  test('the contents list every section and jump to it', async () => {
+    mockDocs();
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
     render(<HowItWorksView />);
-
-    await screen.findByRole('img', { name: 'Flowchart for Guest Follow-Up' });
-    expect(screen.queryByRole('img', { name: 'Flowchart for Monthly Worship Schedule' })).not.toBeInTheDocument();
+    const contents = await screen.findByRole('navigation', { name: 'Contents' });
+    expect(within(contents).getAllByRole('link').map(a => a.textContent)).toEqual(['Getting started', 'Upcoming Service', 'Guests and following up']);
+    fireEvent.click(within(contents).getByRole('link', { name: 'Guests and following up' }));
+    expect(scrolled).toHaveBeenCalled();
+    expect(scrolled.mock.contexts[0].id).toBe('how-guests');
   });
 
-  test('a failed load still leaves the rest of the page usable', async () => {
-    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('network error'))));
+  test('a member sees no admin part, and downloads the PDF', async () => {
+    mockDocs();
     render(<HowItWorksView />);
+    const pdf = await screen.findByRole('link', { name: 'Download PDF' });
+    expect(pdf).toHaveAttribute('href', '/api/how-it-works/pdf');
+    expect(screen.queryByText('For admins')).toBeNull();
+    expect(screen.queryByText('Admins only')).toBeNull();
+  });
 
-    expect(screen.getByRole('img', { name: 'Flowchart for How permissions work' })).toBeInTheDocument();
-    // Give the failed fetch a tick to settle, then confirm neither live chart appears.
-    await new Promise(r => setTimeout(r, 0));
-    expect(screen.queryByRole('img', { name: 'Flowchart for Monthly Worship Schedule' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('img', { name: 'Flowchart for Guest Follow-Up' })).not.toBeInTheDocument();
+  test('an admin gets the admin sections, marked as theirs', async () => {
+    mockDocs({ admin: true });
+    render(<HowItWorksView />);
+    const section = await screen.findByRole('region', { name: 'Accounts and access' });
+    expect(within(section).getByText('Admins only')).toBeInTheDocument();
+    expect(within(section).getByText('Approve it')).toBeInTheDocument();
+    expect(screen.getAllByText('For admins').length).toBe(2); // in the contents, and above the section
+    expect(screen.getByText(/members see only the first part/)).toBeInTheDocument();
+  });
+
+  test('a failed load says so', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ success: false, error: 'Database is away' }) })));
+    render(<HowItWorksView />);
+    expect(await screen.findByText('Database is away')).toBeInTheDocument();
   });
 });
