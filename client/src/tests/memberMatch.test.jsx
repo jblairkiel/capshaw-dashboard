@@ -33,7 +33,9 @@ describe('MemberMatchView — getting going', () => {
 
     expect(await screen.findByText('Who is this?')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: 'Who is this?' })).toHaveAttribute('src', '/api/member-match/photo/ray.jpg');
-    fireEvent.click(screen.getByRole('button', { name: 'Ray Harris' }));
+    // The choices are set by an effect after the question renders, so wait for
+    // them rather than assuming they arrived with it.
+    fireEvent.click(await screen.findByRole('button', { name: 'Ray Harris' }));
     fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
     expect(await screen.findByText(/person 1 of 2 in this photo/)).toBeInTheDocument();

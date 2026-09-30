@@ -34,7 +34,7 @@ const AREAS = [
     id:    'serving-schedule',
     label: 'Serving Schedule',
     page:  'Serving Schedule',
-    description: 'Build next month\'s worship jobs, fill or clear any slot, and decide which jobs each member may sign up for.',
+    description: 'Build next month\'s worship jobs, fill or clear any slot, and record what each man will volunteer for and the days he is away.',
   },
   {
     id:    'attendance',
