@@ -1134,7 +1134,8 @@ function initSchema(db) {
       part_name TEXT    NOT NULL,
       song_id   INTEGER REFERENCES songs(id),
       person    TEXT    NOT NULL DEFAULT '',
-      detail    TEXT    NOT NULL DEFAULT ''
+      detail    TEXT    NOT NULL DEFAULT '',
+      note      TEXT    NOT NULL DEFAULT ''   -- the leader's own word on the part: verses, a key, who starts it
     );
     CREATE INDEX IF NOT EXISTS idx_worship_plan_items_plan ON worship_plan_items(plan_id, position);
 
@@ -1167,6 +1168,9 @@ function initSchema(db) {
       UNIQUE (date, service, kind)
     );
   `);
+  // A note against any part of a submitted service, whatever the part
+  // collects: "vv. 1, 2 and 4", "Romans 12:1-8", "start it slow".
+  addColumn('worship_plan_items', 'note', "TEXT NOT NULL DEFAULT ''");
 
   // A usual Church of Christ service to start from; the organizer changes it
   // from the Service Parts tab.

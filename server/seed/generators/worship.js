@@ -114,6 +114,7 @@ module.exports = {
       song_id: part.takes_song ? random.pick(songs).id : null,
       person:  part.takes_person ? speaker() : '',
       detail:  part.detail_label === 'Title' ? random.pick(SERMON_TITLES) : part.detail_label ? 'Psalm 23' : '',
+      note:    part.takes_song && position % 3 === 0 ? random.pick(['vv. 1, 2 and 4', 'Start it slow', 'Last verse twice']) : '',
     }, `${part.name}, ${date}`));
 
     // A few members asking for a song.
