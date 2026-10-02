@@ -780,13 +780,13 @@ describe('VisitorTracker — the follow-ups tab', () => {
     mockGuests(visitors);
     render(<VisitorTracker />);
     await screen.findByRole('tab', { name: /Guests/ });
-    fireEvent.click(screen.getByRole('tab', { name: /Follow-ups/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /All follow-ups/ }));
   }
 
   test('the tab says how many guests nobody has reached out to', async () => {
     mockGuests([REACHED, IN_PROGRESS, NOBODY]);
     render(<VisitorTracker />);
-    const tab = await screen.findByRole('tab', { name: /Follow-ups/ });
+    const tab = await screen.findByRole('tab', { name: /All follow-ups/ });
     expect(tab).toHaveTextContent('1');
   });
 

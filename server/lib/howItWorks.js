@@ -121,7 +121,7 @@ const SECTIONS = [
   {
     id: 'guests', title: 'Guests and following up', audience: 'everyone',
     blocks: [
-      { p: '**Our Church Family → Guests** lists everyone who has visited, each visit, who invited them, and whether anybody has been in touch yet. The **Follow-ups** tab arranges them by where that stands: nobody has reached out, someone is on it, reached, or never reached.' },
+      { p: '**Our Church Family → Guests** lists everyone who has visited, each visit, who invited them, and whether anybody has been in touch yet. The **All follow-ups** tab arranges them by where that stands: nobody has reached out, someone is on it, reached, or never reached. **Individual follow-ups**, at the top of the page, is where a follow-up is started or worked through.' },
       { workflow: 'visitor-follow-up', intro: 'The **Follow up** button on a guest asks somebody to get in touch. Whoever is asked sees it in **My Inbox**, with the guest\'s phone number and email. Phoning or emailing them closes it; no answer brings it round for another try.' },
     ],
   },
