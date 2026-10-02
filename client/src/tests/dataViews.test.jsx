@@ -297,7 +297,8 @@ describe('VisitorTracker', () => {
     render(<VisitorTracker user={{ id: 1, role: 'approved' }} />);
 
     await screen.findByRole('button', { name: 'Pat Lane' });
-    expect(screen.queryByRole('button', { name: /^follow up$/i })).not.toBeInTheDocument();
+    // The page's own Follow Up button, at the top, is all there is.
+    expect(screen.getAllByRole('button', { name: /^follow up$/i })).toHaveLength(1);
     expect(screen.getByText('In progress')).toBeInTheDocument();
   });
 
@@ -306,7 +307,8 @@ describe('VisitorTracker', () => {
     render(<VisitorTracker user={{ id: 1, role: 'approved' }} />);
 
     await screen.findByRole('button', { name: 'Pat Lane' });
-    expect(screen.getByRole('button', { name: /^follow up$/i })).toBeInTheDocument();
+    // The page's Follow Up button, and the guest's own.
+    expect(screen.getAllByRole('button', { name: /^follow up$/i })).toHaveLength(2);
   });
 
   test('the details offer the two ways of reaching them', async () => {
@@ -780,13 +782,13 @@ describe('VisitorTracker — the follow-ups tab', () => {
     mockGuests(visitors);
     render(<VisitorTracker />);
     await screen.findByRole('tab', { name: /Guests/ });
-    fireEvent.click(screen.getByRole('tab', { name: /Follow-ups/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /All follow-ups/ }));
   }
 
   test('the tab says how many guests nobody has reached out to', async () => {
     mockGuests([REACHED, IN_PROGRESS, NOBODY]);
     render(<VisitorTracker />);
-    const tab = await screen.findByRole('tab', { name: /Follow-ups/ });
+    const tab = await screen.findByRole('tab', { name: /All follow-ups/ });
     expect(tab).toHaveTextContent('1');
   });
 
