@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import Dialog from './Dialog';
 import PersonPhoto from './PersonPhoto';
 import MemberAttendanceAnalytics from './MemberAttendanceAnalytics';
+import MemberAttendanceImport from './MemberAttendanceImport';
 import { API, TONES, TONE_NAMES, toneHex, call, photoUrl, localToday } from '../lib/memberAttendance';
 
 // Member Attendance: who was at each service, one tap per person, and what it
@@ -379,6 +380,9 @@ export default function MemberAttendanceView() {
   const [setup, setSetup] = useState(null);
   const [error, setError] = useState('');
   const [editingStatuses, setEditingStatuses] = useState(false);
+  const [importing, setImporting] = useState(false);
+  // Bumped after an import, so the roll and analytics read the new marks.
+  const [version, setVersion] = useState(0);
 
   const load = useCallback(() => (
     call(`${API}/roll`).then(d => { setSetup({ services: d.services, statuses: d.statuses }); setError(''); })
@@ -393,10 +397,16 @@ export default function MemberAttendanceView() {
           <h2 className="section-heading mb-1">Member Attendance</h2>
           <p className="text-sm text-gray-500">Tap each person at a service. Every tap is saved as you go.</p>
         </div>
-        <button type="button" onClick={() => setEditingStatuses(true)} disabled={!setup}
-          className="text-sm px-3 py-2 rounded-lg border border-gray-300 text-gray-600 hover:border-church-gold hover:text-church-navy disabled:opacity-40">
-          Statuses
-        </button>
+        <div className="flex gap-2">
+          <button type="button" onClick={() => setImporting(true)} disabled={!setup?.services.length}
+            className="text-sm px-3 py-2 rounded-lg border border-gray-300 text-gray-600 hover:border-church-gold hover:text-church-navy disabled:opacity-40">
+            Import from Excel
+          </button>
+          <button type="button" onClick={() => setEditingStatuses(true)} disabled={!setup}
+            className="text-sm px-3 py-2 rounded-lg border border-gray-300 text-gray-600 hover:border-church-gold hover:text-church-navy disabled:opacity-40">
+            Statuses
+          </button>
+        </div>
       </div>
 
       <div role="tablist" aria-label="Member attendance" className="flex gap-1 border-b border-gray-200">
@@ -413,9 +423,13 @@ export default function MemberAttendanceView() {
       {error && !setup && <div className="card text-sm text-red-600">{error}</div>}
       {!setup && !error && <div className="card text-sm text-gray-400">Loading…</div>}
 
-      {setup && tab === 'roll' && <RollTab services={setup.services} statuses={setup.statuses} />}
-      {setup && tab === 'analytics' && <MemberAttendanceAnalytics services={setup.services} />}
+      {setup && tab === 'roll' && <RollTab key={version} services={setup.services} statuses={setup.statuses} />}
+      {setup && tab === 'analytics' && <MemberAttendanceAnalytics key={version} services={setup.services} />}
 
+      {importing && setup && (
+        <MemberAttendanceImport services={setup.services} statuses={setup.statuses}
+          onClose={() => setImporting(false)} onImported={() => { setVersion(v => v + 1); load(); }} />
+      )}
       {editingStatuses && setup && (
         <StatusesDialog statuses={setup.statuses} onClose={() => setEditingStatuses(false)} onChanged={load} />
       )}

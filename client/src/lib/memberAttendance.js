@@ -22,11 +22,13 @@ export const toneHex = tone => TONES[tone] || TONES.blue;
 export async function call(url, options = {}) {
   const res = await fetch(url, {
     credentials: 'include',
-    headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
+    // A FormData body sets its own multipart content type.
+    headers: typeof options.body === 'string' ? { 'Content-Type': 'application/json' } : undefined,
     ...options,
   });
   const json = await res.json().catch(() => ({}));
-  if (!json.success) throw new Error(json.error || 'Something went wrong');
+  // The rest of the reply rides along: a refused import still lists the sheets.
+  if (!json.success) throw Object.assign(new Error(json.error || 'Something went wrong'), { data: json });
   return json;
 }
 

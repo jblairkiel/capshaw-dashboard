@@ -5,6 +5,11 @@ const attendance = require('../lib/memberAttendance');
 const photoStore = require('../lib/photoStore');
 const { requireArea } = require('../middleware/auth');
 const actionLog = require('../lib/actionLog');
+const multer = require('multer');
+const importer = require('../lib/memberAttendanceImport');
+
+// A spreadsheet is read straight from memory and never written to disk.
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1 } }).single('file');
 
 // ─── Member Attendance ────────────────────────────────────────────────────────
 //
@@ -104,6 +109,58 @@ router.delete('/statuses/:id', (req, res) => {
     details: result.removed,
   });
   res.json({ success: true });
+});
+
+// ─── POST /api/member-attendance/import ───────────────────────────────────────
+// Multipart: `file` (.xlsx), and as fields `sheet`, `service`, `overwrite`,
+// `dryRun`, and JSON `keyMap` ({ colour or text key: statusId }) and
+// `personMap` ({ spreadsheet row: personId, or '' to leave them out }).
+//
+// Sent twice, like the contributions import: a dry run says what is in the
+// file and what the mapping would do, and the second saves it. The file is
+// read afresh each time, so nothing about it is held between the two.
+
+function parseJson(value, fallback) {
+  try { return value ? JSON.parse(value) : fallback; } catch { return fallback; }
+}
+
+router.post('/import', (req, res) => {
+  upload(req, res, async err => {
+    if (err) return bad(res, err.code === 'LIMIT_FILE_SIZE' ? 'That file is over 10 MB.' : 'The file could not be read.');
+    if (!req.file) return bad(res, 'Choose an Excel file (.xlsx) to import.');
+
+    // An error in here would otherwise escape Express 4, which does not catch
+    // a rejected promise.
+    let file;
+    try {
+      file = await importer.readFile(req.file.buffer, req.body.sheet);
+    } catch (e) {
+      console.error('[member-attendance] import could not read', req.file.originalname, '-', e.message);
+      return bad(res, 'That workbook could not be read.');
+    }
+    if (file.error) return res.status(400).json({ success: false, error: file.error, sheets: file.sheets, sheet: file.sheet });
+
+    const options = {
+      service:   req.body.service,
+      overwrite: req.body.overwrite === 'true',
+      keyMap:    parseJson(req.body.keyMap, {}),
+      personMap: parseJson(req.body.personMap, {}),
+    };
+    const planned = importer.plan(file, options);
+    const preview = { ...file, people: file.people.map(({ marks, ...p }) => ({ ...p, marks: marks.length })), counts: planned.counts, service: planned.service };
+
+    if (req.body.dryRun === 'true') return res.json({ success: true, dryRun: true, ...preview });
+    if (!planned.service) return bad(res, 'Choose the service these dates are for.');
+    if (!planned.writes.length) return bad(res, 'There is nothing to import with these choices.');
+
+    importer.save(planned.writes, planned.service, req.user);
+    actionLog.record(req.user, {
+      area: 'member-attendance', action: 'create', entity: 'attendance import', entityId: req.file.originalname || '',
+      summary: `Imported ${planned.writes.length} attendance marks for ${planned.service} from ${req.file.originalname || 'a spreadsheet'} (${file.sheet})`,
+      details: { file: req.file.originalname, sheet: file.sheet, service: planned.service, counts: planned.counts, keyMap: options.keyMap, overwrite: options.overwrite },
+    });
+    res.json({ success: true, imported: planned.writes.length, ...preview });
+  });
 });
 
 // ─── Analytics ────────────────────────────────────────────────────────────────

@@ -176,6 +176,7 @@ const SECTIONS = [
       ] },
       { p: 'Every tap is saved as it is made. **Statuses** changes the list: add one, rename it, choose its colour and whether it counts as present. A status somebody has been marked with is retired rather than removed.' },
       { p: 'The **Analytics** tab shows the whole congregation for a number of weeks — the rolls taken, how many were present, each roll by status, and who has not been here lately. Choose a member from the dropdown to see just them.' },
+      { p: '**Import from Excel** brings in a roll kept in a spreadsheet: a row per member with their name on the left, a column per date along the top, and each cell coloured for how they were marked. Choose the file and the service, say which status each colour stands for (a cell with no colour is listed by what is typed in it), match any name the directory does not know, and Import. Somebody already marked for a date keeps their mark unless you tick to let the spreadsheet win.' },
       { note: 'Somebody left unmarked on a roll is counted as not marked, never as absent.' },
     ],
   },
