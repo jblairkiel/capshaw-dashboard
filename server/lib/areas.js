@@ -43,6 +43,12 @@ const AREAS = [
     description: 'Record attendance counts and correct earlier ones.',
   },
   {
+    id:    'member-attendance',
+    label: 'Member Attendance',
+    page:  'Member Attendance',
+    description: 'Take the roll at each service — present, sick, out of town or absent — keep the list of statuses, and see the attendance analytics for the congregation and each member.',
+  },
+  {
     id:    'visitors',
     label: 'Guest Tracker',
     page:  'Guests',

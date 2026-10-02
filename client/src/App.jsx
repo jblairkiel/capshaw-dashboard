@@ -33,6 +33,7 @@ import BugReportsView from './components/BugReportsView';
 import HowItWorksView from './components/HowItWorksView';
 import MemberMatchView from './components/MemberMatchView';
 import ContributionsView from './components/ContributionsView';
+import MemberAttendanceView from './components/MemberAttendanceView';
 import { hasWriteAccess, isAdmin, hasArea } from './lib/roles';
 
 const API = '/api/members';
@@ -99,6 +100,7 @@ const OFFICE_ITEMS = [
   { id: 'directory',      label: 'Member Directory',  when: user => hasArea(user, 'directory') },
   { id: 'mail-groups',    label: 'Email Groups',      when: user => hasArea(user, 'mail-groups') },
   { id: 'emails',         label: 'Emails',            when: user => hasArea(user, 'mail-groups') },
+  { id: 'member-attendance', label: 'Member Attendance', when: user => hasArea(user, 'member-attendance') },
   { id: 'record-keeping', label: 'Record Keeping',    when: user => hasArea(user, 'records') },
   { id: 'bulletin',       label: 'Weekly Newsletter', when: user => hasArea(user, 'bulletin') },
 ];
@@ -166,7 +168,7 @@ const STANDALONE_TABS = new Set([
   'bible-class', 'announcements', 'upcoming', 'calendar', 'users', 'database',
   'directory', 'profile', 'inbox', 'mail-groups', 'emails', 'record-keeping', 'livestreams',
   'assignments', 'visitors', 'leadership', 'action-history','service-roster', 'bulletin',
-  'groups', 'bug-reports', 'how-it-works', 'member-match', 'contributions',
+  'groups', 'bug-reports', 'how-it-works', 'member-match', 'contributions', 'member-attendance',
 ]);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
@@ -538,6 +540,11 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       {!updating && activeTab === 'record-keeping' && hasArea(user, 'records') && (
         <main className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
           <RecordKeepingView onGoToPage={goTo} />
+        </main>
+      )}
+      {!updating && activeTab === 'member-attendance' && hasArea(user, 'member-attendance') && (
+        <main className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
+          <MemberAttendanceView />
         </main>
       )}
       {!updating && activeTab === 'directory' && hasArea(user, 'directory') && (

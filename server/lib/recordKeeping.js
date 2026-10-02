@@ -1,5 +1,6 @@
 // The Record Keeping report: for each recent week, which services got their
-// songs and guests on file, and whether the Sunday's contribution was.
+// songs, guests and member roll call on file, and whether the Sunday's
+// contribution was.
 //
 // Nothing here is stored. Each check reads the page that owns the record — the
 // song tracker, the guest book, the contribution counter — and a service
@@ -23,6 +24,7 @@ const { parseAnyDate } = require('./contributions');
 const CHECKS = [
   { id: 'songs',        label: 'Songs',        scope: 'service', area: 'songs',         page: 'songs',         noneLabel: 'No songs to record' },
   { id: 'guests',       label: 'Guests',       scope: 'service', area: 'visitors',      page: 'visitors',      noneLabel: 'No guests' },
+  { id: 'roll',         label: 'Roll call',    scope: 'service', area: 'member-attendance', page: 'member-attendance', noneLabel: 'No roll taken' },
   { id: 'contribution', label: 'Contribution', scope: 'sunday',  area: 'contributions', page: 'contributions', noneLabel: 'No contribution taken' },
   { id: 'head-count',   label: 'Head count',   scope: 'meeting', area: 'church-groups', page: 'groups',        noneLabel: null },
 ];
@@ -69,6 +71,11 @@ function onFile(from, to) {
   `).all(), from, to);
   const guests = keysFrom(db.prepare('SELECT date, service FROM visitor_visits').all(), from, to);
   const attendance = keysFrom(db.prepare('SELECT date, service FROM attendance WHERE count > 0').all(), from, to);
+  // A roll is taken once anybody on it is marked. Rolls are only expected from
+  // the first one ever taken: before that, nobody was keeping them, and eight
+  // weeks of "missing" the day the feature arrived would bury the real gaps.
+  const rolls = keysFrom(db.prepare('SELECT DISTINCT date, service FROM member_attendance').all(), from, to);
+  const rollsSince = db.prepare('SELECT MIN(date) AS d FROM member_attendance').get().d || null;
   const contributions = new Set(
     db.prepare('SELECT date FROM contributions').all().map(r => parseAnyDate(r.date)).filter(Boolean),
   );
@@ -76,7 +83,7 @@ function onFile(from, to) {
     db.prepare('SELECT * FROM record_checkoffs WHERE date BETWEEN ? AND ?').all(from, to)
       .map(c => [`${c.date}|${lower(c.service)}|${c.check_id}`, c]),
   );
-  return { songs, guests, attendance, contributions, checkoffs };
+  return { songs, guests, attendance, rolls, rollsSince, contributions, checkoffs };
 }
 
 // ─── Services ─────────────────────────────────────────────────────────────────
@@ -107,6 +114,7 @@ function datesFor(service, weekStart, today, files) {
   return past.filter(d =>
     files.attendance.has(`${d}|${name}`) ||
     files.guests.has(`${d}|${name}`) ||
+    files.rolls.has(`${d}|${name}`) ||
     service.songKeys.some(k => files.songs.has(`${d}|${k}`)));
 }
 
@@ -160,6 +168,9 @@ function report({ weeks = 8, today = churchToday() } = {}) {
         } else {
           row.cells.songs = cell({ done: service.songKeys.some(k => files.songs.has(`${date}|${k}`)), checkoff: off(date, service.name, 'songs') });
           row.cells.guests = cell({ done: files.guests.has(`${date}|${lower(service.name)}`), checkoff: off(date, service.name, 'guests') });
+          if (files.rollsSince && date >= files.rollsSince) {
+            row.cells.roll = cell({ done: files.rolls.has(`${date}|${lower(service.name)}`), checkoff: off(date, service.name, 'roll') });
+          }
           for (const [id, c] of Object.entries(row.cells)) if (c.status === 'missing') missing[id]++;
         }
         rows.push(row);

@@ -1,8 +1,9 @@
 import { useState } from 'react';
 
 // A person's directory photo, falling back to their initials. The photo is
-// fetched from the profile API, which checks the viewer may see this person.
-export default function PersonPhoto({ person, size = 48, className = '' }) {
+// fetched from the profile API, which checks the viewer may see this person;
+// a page with its own right to see everybody's (Member Attendance) passes `src`.
+export default function PersonPhoto({ person, size = 48, className = '', src }) {
   const [failed, setFailed] = useState(false);
   const show = person?.has_photo && !failed;
 
@@ -14,7 +15,7 @@ export default function PersonPhoto({ person, size = 48, className = '' }) {
 
   return show ? (
     <img
-      src={`/api/profile/person/${person.id}/photo`}
+      src={src || `/api/profile/person/${person.id}/photo`}
       alt={person.name}
       width={size}
       height={size}

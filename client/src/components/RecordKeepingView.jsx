@@ -27,6 +27,9 @@ const TRACKING_LABEL = { weekly: 'Every week', 'when-held': 'When held', '': 'No
 // ─── One check for one service ───────────────────────────────────────────────
 
 function Cell({ cell, check, onAdd, onNone, onUndo, busy }) {
+  // A check that does not apply to this service yet — roll call is only
+  // expected from the first roll anybody took.
+  if (!cell) return <span className="text-xs text-gray-300">—</span>;
   if (cell.status === 'recorded') {
     return (
       <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
@@ -62,6 +65,8 @@ function Week({ week, checks, busy, onGoToPage, onOpenMeeting, onCheckoff, onUnd
   const contribution = checks.find(c => c.id === 'contribution');
   const headCount = checks.find(c => c.id === 'head-count');
   const meetings = week.meetings ?? [];
+  // A column per service check, however many the report has.
+  const columns = { '--rk-cols': `1.3fr ${serviceChecks.map(() => '1fr').join(' ')} auto` };
   const gaps = week.rows.reduce((n, r) => n + Object.values(r.cells).filter(c => c.status === 'missing').length, 0)
     + (week.contribution?.status === 'missing' ? 1 : 0)
     + meetings.filter(m => m.cell.status === 'missing').length;
@@ -95,24 +100,24 @@ function Week({ week, checks, busy, onGoToPage, onOpenMeeting, onCheckoff, onUnd
       ) : (
         <div>
           {/* Column headings on wider screens; on a phone each row labels its own checks. */}
-          <div className="hidden sm:grid grid-cols-[1.3fr_1fr_1fr_auto] gap-3 px-4 pt-2 pb-1 text-xs text-gray-400 uppercase tracking-wide">
+          <div className="hidden sm:grid sm:[grid-template-columns:var(--rk-cols)] gap-3 px-4 pt-2 pb-1 text-xs text-gray-400 uppercase tracking-wide" style={columns}>
             <span>Service</span>
             {serviceChecks.map(c => <span key={c.id}>{c.label}</span>)}
             <span />
           </div>
           {week.rows.map(row => (
-            <div key={`${row.date}-${row.service}`} className="grid grid-cols-1 sm:grid-cols-[1.3fr_1fr_1fr_auto] gap-x-3 gap-y-1.5 px-4 py-2.5 border-t border-gray-50 items-start">
+            <div key={`${row.date}-${row.service}`} className="grid grid-cols-1 sm:[grid-template-columns:var(--rk-cols)] gap-x-3 gap-y-1.5 px-4 py-2.5 border-t border-gray-50 items-start" style={columns}>
               <div>
                 <span className="block text-church-navy text-sm">{row.service}</span>
                 <span className="block text-xs text-gray-400">{day(row.date)}</span>
               </div>
               {row.notHeld ? (
-                <div className="sm:col-span-2 text-xs text-gray-500 self-center">
+                <div className="text-xs text-gray-500 self-center sm:[grid-column:var(--rk-span)]" style={{ '--rk-span': `span ${serviceChecks.length}` }}>
                   Did not happen{row.notHeld.by ? ` · ${row.notHeld.by}` : ''}{row.notHeld.note ? ` — ${row.notHeld.note}` : ''}
                 </div>
               ) : serviceChecks.map(c => (
                 <div key={c.id} className="flex items-center gap-2 sm:block">
-                  <span className="sm:hidden text-xs text-gray-400 w-14 shrink-0">{c.label}</span>
+                  <span className="sm:hidden text-xs text-gray-400 w-16 shrink-0">{c.label}</span>
                   <Cell
                     cell={row.cells[c.id]}
                     check={c}
@@ -241,7 +246,7 @@ function Settings({ onChanged }) {
     <div className="overflow-x-auto">
       <p className="text-xs text-gray-500 mb-2">
         <strong>Every week</strong> services are expected on their day whatever is on file. <strong>When held</strong> ones
-        only in a week where attendance, guests or songs show they happened. The song tracker names services its own way —
+        only in a week where attendance, guests, a roll call or songs show they happened. The song tracker names services its own way —
         say what it calls each one so its songs are counted.
       </p>
       <datalist id="song-tracker-names">{data.songNames.map(n => <option key={n} value={n} />)}</datalist>
@@ -288,7 +293,7 @@ function Reminder({ reminder }) {
     <div className="card flex flex-col sm:flex-row sm:items-center gap-3">
       <div className="text-sm text-gray-600 flex-1">
         <p>
-          Every {reminder.day} at {clock(reminder.hour)}, whoever looks after songs, guests and the contribution is
+          Every {reminder.day} at {clock(reminder.hour)}, whoever looks after songs, guests, the roll call and the contribution is
           emailed what is still missing from the last eight days — each only their own. Nothing is sent when nothing is missing.
         </p>
         {last && <p className="text-xs text-gray-500 mt-1">Last checked for the week of {day(last, { month: 'long', day: 'numeric' })}.</p>}
@@ -341,7 +346,7 @@ export default function RecordKeepingView({ onGoToPage }) {
       <div className="flex items-end justify-between gap-3 flex-wrap">
         <div>
           <h2 className="section-heading mb-1">Record Keeping</h2>
-          <p className="text-sm text-gray-500">Songs and guests for every service, each Sunday&apos;s contribution, and how many came to each group meeting.</p>
+          <p className="text-sm text-gray-500">Songs, guests and the member roll call for every service, each Sunday&apos;s contribution, and how many came to each group meeting.</p>
         </div>
         <label className="text-sm text-gray-500 flex items-center gap-2">
           Show

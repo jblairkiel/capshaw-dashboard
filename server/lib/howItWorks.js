@@ -166,6 +166,20 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'member-attendance', title: 'Member attendance', audience: 'everyone',
+    blocks: [
+      { p: '**Church Office → Member Attendance** is for whoever holds the Member Attendance area (and admins); nobody else can see who was at a service. Pick the date and the service, then go down the roll: everybody in the directory, by surname, with their photo.' },
+      { steps: [
+        'Tap a photo or name to step through the statuses — Present, Sick, Out of town, Absent, then back to not marked — or tap the status you want under the name.',
+        'Use the letters down the side of the screen to jump through the alphabet.',
+        'When only the absent are left, **Mark everyone left as** marks the rest at once.',
+      ] },
+      { p: 'Every tap is saved as it is made. **Statuses** changes the list: add one, rename it, choose its colour and whether it counts as present. A status somebody has been marked with is retired rather than removed.' },
+      { p: 'The **Analytics** tab shows the whole congregation for a number of weeks — the rolls taken, how many were present, each roll by status, and who has not been here lately. Choose a member from the dropdown to see just them.' },
+      { note: 'Somebody left unmarked on a roll is counted as not marked, never as absent.' },
+    ],
+  },
+  {
     id: 'other-pages', title: 'Everything else', audience: 'everyone',
     blocks: [
       { table: { head: ['Page', 'What it is'], rows: [
@@ -217,6 +231,7 @@ const SECTIONS = [
       { p: '**Church Office → Record Keeping** (for admins, and anyone given Reports & Record Keeping) checks, week by week, that the records are being kept:' },
       { list: [
         '**Songs** and **guests** for every tracked service — Sunday morning and Wednesday evening every week; Sunday evening and gospel meetings in the weeks they are held',
+        '**The roll call** of members at each of those services, from the first roll anybody took',
         '**The contribution** each Sunday',
         '**How many came** to each group meeting',
       ] },
