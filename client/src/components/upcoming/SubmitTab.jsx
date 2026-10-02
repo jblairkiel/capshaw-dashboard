@@ -20,7 +20,7 @@ function fromServer(items) {
   return items.map(i => withKey({
     partId: i.partId, partName: i.partName,
     takesSong: i.takesSong, takesPerson: i.takesPerson, detailLabel: i.detailLabel,
-    song: i.song, person: i.person || '', detail: i.detail || '',
+    song: i.song, person: i.person || '', detail: i.detail || '', note: i.note || '',
   }));
 }
 
@@ -29,7 +29,7 @@ function ItemRow({ item, index, count, editable, onChange, onMove, onRemove }) {
     <li className="py-2.5 border-t border-gray-100 first:border-t-0">
       <div className="flex items-start gap-2">
         <span className="text-church-gold text-xs font-bold w-5 pt-2 shrink-0">{index + 1}.</span>
-        <div className="flex-1 min-w-0 grid gap-2 sm:grid-cols-[9rem_1fr] items-start">
+        <div className="flex-1 min-w-0 grid gap-2 sm:grid-cols-[9rem_minmax(0,1fr)] md:grid-cols-[8rem_minmax(0,3fr)_minmax(0,2fr)] items-start">
           <span className="text-sm font-medium text-gray-700 sm:pt-1.5">{item.partName}</span>
           <div className="space-y-1.5 min-w-0">
             {item.takesSong && (editable
@@ -46,6 +46,13 @@ function ItemRow({ item, index, count, editable, onChange, onMove, onRemove }) {
                   className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-church-navy" />
               : item.detail && <span className="block text-sm text-gray-500 italic">{item.detail}</span>)}
           </div>
+          {/* Beside the part (under it on a narrow screen): the leader's own
+              word on it, whatever the part collects. */}
+          {editable
+            ? <input value={item.note} onChange={e => onChange({ note: e.target.value })} placeholder="specific vs. or comments"
+                aria-label={`Note for ${item.partName} ${index + 1}`} maxLength={200}
+                className="sm:col-start-2 md:col-start-auto w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-church-navy" />
+            : item.note && <span className="sm:col-start-2 md:col-start-auto text-sm text-gray-500 italic md:pt-1.5">{item.note}</span>}
         </div>
         {editable && (
           <div className="flex flex-col sm:flex-row gap-0.5 shrink-0">
@@ -158,7 +165,7 @@ export default function SubmitTab({ overview, selection, onSelect, onChanged }) 
   function appendPart(partId) {
     const part = overview.parts.find(p => p.id === Number(partId));
     if (!part) return;
-    change(list => [...list, withKey({ partId: part.id, partName: part.name, takesSong: part.takesSong, takesPerson: part.takesPerson, detailLabel: part.detailLabel, song: null, person: '', detail: '' })]);
+    change(list => [...list, withKey({ partId: part.id, partName: part.name, takesSong: part.takesSong, takesPerson: part.takesPerson, detailLabel: part.detailLabel, song: null, person: '', detail: '', note: '' })]);
     setAddPart('');
   }
 
@@ -167,7 +174,7 @@ export default function SubmitTab({ overview, selection, onSelect, onChanged }) 
     const empty = items.find(i => i.takesSong && !i.song);
     if (empty) { update(empty.key, { song }); return; }
     const part = overview.parts.find(p => p.name === 'Song') || overview.parts.find(p => p.takesSong);
-    if (part) change(list => [...list, withKey({ partId: part.id, partName: part.name, takesSong: true, takesPerson: part.takesPerson, detailLabel: part.detailLabel, song, person: '', detail: '' })]);
+    if (part) change(list => [...list, withKey({ partId: part.id, partName: part.name, takesSong: true, takesPerson: part.takesPerson, detailLabel: part.detailLabel, song, person: '', detail: '', note: '' })]);
   }
 
   async function save() {
@@ -177,7 +184,7 @@ export default function SubmitTab({ overview, selection, onSelect, onChanged }) 
         method: 'POST',
         body: JSON.stringify({
           date: selection.date, service: selection.service, leader, notes,
-          items: items.map(i => ({ partId: i.partId, songId: i.song?.id ?? null, person: i.person, detail: i.detail })),
+          items: items.map(i => ({ partId: i.partId, songId: i.song?.id ?? null, person: i.person, detail: i.detail, note: i.note })),
         }),
       });
       setMessage(result.created

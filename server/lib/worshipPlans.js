@@ -221,7 +221,7 @@ function toPlan(row, { items = true } = {}) {
       takesPerson: i.part_id ? !!i.takes_person : !!i.person,
       detailLabel: i.part_id ? i.detail_label : (i.detail ? 'Detail' : ''),
       song: i.song_id ? { id: i.song_id, title: i.title, hymnal: i.hymnal, number: i.number } : null,
-      person: i.person, detail: i.detail,
+      person: i.person, detail: i.detail, note: i.note,
     }));
   }
   return plan;
@@ -251,6 +251,7 @@ function template(date, service) {
     song: null,
     person: p.takesPerson && p.servingJob ? (jobs[p.servingJob] || []).join(', ') : '',
     detail: '',
+    note: '',
   }));
   return { date, service, leader, items, serving: jobs };
 }
@@ -274,6 +275,7 @@ function readItems(items) {
       partId: part.id, partName: part.name, songId: song?.id ?? null,
       person: part.takesPerson ? clean(item.person, 100) : '',
       detail: part.detailLabel ? clean(item.detail, 200) : '',
+      note: clean(item.note, 200),
     });
   }
   return { items: out };
@@ -281,8 +283,8 @@ function readItems(items) {
 
 function writeItems(planId, items) {
   db.prepare('DELETE FROM worship_plan_items WHERE plan_id = ?').run(planId);
-  const add = db.prepare('INSERT INTO worship_plan_items (plan_id, position, part_id, part_name, song_id, person, detail) VALUES (?, ?, ?, ?, ?, ?, ?)');
-  items.forEach((it, i) => add.run(planId, i, it.partId, it.partName, it.songId, it.person, it.detail));
+  const add = db.prepare('INSERT INTO worship_plan_items (plan_id, position, part_id, part_name, song_id, person, detail, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+  items.forEach((it, i) => add.run(planId, i, it.partId, it.partName, it.songId, it.person, it.detail, it.note));
 }
 
 // Submit a service, or change one already submitted. Returns the plan and
