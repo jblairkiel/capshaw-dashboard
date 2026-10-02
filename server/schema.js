@@ -1028,7 +1028,7 @@ function initSchema(db) {
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       date       TEXT    NOT NULL,
       service    TEXT    NOT NULL DEFAULT '',
-      check_id   TEXT    NOT NULL,              -- songs | guests | contribution | not-held
+      check_id   TEXT    NOT NULL,              -- songs | guests | roll | contribution | not-held
       note       TEXT    NOT NULL DEFAULT '',
       user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
       user_name  TEXT    NOT NULL DEFAULT '',
@@ -1197,6 +1197,47 @@ function initSchema(db) {
     ]);
     const wednesday = db.prepare("SELECT id FROM service_types WHERE name LIKE '%Wednesday%' ORDER BY sort_order LIMIT 1").get();
     if (wednesday) outline(wednesday.id, ['Song', 'Opening prayer', 'Song', 'Song', 'Invitation song', 'Closing prayer']);
+  }
+
+  // ─── Member attendance ────────────────────────────────────────────────────────
+  // Who was at each service, one mark per person, as opposed to the head count
+  // in `attendance`. What a mark can say is a list the member attendance
+  // tracker keeps (Present, Sick, Out of town, Absent to start with); a status
+  // that has been used is retired rather than deleted, so no mark is orphaned.
+  // `counts_present` says which statuses count as being there for the
+  // analytics. `tone` is one of the chart palette's slots (see
+  // client/src/components/MemberAttendanceView.jsx).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS attendance_statuses (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      label          TEXT    NOT NULL UNIQUE,
+      tone           TEXT    NOT NULL DEFAULT 'blue',
+      counts_present INTEGER NOT NULL DEFAULT 0,
+      sort_order     INTEGER NOT NULL DEFAULT 0,
+      active         INTEGER NOT NULL DEFAULT 1,
+      created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+
+    -- service is a service_types name, the same as attendance and the song
+    -- tracker, so the Record Keeping report can line a roll up with a service.
+    CREATE TABLE IF NOT EXISTS member_attendance (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      person_id  INTEGER NOT NULL REFERENCES directory(id) ON DELETE CASCADE,
+      date       TEXT    NOT NULL,                -- YYYY-MM-DD
+      service    TEXT    NOT NULL,
+      status_id  INTEGER NOT NULL REFERENCES attendance_statuses(id),
+      user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      user_name  TEXT    NOT NULL DEFAULT '',
+      updated_at TEXT    NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (person_id, date, service)
+    );
+    CREATE INDEX IF NOT EXISTS idx_member_attendance_roll ON member_attendance(date, service);
+  `);
+
+  if (!db.prepare('SELECT COUNT(*) AS n FROM attendance_statuses').get().n) {
+    const addStatus = db.prepare('INSERT INTO attendance_statuses (label, tone, counts_present, sort_order) VALUES (?, ?, ?, ?)');
+    [['Present', 'blue', 1], ['Sick', 'orange', 0], ['Out of town', 'aqua', 0], ['Absent', 'yellow', 0]]
+      .forEach((s, i) => addStatus.run(...s, i));
   }
 
   // ─── Seed the distribution groups ─────────────────────────────────────────────

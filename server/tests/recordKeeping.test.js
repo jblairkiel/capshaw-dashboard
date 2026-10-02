@@ -45,7 +45,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-  for (const t of ['service_songs', 'song_services', 'songs', 'visitor_visits', 'visitors', 'attendance', 'contributions', 'record_checkoffs']) {
+  for (const t of ['service_songs', 'song_services', 'songs', 'visitor_visits', 'visitors', 'attendance', 'contributions', 'record_checkoffs', 'member_attendance']) {
     db.prepare(`DELETE FROM ${t}`).run();
   }
 });
@@ -92,6 +92,40 @@ describe('which services are expected', () => {
   });
 });
 
+describe('the member roll call', () => {
+  const person = () => db.prepare("INSERT INTO directory (name) VALUES ('Roll Person')").run().lastInsertRowid;
+  const present = () => db.prepare("SELECT id FROM attendance_statuses WHERE label = 'Present'").get().id;
+  const rollCall = (date, service) => db.prepare('INSERT INTO member_attendance (person_id, date, service, status_id) VALUES (?, ?, ?, ?)').run(person(), date, service, present());
+
+  test('is not expected until somebody has taken a roll', () => {
+    const r = keeping.report({ weeks: 2, today: TODAY });
+    expect(r.weeks.flatMap(w => w.rows).some(x => x.cells.roll)).toBe(false);
+    expect(r.missing.roll).toBe(0);
+  });
+
+  test('from the first roll on, a service without one is missing', () => {
+    rollCall('2026-09-23', 'Wednesday Bible Study');
+    const r = keeping.report({ weeks: 2, today: TODAY });
+    expect(row(weekOf(r, '2026-09-20'), '2026-09-20', 'Sunday AM Worship').cells.roll).toBeUndefined();
+    expect(row(weekOf(r, '2026-09-20'), '2026-09-23', 'Wednesday Bible Study').cells.roll.status).toBe('recorded');
+    expect(row(weekOf(r, '2026-09-27'), '2026-09-27', 'Sunday AM Worship').cells.roll.status).toBe('missing');
+    expect(r.missing.roll).toBe(2);
+  });
+
+  test('a roll shows a service held only sometimes happened', () => {
+    rollCall('2026-09-27', 'Sunday PM Worship');
+    const r = keeping.report({ weeks: 1, today: TODAY });
+    expect(row(r.weeks[0], '2026-09-27', 'Sunday PM Worship').cells.roll.status).toBe('recorded');
+  });
+
+  test('can be marked as not taken', () => {
+    rollCall('2026-09-23', 'Wednesday Bible Study');
+    expect(keeping.addCheckoff({ date: '2026-09-27', service: 'Sunday AM Worship', check: 'roll' }, ADMIN, { today: TODAY }).checkoff).toBeTruthy();
+    const r = keeping.report({ weeks: 1, today: TODAY });
+    expect(row(r.weeks[0], '2026-09-27', 'Sunday AM Worship').cells.roll.status).toBe('none');
+  });
+});
+
 describe('what counts as recorded', () => {
   test('songs count under the song tracker’s own name for the service', () => {
     songs('2026-09-27', 'AM');
@@ -124,7 +158,7 @@ describe('what counts as recorded', () => {
     guest('2026-09-27', 'Sunday AM Worship');
     give('2026-09-27');
     const r = keeping.report({ weeks: 1, today: TODAY });
-    expect(r.missing).toEqual({ songs: 1, guests: 1, contribution: 0, 'head-count': 0 });
+    expect(r.missing).toEqual({ songs: 1, guests: 1, roll: 0, contribution: 0, 'head-count': 0 });
     expect(r.totalMissing).toBe(2);
   });
 });
@@ -203,7 +237,7 @@ describe('the API', () => {
       const res = await request(buildApp(user)).get('/api/record-keeping?weeks=3');
       expect(res.status).toBe(200);
       expect(res.body.weeks).toHaveLength(3);
-      expect(res.body.checks.map(c => c.id)).toEqual(['songs', 'guests', 'contribution', 'head-count']);
+      expect(res.body.checks.map(c => c.id)).toEqual(['songs', 'guests', 'roll', 'contribution', 'head-count']);
     }
   });
 

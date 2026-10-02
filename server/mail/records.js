@@ -5,7 +5,8 @@
 // whole of last week and the Sunday just gone — and mentions, without
 // listing, any older gaps. Each person hears only about what they look after:
 // the song tracker hears about songs, the guest book about guests, the
-// counters about the contribution, and a group's leaders about their own
+// member attendance tracker about roll calls, the counters about the
+// contribution, and a group's leaders about their own
 // meetings' head counts (whoever looks after every group, when a group has no
 // leader with an address). Whoever holds Reports & Record Keeping hears about
 // all of it. A record nobody looks after goes to the admins, so a gap is

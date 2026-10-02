@@ -77,6 +77,13 @@ export const AREAS = [
     tone:        'bg-teal-100 text-teal-800',
   },
   {
+    id:          'member-attendance',
+    label:       'Member Attendance',
+    page:        'Member Attendance',
+    description: 'Take the roll at each service — present, sick, out of town or absent — keep the list of statuses, and see the attendance analytics for the congregation and each member.',
+    tone:        'bg-pink-100 text-pink-800',
+  },
+  {
     id:          'visitors',
     label:       'Guest Tracker',
     page:        'Guests',

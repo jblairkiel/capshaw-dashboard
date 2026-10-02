@@ -7,7 +7,7 @@ const reminder = require('../mail/records');
 
 // ─── Record Keeping ───────────────────────────────────────────────────────────
 //
-// Which services are missing their songs, guests or contribution
+// Which services are missing their songs, guests, roll call or contribution
 // (server/lib/recordKeeping.js). For admins and whoever holds the Reports &
 // Record Keeping area.
 
@@ -41,7 +41,7 @@ router.post('/remind', (req, res) => {
 });
 
 // ─── POST /api/record-keeping/checkoffs ───────────────────────────────────────
-// { date, service, check: songs | guests | contribution | not-held, note }
+// { date, service, check: songs | guests | roll | contribution | not-held, note }
 
 router.post('/checkoffs', (req, res) => {
   const { date, service, check, note } = req.body || {};
