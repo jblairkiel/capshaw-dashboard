@@ -428,7 +428,7 @@ export default function MemberAttendanceView() {
 
       {importing && setup && (
         <MemberAttendanceImport services={setup.services} statuses={setup.statuses}
-          onClose={() => setImporting(false)} onImported={() => { setVersion(v => v + 1); load(); }} />
+          onClose={() => setImporting(false)} onImported={() => { setVersion(v => v + 1); load(); }} onStatusesChanged={load} />
       )}
       {editingStatuses && setup && (
         <StatusesDialog statuses={setup.statuses} onClose={() => setEditingStatuses(false)} onChanged={load} />

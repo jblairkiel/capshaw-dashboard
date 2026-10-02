@@ -1,21 +1,30 @@
-// Bringing an attendance spreadsheet into Member Attendance.
+// Bringing attendance spreadsheets into Member Attendance.
 //
-// The sheet this was written for keeps the roll by colouring in cells: one row
-// per member, their name on the left, and a column per service date with the
-// cell coloured for how they were marked (green for there, say). So the import
-// reads it in that shape:
+// The roll has been kept in Excel by colouring in cells, and two shapes of
+// sheet are read:
 //
-//   - the header row is the first row with dates in it, and those cells say
-//     which date each column is
-//   - the name column is the first column of the header row that is not a date
-//   - every row under it with a name is a member, and each date cell is keyed by
-//     its fill colour — or, for a cell with no fill, by what is typed in it
+//   roster — one sheet per service date, the way the church's own sheet is
+//     laid out: the date typed near the top ("10 04 2026"), a legend of what
+//     each colour means ("Green = Present", each in a cell of that colour),
+//     then side-by-side blocks of First Name / Last Name columns with a person
+//     per row. The person's name cells are coloured for how they were marked;
+//     a name left uncoloured is listed as "no colour", which the legend does
+//     not mention and so most likely means absent. When the date is not on
+//     the sheet, the file name ("Attendance_10_04_2026.xlsx") or the sheet's
+//     name is used, and the tracker can type it in.
 //
-// Nothing is guessed about what a colour means. The first read (a dry run)
-// returns every colour found and every name, matched to the directory where it
-// can be; the tracker says which status each colour is and who any unmatched
-// name is, and the second read saves it. A mark already on the roll is kept
-// unless the tracker asks for the file to win.
+//   grid — one row per member with their name on the left and a column per
+//     date, each cell coloured (or, with no colour, typed in).
+//
+// Several files are read at once, so a run of old weekly sheets comes in
+// together. Every roster sheet in a file is read; a grid workbook is read one
+// sheet at a time.
+//
+// The first read (a dry run) returns every colour found with what the legend
+// says it is and the status that looks like it, and every name matched to the
+// directory where it can be. The tracker confirms which status each colour
+// is and who any unmatched name is, and the second read saves it. A mark
+// already on the roll is kept unless the tracker asks for the file to win.
 
 const db = require('../db');
 const { readWorkbook, serialToIso, columnName } = require('./xlsxReader');
@@ -24,51 +33,30 @@ const attendance = require('./memberAttendance');
 
 // White is what an uncoloured cell looks like, whether or not Excel stored it.
 const BLANK_COLOURS = new Set(['#FFFFFF']);
+const NONE = 'none';
+
+const text = v => (v === null || v === undefined || typeof v === 'boolean' ? '' : String(v).trim());
+const fill = cell => (cell?.colour && !BLANK_COLOURS.has(cell.colour) ? cell.colour : null);
+
+// ─── Dates ────────────────────────────────────────────────────────────────────
+
+// "10/04/2026", "Oct 4, 2026", and the sheet's own "10 04 2026" or a file
+// called "Attendance_10_04_2026.xlsx".
+function dateFromText(value) {
+  const s = text(value);
+  if (!s) return null;
+  const direct = parseAnyDate(s);
+  if (direct) return direct;
+  const m = s.match(/(?:^|\D)(\d{1,2})[\s_.-]+(\d{1,2})[\s_.-]+(\d{4}|\d{2})(?:\D|$)/);
+  return m ? parseAnyDate(`${m[1]}/${m[2]}/${m[3]}`) : null;
+}
 
 function cellDate(value, date1904) {
   if (typeof value === 'number') return value > 20000 && value < 80000 ? serialToIso(value, date1904) : null;
-  return typeof value === 'string' ? parseAnyDate(value) : null;
+  return dateFromText(value);
 }
 
-const text = v => (v === null || v === undefined || typeof v === 'boolean' ? '' : String(v).trim());
-
-// A cell's key: its colour, or what is written in it when it has none.
-function keyOf(cell) {
-  if (!cell) return null;
-  if (cell.colour && !BLANK_COLOURS.has(cell.colour)) return cell.colour;
-  const t = text(cell.value);
-  return t ? `text:${t.toLowerCase()}` : null;
-}
-
-// ─── Reading the shape of the sheet ───────────────────────────────────────────
-
-// A title row with one date in it ("Attendance from 1/5/25") is not the
-// header: the first row with two or more dates is, or failing that one with one.
-function layout(rows, date1904) {
-  return headerAt(rows, date1904, 2) || headerAt(rows, date1904, 1);
-}
-
-function headerAt(rows, date1904, least) {
-  for (let r = 0; r < Math.min(rows.length, 30); r++) {
-    const cells = rows[r] || [];
-    const dates = [];
-    cells.forEach((cell, col) => {
-      const date = cell && cellDate(cell.value, date1904);
-      if (date) dates.push({ column: col, letter: columnName(col), date, heading: text(cell.value) || date });
-    });
-    if (dates.length < least) continue;
-    let nameColumn = 0;
-    for (let col = 0; col < dates[0].column; col++) {
-      if (cells[col] && !cellDate(cells[col].value, date1904)) { nameColumn = col; break; }
-    }
-    // Headings before the name column, or text headings among the dates
-    // (a "Total" column), are not dates and are left out.
-    return { headerRow: r, nameColumn, dates: dates.filter(d => d.column > nameColumn) };
-  }
-  return null;
-}
-
-// ─── Who is who ───────────────────────────────────────────────────────────────
+// ─── Names ────────────────────────────────────────────────────────────────────
 
 const normal = name => String(name || '').toLowerCase().replace(/[^a-z0-9\s'-]/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -77,7 +65,7 @@ function nameForms(name) {
   const s = String(name || '').trim();
   const forms = [normal(s)];
   const comma = s.match(/^([^,]+),\s*(.+)$/);
-  if (comma) forms.push(normal(`${comma[2]} ${comma[1]}`));
+  if (comma) forms.unshift(normal(`${comma[2]} ${comma[1]}`));
   return forms;
 }
 
@@ -96,51 +84,233 @@ function matcher() {
   };
 }
 
-// ─── The two reads ────────────────────────────────────────────────────────────
+// ─── What a colour means ──────────────────────────────────────────────────────
 
-async function readFile(buffer, sheetName) {
-  const book = await readWorkbook(buffer);
-  if (book.error) return book;
-  const visible = book.sheets.filter(s => !s.hidden);
-  const sheet = (sheetName && book.sheets.find(s => s.name === sheetName)) || visible[0] || book.sheets[0];
-  const shape = layout(sheet.rows, book.date1904);
-  if (!shape) return { error: `No row of dates was found on "${sheet.name}". The first row should have the service dates across it, one per column.`, sheets: book.sheets.map(s => s.name), sheet: sheet.name };
+const COLOUR_WORDS = /^(green|blue|orange|yellow|red|pink|purple|grey|gray|white|black|brown|teal|light \w+|dark \w+)$/i;
 
-  const match = matcher();
-  const people = [];
-  const keys = new Map();
-  for (let r = shape.headerRow + 1; r < sheet.rows.length; r++) {
-    const cells = sheet.rows[r] || [];
-    const name = text(cells[shape.nameColumn]?.value);
-    if (!name || cellDate(cells[shape.nameColumn]?.value, book.date1904)) continue;
-    const marks = [];
-    for (const d of shape.dates) {
-      const key = keyOf(cells[d.column]);
-      if (!key) continue;
-      marks.push({ date: d.date, key });
-      if (!keys.has(key)) {
-        const cell = cells[d.column];
-        keys.set(key, { key, colour: key.startsWith('#') ? key : null, text: key.startsWith('#') ? '' : text(cell.value), count: 0, sample: text(cell.value) });
-      }
-      keys.get(key).count++;
+// "Green = Present" (or "Present = Green") in a filled cell.
+function legendEntry(cell) {
+  const colour = fill(cell);
+  const t = text(cell?.value);
+  const m = t.match(/^(.+?)\s*=\s*(.+)$/) || t.match(/^(.+?)\s*[:–]\s*(.+)$/);
+  if (!colour || !m) return null;
+  const [a, b] = [m[1].trim(), m[2].trim()];
+  if (COLOUR_WORDS.test(b) && !COLOUR_WORDS.test(a)) return { colour, name: b, label: a };
+  return { colour, name: a, label: b };
+}
+
+const STOP = new Set(['or', 'of', 'the', 'and', 'a', 'an', 'at', 'in', 'is']);
+const words = s => new Set(normal(s).split(/[\s/-]+/).filter(w => w && !STOP.has(w)));
+
+// The status a legend label most looks like: "Sick or Caregiver" is Sick,
+// "Out Town" is Out of town. Nothing when no status shares a word with it.
+function statusLike(label, statuses) {
+  const want = words(label);
+  let best = null, bestScore = 0;
+  for (const s of statuses) {
+    const have = words(s.label);
+    const shared = [...have].filter(w => want.has(w)).length;
+    const covers = shared === have.size || shared === want.size;
+    const score = covers ? shared : 0;
+    if (score > bestScore) { best = s; bestScore = score; }
+  }
+  return best;
+}
+
+const rgb = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
+const distance = (a, b) => Math.hypot(...rgb(a).map((v, i) => v - rgb(b)[i]));
+
+// ─── Reading one sheet ────────────────────────────────────────────────────────
+
+// The row of First Name / Last Name headings, and the column pairs it sets out.
+function rosterHeader(rows) {
+  for (let r = 0; r < Math.min(rows.length, 30); r++) {
+    const cells = rows[r] || [];
+    const blocks = [];
+    cells.forEach((cell, c) => {
+      if (/^first(\s*name)?$/i.test(text(cell?.value)) && /^(last|sur)(\s*name)?$/i.test(text(cells[c + 1]?.value))) blocks.push({ first: c, last: c + 1 });
+    });
+    if (blocks.length) return { row: r, blocks };
+  }
+  return null;
+}
+
+function readRoster(sheet, header, { date1904, fileDate }) {
+  let found = null;
+  const legend = [];
+  for (let r = 0; r < header.row; r++) {
+    for (const cell of sheet.rows[r] || []) {
+      if (!cell) continue;
+      const entry = legendEntry(cell);
+      if (entry) legend.push(entry);
+      else found ||= cellDate(cell.value, date1904);
     }
-    const person = match(name);
-    people.push({ row: r + 1, name, personId: person?.id ?? null, matchedName: person?.name ?? null, marks });
+  }
+  const date = found || fileDate || dateFromText(sheet.name);
+
+  const entries = [];
+  for (let r = header.row + 1; r < sheet.rows.length; r++) {
+    const cells = sheet.rows[r] || [];
+    for (const { first, last } of header.blocks) {
+      const name = [text(cells[first]?.value), text(cells[last]?.value)].filter(Boolean).join(' ');
+      if (!name) continue;
+      entries.push({ name, where: `${columnName(first)}${r + 1}`, cells: [{ date, key: fill(cells[first]) || fill(cells[last]) || NONE }] });
+    }
+  }
+  return { layout: 'roster', dates: date ? [date] : [], dateFound: !!found, legend, entries };
+}
+
+// A title row with one date in it is not the header: the first row with two
+// or more dates is, or failing that one with one.
+function gridHeader(rows, date1904) {
+  for (const least of [2, 1]) {
+    for (let r = 0; r < Math.min(rows.length, 30); r++) {
+      const cells = rows[r] || [];
+      const dates = [];
+      cells.forEach((cell, col) => {
+        const date = cell && cellDate(cell.value, date1904);
+        if (date) dates.push({ column: col, date });
+      });
+      if (dates.length < least) continue;
+      let nameColumn = 0;
+      for (let col = 0; col < dates[0].column; col++) {
+        if (cells[col] && !cellDate(cells[col].value, date1904)) { nameColumn = col; break; }
+      }
+      return { row: r, nameColumn, dates: dates.filter(d => d.column > nameColumn) };
+    }
+  }
+  return null;
+}
+
+function readGrid(sheet, header, { date1904 }) {
+  const entries = [];
+  for (let r = header.row + 1; r < sheet.rows.length; r++) {
+    const cells = sheet.rows[r] || [];
+    const name = text(cells[header.nameColumn]?.value);
+    if (!name || cellDate(cells[header.nameColumn]?.value, date1904)) continue;
+    const marks = [];
+    for (const d of header.dates) {
+      const cell = cells[d.column];
+      const t = text(cell?.value);
+      const key = fill(cell) || (t ? `text:${t.toLowerCase()}` : null);
+      if (key) marks.push({ date: d.date, key, text: t });
+    }
+    entries.push({ name, where: `${columnName(header.nameColumn)}${r + 1}`, cells: marks });
+  }
+  return {
+    layout: 'grid', dates: header.dates.map(d => d.date), dateFound: true, legend: [], entries,
+    nameColumn: columnName(header.nameColumn), headerRow: header.row + 1,
+  };
+}
+
+// ─── Reading the files ────────────────────────────────────────────────────────
+
+// files: [{ buffer, name }]. options.sheet picks the sheet of a single grid
+// workbook; options.dateMap gives a roster page ({ "file#sheet": date }) the
+// date its sheet does not say.
+async function readFiles(files, { sheet: wanted = '', dateMap = {} } = {}) {
+  const pages = [];
+  let sheets = [];
+  for (const [index, file] of files.entries()) {
+    const book = await readWorkbook(file.buffer);
+    const label = file.name || `File ${index + 1}`;
+    if (book.error) { pages.push({ id: `${index}#`, file: label, sheet: '', problem: book.error }); continue; }
+    const visible = book.sheets.filter(s => !s.hidden);
+    const fileDate = dateFromText(label);
+
+    const rosters = visible.map(s => ({ s, header: rosterHeader(s.rows) })).filter(x => x.header);
+    if (rosters.length) {
+      for (const { s, header } of rosters) {
+        const id = `${index}#${s.name}`;
+        const read = readRoster(s, header, { date1904: book.date1904, fileDate });
+        const override = dateFromText(dateMap[id]);
+        if (override) {
+          read.dates = [override];
+          read.entries.forEach(e => e.cells.forEach(c => { c.date = override; }));
+        }
+        pages.push({ id, file: label, sheet: s.name, ...read, problem: read.dates.length ? null : 'No date found on this sheet. Enter it.' });
+      }
+      continue;
+    }
+
+    // A grid: one sheet, the one asked for or the first that is visible.
+    if (files.length === 1) sheets = book.sheets.map(s => s.name);
+    const s = (wanted && book.sheets.find(x => x.name === wanted)) || visible[0] || book.sheets[0];
+    const header = gridHeader(s.rows, book.date1904);
+    pages.push(header
+      ? { id: `${index}#${s.name}`, file: label, sheet: s.name, ...readGrid(s, header, { date1904: book.date1904 }), problem: null }
+      : { id: `${index}#${s.name}`, file: label, sheet: s.name, layout: 'unknown', dates: [], legend: [], entries: [],
+        problem: `"${s.name}" is not laid out in a way the import knows. It needs First Name / Last Name columns, or a row of dates across the top.` });
   }
 
+  // The legend, once per colour, across every page.
+  const legend = new Map();
+  for (const p of pages) for (const e of p.legend || []) if (!legend.has(e.colour)) legend.set(e.colour, e);
+
+  // Everybody, once each across every page: the same name on two sheets is one person.
+  const match = matcher();
+  const people = new Map();
+  const keys = new Map();
+  for (const p of pages) {
+    for (const e of p.entries || []) {
+      const id = nameForms(e.name)[0];
+      if (!people.has(id)) {
+        const person = match(e.name);
+        people.set(id, { key: id, name: e.name, where: `${p.sheet || p.file} ${e.where}`, personId: person?.id ?? null, matchedName: person?.name ?? null, marks: [] });
+      }
+      for (const c of e.cells) {
+        if (!c.date) continue;
+        people.get(id).marks.push({ date: c.date, key: c.key });
+        if (!keys.has(c.key)) {
+          keys.set(c.key, {
+            key: c.key,
+            colour: c.key.startsWith('#') ? c.key : null,
+            text: c.key.startsWith('text:') ? c.text : '',
+            none: c.key === NONE,
+            count: 0,
+          });
+        }
+        keys.get(c.key).count++;
+      }
+    }
+  }
+
+  const statuses = attendance.statuses().filter(s => s.active);
+  const absent = statuses.find(s => normal(s.label) === 'absent') || null;
+  for (const k of keys.values()) {
+    if (k.colour) {
+      const exact = legend.get(k.colour);
+      const near = exact || [...legend.values()]
+        .map(l => ({ l, d: distance(l.colour, k.colour) }))
+        .filter(x => x.d < 90)
+        .sort((a, b) => a.d - b.d)[0]?.l;
+      if (near) {
+        k.legend = `${near.name} = ${near.label}`;
+        k.approximate = !exact;
+        k.suggest = statusLike(near.label, statuses)?.id ?? null;
+        k.legendLabel = near.label;
+      }
+    } else if (k.none) {
+      k.suggest = absent?.id ?? null;
+    } else {
+      k.suggest = statusLike(k.text, statuses)?.id ?? null;
+    }
+  }
+
+  const dates = [...new Set(pages.flatMap(p => p.dates || []))].sort();
   return {
-    sheets: book.sheets.map(s => s.name),
-    sheet: sheet.name,
-    headerRow: shape.headerRow + 1,
-    nameColumn: columnName(shape.nameColumn),
-    dates: shape.dates.map(({ letter, date, heading }) => ({ column: letter, date, heading })),
+    pages: pages.map(({ entries, legend: l, ...p }) => ({ ...p, people: entries?.length ?? 0 })),
+    sheets,
+    sheet: pages.length === 1 ? pages[0].sheet : '',
+    dates,
+    legend: [...legend.values()],
     keys: [...keys.values()].sort((a, b) => b.count - a.count),
-    people,
+    people: [...people.values()],
   };
 }
 
 // What the import would do, or does: { keyMap: { key: statusId }, personMap:
-// { row: personId | '' }, service, overwrite }.
+// { personKey: personId | '' }, service, overwrite }.
 function plan(file, { service, keyMap = {}, personMap = {}, overwrite = false }) {
   const name = service ? db.prepare('SELECT name FROM service_types WHERE lower(name) = lower(?)').get(String(service).trim())?.name : null;
   const statuses = new Map(attendance.statuses().filter(s => s.active).map(s => [s.id, s]));
@@ -148,14 +318,15 @@ function plan(file, { service, keyMap = {}, personMap = {}, overwrite = false })
   const existing = new Map(
     name ? db.prepare('SELECT person_id, date, status_id FROM member_attendance WHERE service = ?').all(name).map(m => [`${m.person_id}|${m.date}`, m.status_id]) : [],
   );
+  const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 
   const writes = [];
   const counts = { add: 0, replace: 0, same: 0, keep: 0, unmapped: 0, unmatchedPeople: 0, skippedPeople: 0 };
   const seen = new Set();
   for (const p of file.people) {
-    const chosen = Object.prototype.hasOwnProperty.call(personMap, p.row) ? personMap[p.row] : p.personId;
+    const chosen = has(personMap, p.key) ? personMap[p.key] : p.personId;
     if (chosen === '' || chosen === null || chosen === undefined) {
-      counts[p.personId === null && !Object.prototype.hasOwnProperty.call(personMap, p.row) ? 'unmatchedPeople' : 'skippedPeople']++;
+      counts[p.personId === null && !has(personMap, p.key) ? 'unmatchedPeople' : 'skippedPeople']++;
       continue;
     }
     const personId = Number(chosen);
@@ -164,7 +335,7 @@ function plan(file, { service, keyMap = {}, personMap = {}, overwrite = false })
       const status = statuses.get(Number(keyMap[m.key]));
       if (!status) { counts.unmapped++; continue; }
       const id = `${personId}|${m.date}`;
-      if (seen.has(id)) continue; // the same person twice on the sheet: the first row wins
+      if (seen.has(id)) continue; // the same person twice: the first one read wins
       seen.add(id);
       const before = existing.get(id);
       if (before === status.id) counts.same++;
@@ -189,4 +360,4 @@ const save = db.transaction((writes, service, user) => {
   for (const w of writes) upsert.run(w.personId, w.date, service, w.statusId, user?.id ?? null, user?.name || '');
 });
 
-module.exports = { readFile, plan, save, keyOf, layout, nameForms };
+module.exports = { readFiles, plan, save, dateFromText, nameForms, statusLike, legendEntry, NONE };
