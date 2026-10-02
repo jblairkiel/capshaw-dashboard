@@ -329,13 +329,14 @@ const serviceDay = iso => new Date(`${iso}T12:00:00Z`)
   .toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 
 function planLines(plan) {
-  return plan.items.map((item, i) => {
+  return plan.items.flatMap((item, i) => {
     const what = [
       item.song ? `${item.song.title}${item.song.number ? ` (${[item.song.hymnal, item.song.number].filter(Boolean).join(' ')})` : ''}` : '',
       item.person,
       item.detail ? `"${item.detail}"` : '',
     ].filter(Boolean).join(' — ');
-    return `  ${String(i + 1).padStart(2)}. ${item.partName}${what ? `: ${what}` : ''}`;
+    const line = `  ${String(i + 1).padStart(2)}. ${item.partName}${what ? `: ${what}` : ''}`;
+    return item.note ? [line, `      Note: ${item.note}`] : [line];
   });
 }
 

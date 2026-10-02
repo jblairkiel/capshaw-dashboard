@@ -141,6 +141,26 @@ describe('submitting a service', () => {
     expect((await submit(PEOPLE.leader, body({ service: 'No Such Service' }))).status).toBe(400);
   });
 
+  test('any part can carry a note, which the organizer sees in the email', async () => {
+    const items = body().items.map(i => ({ ...i }));
+    items[0].note = '  vv. 1, 2\n and 4 ';
+    items[2].note = 'Romans 12:1-8';
+    const res = await submit(PEOPLE.leader, body({ items }));
+    expect(res.status).toBe(201);
+    expect(res.body.plan.items.map(i => i.note)).toEqual(['vv. 1, 2 and 4', '', 'Romans 12:1-8', '']);
+    expect(plans.getPlan(res.body.plan.id).items[0].note).toBe('vv. 1, 2 and 4');
+
+    const [mail] = db.prepare('SELECT body FROM mail_outbox').all();
+    expect(mail.body).toContain('1. Song: Amazing Grace (Praise for the Lord 123)\n      Note: vv. 1, 2 and 4\n');
+    expect(mail.body).toContain('"The Good Shepherd"\n      Note: Romans 12:1-8\n');
+    // A part with no note gets no line for one.
+    expect(mail.body).toMatch(/Mo Member\n +3\. Sermon/);
+
+    items[0].note = 'x'.repeat(300);
+    const long = await submit(PEOPLE.leader, body({ items }));
+    expect(long.body.plan.items[0].note).toHaveLength(200);
+  });
+
   test('emails the organizer once, and puts it in their bell each time it changes', async () => {
     const res = await submit(PEOPLE.leader);
     expect(res.body.emailed).toBe(1);

@@ -18,7 +18,7 @@ const PLAN = {
   id: 7, date: '2026-10-04', service: 'Sunday AM Worship', leader: 'Lee Leader', notes: '', status: 'submitted',
   submittedByName: 'Lee Leader', canEdit: true,
   items: [
-    { partId: 1, partName: 'Song', takesSong: true, takesPerson: false, detailLabel: '', song: GRACE, person: '', detail: '' },
+    { partId: 1, partName: 'Song', takesSong: true, takesPerson: false, detailLabel: '', song: GRACE, person: '', detail: '', note: 'vv. 1, 2 and 4' },
     { partId: 5, partName: 'Sermon', takesSong: false, takesPerson: true, detailLabel: 'Title', song: null, person: 'Sam Preacher', detail: 'The Good Shepherd' },
   ],
 };
@@ -97,6 +97,7 @@ describe('Order of Worship', () => {
     expect(within(sunday).getByText('Waiting to be confirmed')).toBeInTheDocument();
     expect(within(sunday).getByText('Amazing Grace')).toBeInTheDocument();
     expect(within(sunday).getByText('“The Good Shepherd”')).toBeInTheDocument();
+    expect(within(sunday).getByText('vv. 1, 2 and 4')).toBeInTheDocument();
     const wednesday = screen.getByRole('region', { name: /Wednesday Bible Study/ });
     expect(within(wednesday).getByText('Not submitted yet')).toBeInTheDocument();
     // Only the organizer confirms.
@@ -146,16 +147,21 @@ describe('Submit a Service', () => {
     const fetchMock = await openSubmit({ onPost: b => { sent = b; return null; } });
     await pickSong('Song for Song 1', 'grace', 'Amazing Grace');
     await pickSong('Song for Song 3', 'abide', 'Abide With Me');
+    const note = screen.getByLabelText('Note for Song 3');
+    expect(note).toHaveAttribute('placeholder', 'specific vs. or comments');
+    fireEvent.change(note, { target: { value: 'vv. 1 and 3' } });
     fireEvent.click(screen.getByRole('button', { name: 'Move Song 3 up' }));
+    // The note goes with its part.
+    expect(screen.getByLabelText('Note for Song 2')).toHaveValue('vv. 1 and 3');
     fireEvent.click(screen.getByRole('button', { name: 'Submit service' }));
 
     await waitFor(() => expect(calls(fetchMock, 'POST', '/api/worship/plans')).toHaveLength(1));
     expect(sent).toMatchObject({
       date: '2026-10-04', service: 'Sunday AM Worship', leader: 'Lee Leader',
       items: [
-        { partId: 1, songId: GRACE.id },
-        { partId: 1, songId: ABIDE.id },
-        { partId: 2, songId: null, person: 'Mo Member' },
+        { partId: 1, songId: GRACE.id, note: '' },
+        { partId: 1, songId: ABIDE.id, note: 'vv. 1 and 3' },
+        { partId: 2, songId: null, person: 'Mo Member', note: '' },
       ],
     });
     expect(await screen.findByText(/The worship organizer has been emailed/)).toBeInTheDocument();
@@ -194,6 +200,7 @@ describe('Submit a Service', () => {
     expect(screen.getByText(/Only the song leader on the Serving Schedule/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Submit service' })).toBeNull();
     expect(screen.queryByLabelText('Song for Song 1')).toBeNull();
+    expect(screen.queryByLabelText('Note for Song 1')).toBeNull();
   });
 
   test('the organizer can confirm a submitted service from here', async () => {

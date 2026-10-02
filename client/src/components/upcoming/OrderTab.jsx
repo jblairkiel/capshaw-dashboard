@@ -24,6 +24,7 @@ export function PlanOutline({ items }) {
             )}
             {item.person && <span className={item.song ? 'ml-2 text-gray-600' : ''}>{item.person}</span>}
             {item.detail && <span className="ml-2 text-gray-500 italic">“{item.detail}”</span>}
+            {item.note && <span className="block text-xs text-gray-500">{item.note}</span>}
           </span>
         </li>
       ))}
