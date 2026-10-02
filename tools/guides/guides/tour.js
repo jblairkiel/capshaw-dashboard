@@ -129,7 +129,7 @@ module.exports = {
         await d.clear();
         await page.keyboard.press('Escape');
         await d.sleep(400);
-        await d.click(page.getByRole('button', { name: 'Individual follow-ups', exact: true }).first());
+        await d.click(page.getByRole('button', { name: 'Follow Up', exact: true }).first());
         await d.sleep(700);
         await d.caption({ chip: 'GUESTS', title: 'Follow-ups that get done', text: 'Follow-ups are small workflows — assigned to whoever looks after guests and tracked until someone reaches out.' });
         await d.hold(1200);

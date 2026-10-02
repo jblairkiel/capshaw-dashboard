@@ -783,7 +783,7 @@ export default function VisitorTracker({ user }) {
       <div className="flex items-end justify-between flex-wrap gap-3">
         <h2 className="section-heading mb-0">Our Guests</h2>
         <div className="flex items-center gap-2 flex-wrap">
-          <WorkflowDialogButton page="visitors" user={user} label="Individual follow-ups" title="Guest follow-ups" />
+          <WorkflowDialogButton page="visitors" user={user} label="Follow Up" title="Guest follow-ups" />
           {canManage && (
             <button onClick={() => setEditing({})} className="btn-primary text-sm">Add a guest</button>
           )}
