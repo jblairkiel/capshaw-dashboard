@@ -777,11 +777,16 @@ export default function VisitorTracker({ user }) {
 
   return (
     <div className="space-y-4">
+      {/* The heading and both buttons share one row, so the page starts
+          straight away rather than under a row of its own for Follow-ups. */}
       <div className="flex items-end justify-between flex-wrap gap-3">
         <h2 className="section-heading mb-0">Our Guests</h2>
-        {canManage && (
-          <button onClick={() => setEditing({})} className="btn-primary text-sm">Add a guest</button>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          <WorkflowDialogButton page="visitors" user={user} label="Follow-ups" title="Guest follow-ups" />
+          {canManage && (
+            <button onClick={() => setEditing({})} className="btn-primary text-sm">Add a guest</button>
+          )}
+        </div>
       </div>
 
       {/* The same guests, two ways of reading them */}
