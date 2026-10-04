@@ -496,6 +496,10 @@ export default function LoginPage({ authError, verified, verifyError, resetToken
 
               <Divider>or</Divider>
               <ProviderButtons />
+              <p className="text-xs text-gray-500 text-center mt-3 leading-relaxed">
+                Signing in with Google or Facebook is the safer choice: they check your password,
+                so this site never sees or stores it.
+              </p>
             </>
           )}
         </div>

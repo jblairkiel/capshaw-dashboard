@@ -86,3 +86,10 @@ describe('LoginPage — choosing a new password from the link', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Email me a link' })).toBeInTheDocument());
   });
 });
+
+describe('LoginPage — why Google or Facebook', () => {
+  test('says signing in with them means this site never stores a password', () => {
+    render(<LoginPage />);
+    expect(screen.getByText(/Google or Facebook is the safer choice/)).toHaveTextContent('never sees or stores it');
+  });
+});
