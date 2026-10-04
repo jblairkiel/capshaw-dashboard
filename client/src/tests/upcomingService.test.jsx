@@ -210,6 +210,18 @@ describe('Submit a Service', () => {
   });
 });
 
+describe('names from the Serving Schedule', () => {
+  test('a service not submitted yet shows who is down for it', async () => {
+    const view = overview();
+    view.upcoming[1].serving = { 'Song Leader': ['Visiting Leader'], 'Opening Prayer': ['Mo Member'] };
+    mockApi({ view });
+    render(<Page tab="order" />);
+    const card = await screen.findByRole('region', { name: /Wednesday Bible Study/ });
+    expect(within(card).getByText('On the Serving Schedule')).toBeInTheDocument();
+    expect(within(card).getByText('Opening Prayer').nextSibling).toHaveTextContent('Mo Member');
+  });
+});
+
 describe('a link to one service', () => {
   test('the song leader\'s reminder opens that service on the Submit tab', async () => {
     const fetchMock = mockApi();

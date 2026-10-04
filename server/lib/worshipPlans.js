@@ -22,6 +22,7 @@ const library = require('./songLibrary');
 const { holdsArea } = require('./areas');
 const { dateOf } = require('./blackouts');
 const { churchToday, addDays } = require('./recordKeeping');
+const { SERVICES: SERVING_ROSTERS } = require('../workflows/scheduling');
 
 const STATUSES = ['submitted', 'confirmed'];
 const REQUEST_STATUSES = ['open', 'planned', 'done', 'withdrawn', 'declined'];
@@ -67,26 +68,49 @@ function setStartTime(serviceTypeId, time) {
   return { before: row.start_time, service: { id: row.id, name: row.name, startTime: normal } };
 }
 
-// The Serving Schedule names its services its own way.
+// The Serving Schedule names its regular services its own way ("Sunday
+// Worship", "Sunday Evening", "Wednesday" — server/workflows/scheduling.js).
+// A Sunday Bible class is not the worship service and has no roster of its own.
 function servingServiceFor(name) {
   if (/wed/i.test(name)) return 'Wednesday';
+  if (/\b(bible|class|study)\b/i.test(name)) return null;
   if (/\b(pm|evening|night)\b/i.test(name)) return 'Sunday Evening';
   if (/sunday/i.test(name)) return 'Sunday Worship';
   return null;
 }
 
+// Which Serving Schedule rows belong to a service: those under its regular
+// roster name, and those under its own name — a gospel meeting or any other
+// special service is put on the schedule by the service's own name.
+function servingNamesFor(service) {
+  const names = new Set([String(service || '').toLowerCase()]);
+  const regular = servingServiceFor(service);
+  if (regular) names.add(regular.toLowerCase());
+  return names;
+}
+
 // Who the Serving Schedule has down for each job at one service.
 function servingFor(date, service) {
-  const wanted = servingServiceFor(service);
+  const wanted = servingNamesFor(service);
   const jobs = {};
-  if (wanted) {
-    for (const r of db.prepare("SELECT month, date, service, job, name FROM job_assignments WHERE month <> '' AND service = ?").all(wanted)) {
-      if (dateOf(r.month, r.date) !== date || !r.name) continue;
-      (jobs[r.job] ||= []).push(r.name);
-    }
+  for (const r of db.prepare("SELECT month, date, service, job, name FROM job_assignments WHERE month <> '' AND trim(name) <> ''").all()) {
+    if (!wanted.has(String(r.service || '').toLowerCase()) || dateOf(r.month, r.date) !== date) continue;
+    (jobs[r.job] ||= []).push(r.name);
   }
   const leaderJob = Object.keys(jobs).find(j => /^song\s*lead/i.test(j));
   return { jobs, leader: leaderJob ? jobs[leaderJob].join(', ') : '' };
+}
+
+// The Serving Schedule job a part is filled from: the one the organizer linked
+// it to on Service Parts, or else a job of the same name ("Announcements").
+const jobKey = s => String(s || '').toLowerCase().replace(/[^a-z]/g, '');
+// Parts whose usual name is not the job's: the sermon is the speaker's.
+const PART_JOB = { sermon: 'speaker', lordssupper: 'communion' };
+function namesForPart(part, jobs) {
+  if (!part.takesPerson) return '';
+  const wanted = [jobKey(part.name), PART_JOB[jobKey(part.name)]].filter(Boolean);
+  const job = part.servingJob || Object.keys(jobs).find(j => wanted.includes(jobKey(j)));
+  return job ? (jobs[job] || []).join(', ') : '';
 }
 
 function isScheduledLeader(user, date, service) {
@@ -249,7 +273,7 @@ function template(date, service) {
   const items = outlineFor(type?.id ?? null).partIds.map(id => parts.get(id)).filter(p => p?.active).map(p => ({
     partId: p.id, partName: p.name, takesSong: p.takesSong, takesPerson: p.takesPerson, detailLabel: p.detailLabel,
     song: null,
-    person: p.takesPerson && p.servingJob ? (jobs[p.servingJob] || []).join(', ') : '',
+    person: namesForPart(p, jobs),
     detail: '',
     note: '',
   }));
@@ -474,31 +498,56 @@ function syncRequests(plan) {
 
 // The services coming up: every weekly one on its day, and anything else
 // somebody has already submitted for, over the next `days`.
+// The services coming up: every weekly one, every one the Serving Schedule
+// has a special service down for (a gospel meeting), and any already planned.
 function upcoming(user, { days = 14, today = churchToday() } = {}) {
   const until = addDays(today, days - 1);
   const slots = new Map();
-  for (const s of activeServices()) {
+  const services = activeServices();
+  for (const s of services) {
     if (s.tracking !== 'weekly' || s.weekday === null) continue;
     for (let d = 0; d < days; d++) {
       const date = addDays(today, d);
       if (new Date(`${date}T12:00:00Z`).getUTCDay() === s.weekday) slots.set(`${date}|${s.name}`, { date, service: s.name });
     }
   }
+  for (const s of specialServices({ from: today, to: until })) slots.set(`${s.date}|${s.service}`, s);
   for (const p of plansBetween(today, until)) slots.set(`${p.date}|${p.service}`, { date: p.date, service: p.service });
 
-  const order = new Map(activeServices().map((s, i) => [s.name, i]));
+  const order = new Map(services.map((s, i) => [s.name, i]));
   return [...slots.values()]
     .sort((a, b) => a.date.localeCompare(b.date) || (order.get(a.service) ?? 99) - (order.get(b.service) ?? 99))
     .map(({ date, service }) => {
       const plan = planFor(date, service);
+      const serving = servingFor(date, service);
       return {
         date, service,
-        leader: plan?.leader || servingFor(date, service).leader,
+        leader: plan?.leader || serving.leader,
+        // Who the Serving Schedule has down for the service, so a service not
+        // submitted yet still says who is doing what.
+        serving: serving.jobs,
         plan,
         canSubmit: canSubmit(user, date, service),
         canEdit: plan ? canEdit(user, plan) : false,
       };
     });
+}
+
+// Services the Serving Schedule has down by a service's own name — a gospel
+// meeting, a singing — rather than under one of its regular rosters.
+function specialServices({ from, to }) {
+  const byName = new Map(activeServices().map(s => [s.name.toLowerCase(), s.name]));
+  // The regular rosters are the weekly services, listed already.
+  const regular = new Set(SERVING_ROSTERS.map(n => n.toLowerCase()));
+  const found = new Map();
+  for (const r of db.prepare("SELECT DISTINCT month, date, service FROM job_assignments WHERE month <> '' AND date <> ''").all()) {
+    const key = String(r.service || '').toLowerCase();
+    const name = !regular.has(key) && byName.get(key);
+    if (!name) continue;
+    const date = dateOf(r.month, r.date);
+    if (date && date >= from && date <= to) found.set(`${date}|${name}`, { date, service: name });
+  }
+  return [...found.values()];
 }
 
 function holdersOfOrganizer() {
@@ -512,7 +561,7 @@ function holdersOfOrganizer() {
 module.exports = {
   STATUSES, REQUEST_STATUSES,
   canOrganize, keepsSongs, canSubmit, canEdit, isScheduledLeader, nameKey, serviceType,
-  servingFor, servingServiceFor, trackerName,
+  servingFor, servingServiceFor, specialServices, activeServices, trackerName,
   listParts, addPart, updatePart, outlines, outlineFor, setOutline, setStartTime,
   getPlan, planFor, plansBetween, template, submit, confirm, remove,
   getRequest, listRequests, addRequest, setRequestStatus,

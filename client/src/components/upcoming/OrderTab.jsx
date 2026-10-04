@@ -58,7 +58,22 @@ function ServiceCard({ slot, canOrganize, busy, onOpen, onConfirm }) {
             </p>
           </>
         ) : (
-          <p className="text-sm text-gray-500">The song leader has not submitted this service yet.</p>
+          <>
+            <p className="text-sm text-gray-500">The song leader has not submitted this service yet.</p>
+            {Object.keys(slot.serving || {}).length > 0 && (
+              <div className="mt-2">
+                <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">On the Serving Schedule</p>
+                <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-sm">
+                  {Object.entries(slot.serving).map(([job, names]) => (
+                    <div key={job} className="contents">
+                      <dt className="text-gray-500">{job}</dt>
+                      <dd className="text-church-navy">{names.join(', ')}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            )}
+          </>
         )}
 
         <div className="mt-3 flex flex-wrap gap-2">

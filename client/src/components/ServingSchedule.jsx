@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Fragment, useState, useEffect, useCallback, useMemo } from 'react';
 import Dialog from './Dialog';
 import TimeAway from './TimeAway';
 import BlackoutCalendar from './BlackoutCalendar';
@@ -117,6 +117,108 @@ function BuildMonthDialog({ services, onClose, onBuilt }) {
           </button>
         </div>
       </form>
+    </Dialog>
+  );
+}
+
+// ─── A special service ────────────────────────────────────────────────────────
+//
+// A service that does not come round every week — a gospel meeting, a monthly
+// singing — on one day or each night of a run of days, with the jobs it needs.
+// Upcoming Service picks it up from here: its parts are filled from these
+// slots, and its song leader is reminded like any other.
+
+const SPECIAL_JOBS = ['Song Leader', 'Opening Prayer', 'Closing Prayer'];
+
+function SpecialServiceDialog({ choices, jobs, onClose, onAdded }) {
+  const [service, setService] = useState(choices[0] || '');
+  const [from, setFrom]       = useState('');
+  const [through, setThrough] = useState('');
+  const [chosen, setChosen]   = useState(() => new Set(SPECIAL_JOBS.filter(j => jobs.includes(j))));
+  const [busy, setBusy]       = useState(false);
+  const [error, setError]     = useState('');
+
+  function toggle(job) {
+    setChosen(prev => {
+      const next = new Set(prev);
+      if (next.has(job)) next.delete(job); else next.add(job);
+      return next;
+    });
+  }
+
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true); setError('');
+    try {
+      const json = await send(`${API}/special`, { method: 'POST', ...jsonBody({ service, from, through: through || from, jobs: jobs.filter(j => chosen.has(j)) }) });
+      onAdded(json);
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  const label = 'text-xs font-medium text-gray-500 uppercase tracking-wide';
+
+  return (
+    <Dialog title="Add a special service" subtitle="A gospel meeting, a singing — anything that is not every week" onClose={onClose} width="max-w-md">
+      {choices.length === 0 ? (
+        <div className="space-y-3">
+          <p className="text-sm text-gray-600">
+            There are no special services on the church&apos;s list yet. An admin adds them (a Gospel Meeting, say)
+            under <strong>Church Records → Service Types</strong>.
+          </p>
+          <div className="flex justify-end">
+            <button type="button" onClick={onClose} className="text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600">Close</button>
+          </div>
+        </div>
+      ) : (
+        <form onSubmit={submit} className="space-y-4">
+          <label className="block">
+            <span className={label}>Service</span>
+            <select value={service} onChange={e => setService(e.target.value)} className="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+              {choices.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className={label}>First night</span>
+              <DateInput required value={from} onChange={v => { setFrom(v); if (through && v > through) setThrough(''); }} />
+            </label>
+            <label className="block">
+              <span className={label}>Last night</span>
+              <DateInput value={through} min={from || undefined} onChange={setThrough} />
+              <span className="block text-xs text-gray-400 mt-1">Leave blank for one night</span>
+            </label>
+          </div>
+
+          <fieldset className="border-0 p-0 m-0">
+            <legend className={`${label} mb-1`}>Jobs it needs, each night</legend>
+            <div className="grid grid-cols-2 gap-1">
+              {jobs.map(job => (
+                <label key={job} className="flex items-center gap-2 text-sm text-gray-700">
+                  <input type="checkbox" checked={chosen.has(job)} onChange={() => toggle(job)} className="accent-church-gold" />
+                  {job}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <p className="text-xs text-gray-500">
+            Each night gets an empty slot for every job ticked. It shows on Upcoming Service with these names
+            filled in, and its song leader is reminded like any other service.
+          </p>
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={onClose} className="text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600">Cancel</button>
+            <button type="submit" disabled={busy || !from || !chosen.size} className="btn-primary text-sm disabled:opacity-50">
+              {busy ? 'Adding…' : 'Add it'}
+            </button>
+          </div>
+        </form>
+      )}
     </Dialog>
   );
 }
@@ -247,6 +349,7 @@ export default function ServingSchedule() {
   const [notice, setNotice]   = useState('');
   const [busyId, setBusyId]   = useState(null);
   const [building, setBuilding] = useState(false);
+  const [addingSpecial, setAddingSpecial] = useState(false);
   const [editing, setEditing] = useState(null);   // a slot, or {} for a new one
   const [awayView, setAwayView] = useState('list');   // 'list' or 'calendar', for the keeper's view of who is away
   const [blockingOut, setBlockingOut] = useState(false);   // the member's own time-away dialog
@@ -274,11 +377,22 @@ export default function ServingSchedule() {
     for (const a of all) {
       if (a.date && !MONTHLY_JOBS.has(a.job) && !seen.includes(a.date)) seen.push(a.date);
     }
-    return seen;
-  }, [all]);
+    // In the order they happen: a special service added later still falls
+    // between the Sundays either side of it.
+    const when = d => isoFromMonthDay(month, d) || d;
+    return seen.sort((a, b) => when(a).localeCompare(when(b)));
+  }, [all, month]);
 
   const selected = weeks.includes(week) ? week : (weeks[0] || '');
-  const rows     = all.filter(a => a.date === selected && !MONTHLY_JOBS.has(a.job));
+  // A day can have more than one service — Sunday morning and evening, or a
+  // gospel meeting — so its rows are kept together under each service's name.
+  const regular  = data?.services ?? [];
+  const rank     = svc => (regular.includes(svc) ? regular.indexOf(svc) : regular.length);
+  const rows     = all.filter(a => a.date === selected && !MONTHLY_JOBS.has(a.job))
+    .map((a, i) => ({ a, i }))
+    .sort((x, y) => rank(x.a.service) - rank(y.a.service) || String(x.a.service).localeCompare(String(y.a.service)) || x.i - y.i)
+    .map(({ a }) => a);
+  const headed   = new Set(rows.map(r => r.service)).size > 1 || rows.some(r => r.service && !regular.includes(r.service));
   const monthly  = all.filter(a => MONTHLY_JOBS.has(a.job));
 
   const canManage = !!data?.canManage;
@@ -385,6 +499,12 @@ export default function ServingSchedule() {
               >
                 Add a job
               </button>
+              <button
+                onClick={() => setAddingSpecial(true)}
+                className="text-sm px-3 py-2 rounded-lg border border-church-navy text-church-navy hover:bg-church-navy hover:text-white transition-colors"
+              >
+                Add a special service
+              </button>
             </>
           )}
         </div>
@@ -422,8 +542,16 @@ export default function ServingSchedule() {
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
-              <tr key={r.id} className={r.name ? 'bg-white' : 'bg-amber-50/40'}>
+            {rows.map((r, i) => (
+              <Fragment key={r.id}>
+              {headed && r.service !== rows[i - 1]?.service && (
+                <tr className="bg-gray-50">
+                  <th colSpan={3} scope="colgroup" className="px-4 py-1.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    {r.service || 'Any service'}
+                  </th>
+                </tr>
+              )}
+              <tr className={r.name ? 'bg-white' : 'bg-amber-50/40'}>
                 <td className="px-4 py-2 font-medium text-church-navy">{r.job}</td>
                 <td className="px-4 py-2">
                   {r.name || <span className="text-gray-400">Nobody yet</span>}
@@ -459,6 +587,7 @@ export default function ServingSchedule() {
                   </div>
                 </td>
               </tr>
+              </Fragment>
             ))}
             {rows.length === 0 && (
               <tr>
@@ -528,12 +657,21 @@ export default function ServingSchedule() {
         />
       )}
 
+      {addingSpecial && (
+        <SpecialServiceDialog
+          choices={data?.specialServices ?? []}
+          jobs={data?.jobs ?? []}
+          onClose={() => setAddingSpecial(false)}
+          onAdded={json => { setAddingSpecial(false); setWeek(''); load(json.month); }}
+        />
+      )}
+
       {editing && (
         <SlotDialog
           slot={editing.id ? editing : null}
           month={month}
           jobs={data?.jobs ?? []}
-          services={data?.services ?? []}
+          services={[...(data?.services ?? []), ...(data?.specialServices ?? [])]}
           onClose={() => setEditing(null)}
           onSaved={(saved, warning) => { setEditing(null); setNotice(warning || ''); load(saved?.month || month); }}
           onDeleted={() => { setEditing(null); load(month); }}
