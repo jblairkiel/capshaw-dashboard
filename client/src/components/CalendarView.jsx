@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { hasAnyArea } from '../lib/roles';
 import EventComments from './EventComments';
+import DateInput from './DateInput';
 
 // The calendar is a view over announcements, not a store of its own. Anything
 // with an event_date shows up here, and adding or editing a day writes back to
@@ -118,7 +119,7 @@ function EventModal({ event, onSaved, onClose, onDeleted }) {
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
               <span className={labelText}>Date</span>
-              <input type="date" value={form.event_date || ''} onChange={e => set('event_date', e.target.value)} className={field} />
+              <DateInput value={form.event_date} onChange={v => set('event_date', v)} className={field} />
             </label>
             <label className="block">
               <span className={labelText}>Time</span>

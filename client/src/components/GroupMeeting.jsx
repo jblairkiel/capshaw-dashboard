@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import EventComments from './EventComments';
 import { call, formatEventDate, RESPONSES, responseInfo } from '../lib/groups';
+import DateInput from './DateInput';
 
 // ─── A group's meeting ────────────────────────────────────────────────────────
 //
@@ -581,7 +582,7 @@ export function MeetingEditor({ groupId, event, onSaved, onCancel }) {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <label className="block">
           <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Date</span>
-          <input type="date" value={form.date} onChange={e => set('date', e.target.value)} className={field} />
+          <DateInput value={form.date} onChange={v => set('date', v)} className={field} />
         </label>
         <label className="block">
           <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Starts</span>

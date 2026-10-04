@@ -35,6 +35,7 @@ import MemberMatchView from './components/MemberMatchView';
 import ContributionsView from './components/ContributionsView';
 import MemberAttendanceView from './components/MemberAttendanceView';
 import WorshipParticipationView from './components/WorshipParticipationView';
+import MailDeliveryView from './components/MailDeliveryView';
 import { hasWriteAccess, isAdmin, hasArea } from './lib/roles';
 
 const API = '/api/members';
@@ -111,6 +112,7 @@ const ADMIN_ITEMS = [
   { id: 'database',       label: 'Church Records' },
   { id: 'action-history', label: 'Action History' },
   { id: 'bug-reports',    label: 'Bug Reports' },
+  { id: 'mail-delivery',  label: 'Email Delivery' },
 ];
 
 function officeGroupsFor(user) {
@@ -180,7 +182,7 @@ const STANDALONE_TABS = new Set([
   'bible-class', 'announcements', 'upcoming', 'calendar', 'users', 'database',
   'directory', 'profile', 'inbox', 'mail-groups', 'emails', 'record-keeping', 'livestreams',
   'assignments', 'visitors', 'leadership', 'action-history','service-roster', 'bulletin',
-  'groups', 'bug-reports', 'how-it-works', 'member-match', 'contributions', 'member-attendance', 'participation',
+  'groups', 'bug-reports', 'how-it-works', 'member-match', 'contributions', 'member-attendance', 'participation', 'mail-delivery',
 ]);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
@@ -524,6 +526,11 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
           <HowItWorksView />
         </main>
       )}
+      {!updating && activeTab === 'mail-delivery' && admin && (
+        <main className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
+          <MailDeliveryView />
+        </main>
+      )}
       {!updating && activeTab === 'users' && admin && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           <UsersView currentUser={user} />
@@ -616,6 +623,8 @@ export default function App() {
   const authError   = params.get('auth_error');
   const verified    = params.get('verified');
   const verifyError = params.get('verify_error');
+  // The link in a "choose a new password" email.
+  const resetToken  = params.get('reset');
 
   useEffect(() => {
     fetch('/api/auth/me', { credentials: 'include' })
@@ -638,6 +647,7 @@ export default function App() {
         authError={authError}
         verified={verified}
         verifyError={verifyError}
+        resetToken={resetToken}
         onSignedIn={setUser}
       />
     );

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import DateInput from './DateInput';
 
 const API = '/api/bulletin';
 
@@ -356,10 +357,10 @@ export default function WeeklyBulletinView({ canWrite = false }) {
               className="px-2 py-1.5 text-sm rounded border border-gray-300 hover:bg-gray-50"
               aria-label="Previous week"
             >←</button>
-            <input
-              type="date"
+            <DateInput
+              aria-label="Week of"
               value={sunday}
-              onChange={e => e.target.value && setSunday(sundayOf(e.target.value))}
+              onChange={v => v && setSunday(sundayOf(v))}
               className="rounded border border-gray-300 px-2 py-1.5 text-sm focus:border-church-gold focus:outline-none"
             />
             <button

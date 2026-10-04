@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { SongPicker, StatusBadge } from './shared';
 import { call, dayLabel } from './api';
+import DateInput from '../DateInput';
 
 // ─── Submit a Service ─────────────────────────────────────────────────────────
 //
@@ -102,7 +103,7 @@ function OccasionPicker({ overview, selection, onSelect }) {
         <>
           <label className="block text-sm">
             <span className="text-gray-700">Date</span>
-            <input type="date" value={selection?.date || ''} onChange={e => onSelect({ date: e.target.value, service: selection?.service || overview.services[0]?.name || '' })}
+            <DateInput value={selection?.date || ''} onChange={v => onSelect({ date: v, service: selection?.service || overview.services[0]?.name || '' })}
               className="mt-1 border border-gray-300 rounded-lg px-3 py-2 text-sm" />
           </label>
           <label className="block text-sm">

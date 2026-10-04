@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { describeRange } from '../lib/timeAway';
+import DateInput from './DateInput';
 
 // ─── Time away from the serving jobs ──────────────────────────────────────────
 //
@@ -97,23 +98,21 @@ export default function TimeAway({
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
               <span className={label}>First day away</span>
-              <input
+              <DateInput
                 required
-                type="date"
                 aria-label="First day away"
                 value={startsOn}
-                onChange={e => setStartsOn(e.target.value)}
+                onChange={setStartsOn}
                 className={field}
               />
             </label>
             <label className="block">
               <span className={label}>Last day away</span>
-              <input
-                type="date"
+              <DateInput
                 aria-label="Last day away"
                 value={endsOn}
                 min={startsOn || undefined}
-                onChange={e => setEndsOn(e.target.value)}
+                onChange={setEndsOn}
                 className={field}
               />
             </label>

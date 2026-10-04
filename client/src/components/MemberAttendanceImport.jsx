@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import Dialog from './Dialog';
 import { API, call, dayLabel, toneHex } from '../lib/memberAttendance';
+import DateInput from './DateInput';
 
 // Importing attendance kept in Excel by colouring in cells. The server reads
 // the files (server/lib/memberAttendanceImport.js) — the church's weekly sheet,
@@ -182,9 +183,9 @@ export default function MemberAttendanceImport({ services, statuses, onClose, on
                         <td className="px-3 py-2 whitespace-nowrap">
                           {p.layout === 'roster' ? (
                             <span className="inline-flex items-center gap-2">
-                              <input type="date" aria-label={`Date of ${p.file}${p.sheet ? ` ${p.sheet}` : ''}`}
+                              <DateInput aria-label={`Date of ${p.file}${p.sheet ? ` ${p.sheet}` : ''}`}
                                 value={dateMap[p.id] ?? p.dates[0] ?? ''}
-                                onChange={e => setDateMap(m => ({ ...m, [p.id]: e.target.value }))}
+                                onChange={v => setDateMap(m => ({ ...m, [p.id]: v }))}
                                 className={`${field} ${p.dates.length ? '' : 'border-red-300'}`} />
                               {p.dates[0] && !dateMap[p.id] && <span className="text-xs text-gray-400">{p.dateFound ? 'from the sheet' : 'from the file name'}</span>}
                             </span>

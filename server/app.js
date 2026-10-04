@@ -39,6 +39,7 @@ const memberMatchRoutes          = require('./routes/memberMatch');
 const contributionRoutes         = require('./routes/contributions');
 const memberAttendanceRoutes     = require('./routes/memberAttendance');
 const participationRoutes        = require('./routes/participation');
+const mailDeliveryRoutes         = require('./routes/mailDelivery');
 const paths                      = require('./lib/paths');
 const { requireSiteAuth }        = require('./middleware/auth');
 const { applyImpersonation }     = require('./middleware/impersonation');
@@ -154,6 +155,7 @@ function createApp() {
   app.use('/api/contributions',   contributionRoutes);
   app.use('/api/member-attendance', memberAttendanceRoutes);
   app.use('/api/participation',   participationRoutes);
+  app.use('/api/mail-delivery',   mailDeliveryRoutes);
 
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });

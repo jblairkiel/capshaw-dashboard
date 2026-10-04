@@ -175,8 +175,8 @@ export default function MailGroupsView() {
         <div className="card border border-amber-200 bg-amber-50 text-sm text-amber-900">
           <strong>Test mode.</strong> Every message is being delivered to{' '}
           <span className="font-mono">{data.mail.redirectTo}</span> instead of its real recipient,
-          whatever these groups say. Clear <span className="font-mono">MAIL_REDIRECT_TO</span> on the
-          server to send to real people.
+          whatever these groups say, except to the roles and people an admin has turned on under
+          Admin → Email Delivery.
         </div>
       )}
 

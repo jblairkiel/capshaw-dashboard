@@ -369,3 +369,112 @@ describe('rate limiting on the open endpoints', () => {
     expect(refused).not.toBeNull();
   });
 });
+
+// ─── Forgotten passwords ──────────────────────────────────────────────────────
+
+function resetTokenFromEmail() {
+  const mail = outbox('account:reset').filter(m => m.context === 'account:reset').at(-1);
+  return mail?.body.match(/\?reset=([^\s]+)/)?.[1] ?? null;
+}
+
+describe('forgot password', () => {
+  test('answers the same for an account, an unknown address and a Google account', async () => {
+    const app = buildApp();
+    await fullyApproved(app);
+    const answers = await Promise.all(['pat@example.com', 'nobody@example.com', 'ada@example.com']
+      .map(email => request(app).post('/api/auth/forgot-password').send({ email })));
+    expect(answers.map(r => r.status)).toEqual([200, 200, 200]);
+    expect(new Set(answers.map(r => r.body.message)).size).toBe(1);
+
+    expect(outbox('account:reset').map(m => [m.context, m.intended_for || m.to_email])).toEqual([
+      ['account:reset', 'pat@example.com'],
+      ['account:reset-no-password', 'ada@example.com'],
+    ]);
+    expect(outbox('account:reset-no-password')[0].body).toMatch(/signs in with Google/);
+  });
+
+  test('the link sets a new password once, and clears a lockout', async () => {
+    const app = buildApp();
+    const account = await fullyApproved(app);
+    db.prepare("UPDATE users SET failed_logins = 8, locked_until = datetime('now', '+15 minutes') WHERE id = ?").run(account.id);
+    await request(app).post('/api/auth/forgot-password').send({ email: 'Pat@Example.com ' });
+    const token = resetTokenFromEmail();
+    expect(token).toBeTruthy();
+    expect(accountFor('pat@example.com').password_reset_hash).not.toBe(token);
+
+    const NEW_PASSWORD = 'creek-lantern-2041';
+    const res = await request(app).post('/api/auth/reset-password').send({ token, password: NEW_PASSWORD });
+    expect(res.status).toBe(200);
+    const after = accountFor('pat@example.com');
+    await expect(verifyPassword(NEW_PASSWORD, after.password_hash)).resolves.toBe(true);
+    expect(after).toMatchObject({ failed_logins: 0, locked_until: null, password_reset_hash: '' });
+
+    const login = await request(app).post('/api/auth/login').send({ email: 'pat@example.com', password: NEW_PASSWORD });
+    expect(login.status).toBe(200);
+
+    const again = await request(app).post('/api/auth/reset-password').send({ token, password: 'another-good-one-77' });
+    expect(again.status).toBe(400);
+    expect(again.body.code).toBe('reset_invalid');
+  });
+
+  test('refuses an expired or made-up link, and a weak password', async () => {
+    const app = buildApp();
+    await fullyApproved(app);
+    await request(app).post('/api/auth/forgot-password').send({ email: 'pat@example.com' });
+    const token = resetTokenFromEmail();
+
+    const weak = await request(app).post('/api/auth/reset-password').send({ token, password: 'short' });
+    expect(weak.status).toBe(400);
+    expect(weak.body.code).toBeUndefined();
+
+    expect((await request(app).post('/api/auth/reset-password').send({ token: 'made-up', password: 'creek-lantern-2041' })).body.code).toBe('reset_invalid');
+    db.prepare("UPDATE users SET password_reset_expires_at = datetime('now', '-1 minute') WHERE provider = 'local'").run();
+    expect((await request(app).post('/api/auth/reset-password').send({ token, password: 'creek-lantern-2041' })).body.code).toBe('reset_invalid');
+  });
+
+  test('a newer link replaces an older one, and the form will not mail twice in two minutes', async () => {
+    const app = buildApp();
+    await fullyApproved(app);
+    await request(app).post('/api/auth/forgot-password').send({ email: 'pat@example.com' });
+    const first = resetTokenFromEmail();
+    await request(app).post('/api/auth/forgot-password').send({ email: 'pat@example.com' });
+    expect(outbox('account:reset')).toHaveLength(1);
+
+    db.prepare("UPDATE users SET password_reset_sent_at = datetime('now', '-1 hour') WHERE provider = 'local'").run();
+    await request(app).post('/api/auth/forgot-password').send({ email: 'pat@example.com' });
+    const second = resetTokenFromEmail();
+    expect(second).not.toBe(first);
+    expect((await request(app).post('/api/auth/reset-password').send({ token: first, password: 'creek-lantern-2041' })).status).toBe(400);
+    expect((await request(app).post('/api/auth/reset-password').send({ token: second, password: 'creek-lantern-2041' })).status).toBe(200);
+  });
+
+  test('a new password does not skip confirming the address', async () => {
+    const app = buildApp();
+    await register(app);
+    await request(app).post('/api/auth/forgot-password').send({ email: 'pat@example.com' });
+    await request(app).post('/api/auth/reset-password').send({ token: resetTokenFromEmail(), password: 'creek-lantern-2041' });
+    const login = await request(app).post('/api/auth/login').send({ email: 'pat@example.com', password: 'creek-lantern-2041' });
+    expect(login.body.code).toBe('email_unverified');
+  });
+});
+
+// ─── Test mode ────────────────────────────────────────────────────────────────
+
+describe('account mail skips the test-mode redirect', () => {
+  test('confirmation, already-registered, approval and reset go to the person; the note to admins does not', async () => {
+    const app = buildApp();
+    await fullyApproved(app);
+    await register(app);
+    await request(app).post('/api/auth/forgot-password').send({ email: 'pat@example.com' });
+
+    const rows = db.prepare('SELECT context, to_email, intended_for, body FROM mail_outbox ORDER BY id').all();
+    const mine = rows.filter(r => !r.context.endsWith('awaiting-approval'));
+    expect(mine.map(r => r.context)).toEqual(['account:verify', expect.stringMatching(/approved$/), 'account:duplicate', 'account:reset']);
+    for (const r of mine) {
+      expect(r).toMatchObject({ to_email: 'pat@example.com', intended_for: '' });
+      expect(r.body).not.toMatch(/TEST MODE/);
+    }
+    const toAdmins = rows.find(r => r.context.endsWith('awaiting-approval'));
+    expect(toAdmins).toMatchObject({ to_email: 'jblairkiel@gmail.com', intended_for: 'ada@example.com' });
+  });
+});

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { hasArea } from '../lib/roles';
 import EventComments from './EventComments';
+import DateInput from './DateInput';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -111,8 +112,8 @@ function ItemEditor({ initial, onSave, onCancel }) {
       {type === 'event' && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <Field label="Date">
-            <input type="date" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold"
-              value={eventDate} onChange={e => setEventDate(e.target.value)} />
+            <DateInput className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-church-gold"
+              value={eventDate} onChange={setEventDate} />
           </Field>
           <Field label="Time">
             <input type="text" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold"
