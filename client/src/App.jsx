@@ -87,32 +87,41 @@ const PROFILE_GROUP = {
 };
 
 // Everything somebody looks after on the congregation's behalf. Each item is
-// shown only to the people who can actually use it: an admin sees all of it,
-// and a member sees the pages for the areas they hold and nothing else. The
-// server checks the same thing on every request — this only decides what is
-// worth showing.
+// shown only to the people who hold its area: an admin sees all of it, and a
+// member sees the pages for the areas they hold and nothing else. The server
+// checks the same thing on every request — this only decides what is worth
+// showing.
 const OFFICE_ITEMS = [
-  { id: 'users',          label: 'Members & Access',  when: user => isAdmin(user) },
-  { id: 'bug-reports',    label: 'Bug Reports',       when: user => isAdmin(user) },
-  { id: 'action-history', label: 'Action History',    when: user => isAdmin(user) },
-  { id: 'database',       label: 'Church Records',    when: user => isAdmin(user) },
-  { id: 'service-roster', label: 'Service Roster',    when: user => hasArea(user, 'serving-schedule') },
-  { id: 'directory',      label: 'Member Directory',  when: user => hasArea(user, 'directory') },
-  { id: 'mail-groups',    label: 'Email Groups',      when: user => hasArea(user, 'mail-groups') },
-  { id: 'emails',         label: 'Emails',            when: user => hasArea(user, 'mail-groups') },
+  { id: 'record-keeping',    label: 'Record Keeping',    when: user => hasArea(user, 'records') },
   { id: 'member-attendance', label: 'Member Attendance', when: user => hasArea(user, 'member-attendance') },
-  { id: 'record-keeping', label: 'Record Keeping',    when: user => hasArea(user, 'records') },
-  { id: 'bulletin',       label: 'Weekly Newsletter', when: user => hasArea(user, 'bulletin') },
+  { id: 'service-roster',    label: 'Service Roster',    when: user => hasArea(user, 'serving-schedule') },
+  { id: 'directory',         label: 'Member Directory',  when: user => hasArea(user, 'directory') },
+  { id: 'bulletin',          label: 'Weekly Newsletter', when: user => hasArea(user, 'bulletin') },
+  { id: 'mail-groups',       label: 'Email Groups',      when: user => hasArea(user, 'mail-groups') },
+  { id: 'emails',            label: 'Emails',            when: user => hasArea(user, 'mail-groups') },
 ];
 
-function officeGroupFor(user) {
+// The pages only an admin can ever reach — who may sign in, every table, the
+// history of every change, and the bug reports. Kept in a menu of their own
+// so they are never mixed in with work that can be handed to a member.
+const ADMIN_ITEMS = [
+  { id: 'users',          label: 'Members & Access' },
+  { id: 'database',       label: 'Church Records' },
+  { id: 'action-history', label: 'Action History' },
+  { id: 'bug-reports',    label: 'Bug Reports' },
+];
+
+function officeGroupsFor(user) {
   const items = OFFICE_ITEMS.filter(item => item.when(user)).map(({ id, label }) => ({ id, label }));
-  return items.length ? [{ id: 'admin', label: 'Church Office', items }] : [];
+  return [
+    ...(items.length ? [{ id: 'office', label: 'Church Office', items }] : []),
+    ...(isAdmin(user) ? [{ id: 'admin', label: 'Admin', items: ADMIN_ITEMS }] : []),
+  ];
 }
 
 // Every tab id that could ever be the active one — whether or not this user
 // can currently see it in the nav. A deep link is checked against this
-// rather than against what officeGroupFor(user) happens to return, since an
+// rather than against what officeGroupsFor(user) happens to return, since an
 // office item a link points at but this user cannot use should fall back to
 // the default tab, not silently render nothing.
 // Pages that became tabs of Upcoming Service. Old links, the bell, and any
@@ -127,6 +136,7 @@ const ALL_TAB_IDS = new Set([
   ...Object.keys(PAGE_ALIASES),
   ...PROFILE_GROUP.items.map(i => i.id),
   ...OFFICE_ITEMS.map(i => i.id),
+  ...ADMIN_ITEMS.map(i => i.id),
 ]);
 
 // A generated email points here with ?page=&group=&event=&workflow=&plan=&tab=&date=&service= (see
@@ -209,7 +219,7 @@ function NavDropdown({ group, activeTab, onSelect }) {
       </button>
 
       {open && (
-        <div className="absolute top-full left-0 bg-white rounded-b-lg shadow-xl border border-gray-200 min-w-44 z-50 py-1">
+        <div className="absolute top-full left-0 bg-white rounded-b-lg shadow-xl border border-gray-200 min-w-52 z-50 py-1">
           {group.items.map(item => (
             <button
               key={item.id}
@@ -286,7 +296,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
   const GROUPS = [
     ...BASE_GROUPS,
     PROFILE_GROUP,
-    ...officeGroupFor(user),
+    ...officeGroupsFor(user),
   ];
 
   const lastUpdated = siteData?.lastUpdated
@@ -321,11 +331,11 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       {/* Nav */}
       <div className="bg-church-navy shadow-md sticky top-0 z-10">
         <div className="max-w-6xl mx-auto flex items-center">
-          {/* Phones: one folder menu. Tablets up: the full dropdown row. */}
-          <div className="flex md:hidden flex-1 min-w-0">
+          {/* Phones and upright tablets: one folder menu. From 1024px, with room for every menu beside Refresh: the full dropdown row. */}
+          <div className="flex lg:hidden flex-1 min-w-0">
             <MobileNav groups={GROUPS} activeTab={activeTab} onSelect={goTo} />
           </div>
-          <div className="hidden md:flex flex-1 min-w-0">
+          <div className="hidden lg:flex flex-1 min-w-0">
             {GROUPS.map(group => (
               <NavDropdown
                 key={group.id}

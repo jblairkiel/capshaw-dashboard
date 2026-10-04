@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from 'react';
 
 // ─── Mobile nav ────────────────────────────────────────────────────────────────
 // A row of dropdowns cannot fit a phone, and each is whitespace-nowrap, so the
-// row used to force the whole page wider than the viewport. Below md the nav
-// collapses to one button that opens every group as a folder.
+// row used to force the whole page wider than the viewport. Below lg (1024px),
+// where every menu first fits beside the Refresh button, the nav collapses to
+// one button that opens every group as a folder.
 
 export default function MobileNav({ groups, activeTab, onSelect }) {
   const [open, setOpen] = useState(false);

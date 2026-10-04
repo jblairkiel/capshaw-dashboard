@@ -291,7 +291,7 @@ module.exports = {
         await d.sleep(600);
 
         d.mark('access');
-        await d.nav('Church Office', 'Members & Access');
+        await d.nav('Admin', 'Members & Access');
         await d.caption({ chip: 'MEMBERS & ACCESS', title: 'The right keys for each person', text: 'The office approves new accounts and grants each person only the areas they look after.' });
         await d.callout(page.getByText('waiting to be confirmed', { exact: false }).first(), 'New sign-ups wait here', { where: 'below', alignRight: true });
         await d.hold(1200);
