@@ -780,6 +780,12 @@ function initSchema(db) {
   // attempts for a while. Reset the moment a correct password arrives.
   addColumn('users', 'failed_logins', 'INTEGER NOT NULL DEFAULT 0');
   addColumn('users', 'locked_until', 'TEXT');
+  // An outstanding "forgot my password" link: its SHA-256 (never the token),
+  // when it stops working, and when it was sent, so the form cannot be used to
+  // mail somebody over and over.
+  addColumn('users', 'password_reset_hash', "TEXT NOT NULL DEFAULT ''");
+  addColumn('users', 'password_reset_expires_at', 'TEXT');
+  addColumn('users', 'password_reset_sent_at', 'TEXT');
   // Who let this account in, and when. An approval is the moment an account
   // gains access to the congregation's information, so it is worth a record.
   addColumn('users', 'approved_at', 'TEXT');

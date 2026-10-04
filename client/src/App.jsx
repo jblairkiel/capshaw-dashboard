@@ -616,6 +616,8 @@ export default function App() {
   const authError   = params.get('auth_error');
   const verified    = params.get('verified');
   const verifyError = params.get('verify_error');
+  // The link in a "choose a new password" email.
+  const resetToken  = params.get('reset');
 
   useEffect(() => {
     fetch('/api/auth/me', { credentials: 'include' })
@@ -638,6 +640,7 @@ export default function App() {
         authError={authError}
         verified={verified}
         verifyError={verifyError}
+        resetToken={resetToken}
         onSignedIn={setUser}
       />
     );

@@ -91,7 +91,7 @@ function Divider({ children }) {
 
 // ─── Sign in with an email address and password ───────────────────────────────
 
-function SignInForm({ onSignedIn }) {
+function SignInForm({ onSignedIn, onForgot }) {
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy]         = useState(false);
@@ -174,9 +174,117 @@ function SignInForm({ onSignedIn }) {
         value={password}
         onChange={e => setPassword(e.target.value)}
       />
+      <div className="-mt-2 text-right">
+        <button type="button" onClick={() => onForgot(email)} className="text-xs text-church-gold hover:text-church-navy">
+          Forgot your password?
+        </button>
+      </div>
 
       <button type="submit" disabled={busy} className="btn-primary w-full text-sm py-2.5 disabled:opacity-60">
         {busy ? 'Signing in…' : 'Sign in'}
+      </button>
+    </form>
+  );
+}
+
+// ─── Forgot your password ─────────────────────────────────────────────────────
+
+async function post(url, body) {
+  try {
+    const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return await res.json().catch(() => ({}));
+  } catch {
+    return { error: 'We could not reach the portal just now. Please try again.' };
+  }
+}
+
+function ForgotForm({ initialEmail, onBack }) {
+  const [email, setEmail] = useState(initialEmail || '');
+  const [busy, setBusy]   = useState(false);
+  const [error, setError] = useState('');
+  const [sent, setSent]   = useState('');
+
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true); setError('');
+    const json = await post('/api/auth/forgot-password', { email });
+    setBusy(false);
+    if (json.success) setSent(json.message);
+    else setError(json.error || 'Something went wrong. Please try again.');
+  }
+
+  if (sent) {
+    return (
+      <div className="text-center space-y-4">
+        <h2 className="font-semibold text-church-navy">Check your email</h2>
+        <p className="text-sm text-gray-600">{sent}</p>
+        <p className="text-xs text-gray-500">The link works once, for an hour. If you sign in with Google or Facebook, the email says so instead — there is no password to reset.</p>
+        <button type="button" onClick={onBack} className="text-sm text-church-gold hover:text-church-navy">Back to sign in</button>
+      </div>
+    );
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4" noValidate>
+      <p className="text-sm text-gray-600 text-center">
+        Type the email address you sign in with and we will send you a link to choose a new password.
+      </p>
+      {error && <div role="alert" className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</div>}
+      <Field id="forgot-email" label="Email address" type="email" autoComplete="username" required
+        value={email} onChange={e => setEmail(e.target.value)} />
+      <button type="submit" disabled={busy || !email.trim()} className="btn-primary w-full text-sm py-2.5 disabled:opacity-60">
+        {busy ? 'Sending…' : 'Email me a link'}
+      </button>
+      <p className="text-center text-sm">
+        <button type="button" onClick={onBack} className="text-church-gold hover:text-church-navy">Back to sign in</button>
+      </p>
+    </form>
+  );
+}
+
+// ─── Choose a new password (from the emailed link) ────────────────────────────
+
+function ResetForm({ token, onDone, onAskAgain }) {
+  const [form, setForm]   = useState({ password: '', confirm: '' });
+  const [busy, setBusy]   = useState(false);
+  const [error, setError] = useState('');
+  const [dead, setDead]   = useState(false);
+
+  async function submit(e) {
+    e.preventDefault();
+    setError('');
+    if (form.password !== form.confirm) return setError('Those two passwords are not the same.');
+    if (form.password.length < MIN_PASSWORD_LENGTH) {
+      return setError(`Please use a password of at least ${MIN_PASSWORD_LENGTH} characters.`);
+    }
+    setBusy(true);
+    const json = await post('/api/auth/reset-password', { token, password: form.password });
+    setBusy(false);
+    if (json.success) return onDone(json.message);
+    setDead(json.code === 'reset_invalid');
+    setError(json.error || 'Something went wrong. Please try again.');
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4" noValidate>
+      <h2 className="font-semibold text-church-navy text-center">Choose a new password</h2>
+      {error && (
+        <div role="alert" className="rounded-xl bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+          {error}
+          {dead && (
+            <button type="button" onClick={onAskAgain} className="block mt-2 underline text-red-800 hover:text-red-900">
+              Send me a new link
+            </button>
+          )}
+        </div>
+      )}
+      <Field id="reset-password" label="New password" type="password" autoComplete="new-password" required
+        value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+        hint={`At least ${MIN_PASSWORD_LENGTH} characters. A few ordinary words together make a good one.`} />
+      <Field id="reset-confirm" label="New password again" type="password" autoComplete="new-password" required
+        value={form.confirm} onChange={e => setForm(f => ({ ...f, confirm: e.target.value }))} />
+      <button type="submit" disabled={busy} className="btn-primary w-full text-sm py-2.5 disabled:opacity-60">
+        {busy ? 'Saving…' : 'Save my new password'}
       </button>
     </form>
   );
@@ -285,9 +393,20 @@ function RegisterForm({ onRegistered }) {
 
 // ─── The page ─────────────────────────────────────────────────────────────────
 
-export default function LoginPage({ authError, verified, verifyError, onSignedIn = () => {} }) {
-  const [mode, setMode]         = useState('signin');   // 'signin' | 'register'
+export default function LoginPage({ authError, verified, verifyError, resetToken, onSignedIn = () => {} }) {
+  // 'signin' | 'register' | 'forgot' | 'reset'
+  const [mode, setMode]         = useState(resetToken ? 'reset' : 'signin');
   const [registered, setRegistered] = useState('');
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [passwordChanged, setPasswordChanged] = useState('');
+
+  // Once the link has been used, take the token out of the address bar so it
+  // is not left in the browser's history.
+  function leaveReset(next, message = '') {
+    if (resetToken) window.history.replaceState(null, '', window.location.pathname);
+    setPasswordChanged(message);
+    setMode(next);
+  }
 
   return (
     <div className="min-h-screen bg-church-cream flex flex-col items-center justify-center px-4 py-10">
@@ -319,8 +438,14 @@ export default function LoginPage({ authError, verified, verifyError, onSignedIn
           </Banner>
         )}
 
+        {passwordChanged && <Banner tone="success">{passwordChanged}</Banner>}
+
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-8">
-          {registered ? (
+          {mode === 'reset' ? (
+            <ResetForm token={resetToken} onDone={msg => leaveReset('signin', msg)} onAskAgain={() => leaveReset('forgot')} />
+          ) : mode === 'forgot' ? (
+            <ForgotForm initialEmail={forgotEmail} onBack={() => setMode('signin')} />
+          ) : registered ? (
             <div className="text-center space-y-4">
               <h2 className="font-semibold text-church-navy">Check your email</h2>
               <p className="text-sm text-gray-600">{registered}</p>
@@ -347,7 +472,7 @@ export default function LoginPage({ authError, verified, verifyError, onSignedIn
               </p>
 
               {mode === 'signin'
-                ? <SignInForm onSignedIn={onSignedIn} />
+                ? <SignInForm onSignedIn={onSignedIn} onForgot={email => { setForgotEmail(email); setPasswordChanged(''); setMode('forgot'); }} />
                 : <RegisterForm onRegistered={setRegistered} />
               }
 

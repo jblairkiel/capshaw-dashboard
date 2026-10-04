@@ -156,6 +156,13 @@ const LOCKOUT_MINUTES    = 15;
 const limitSignIn   = rateLimit({ max: 20, message: 'Too many sign-in attempts just now. Please wait a few minutes and try again.' });
 const limitRegister = rateLimit({ max: 10, message: 'Too many attempts just now. Please wait a few minutes and try again.' });
 const limitResend   = rateLimit({ max: 10, message: 'Too many attempts just now. Please wait a few minutes and try again.' });
+const limitForgot   = rateLimit({ max: 10, message: 'Too many attempts just now. Please wait a few minutes and try again.' });
+const limitReset    = rateLimit({ max: 20, message: 'Too many attempts just now. Please wait a few minutes and try again.' });
+
+// "Forgot your password?" answers the same whether or not the address has an
+// account, for the same reason registration does.
+const RESET_SENT =
+  'If that address has an account here, an email with a link to choose a new password is on its way.';
 
 // Registration says the same thing whether or not the address already has an
 // account. The difference is only in which email goes out, which only the
@@ -229,9 +236,9 @@ function regenerateSession(req, done) {
   return req.session.regenerate(done);
 }
 
-function sentTooRecently(user) {
-  if (!user.email_verify_sent_at) return false;
-  const sent = Date.parse(`${user.email_verify_sent_at.replace(' ', 'T')}Z`);
+function sentTooRecently(user, column = 'email_verify_sent_at') {
+  if (!user[column]) return false;
+  const sent = Date.parse(`${user[column].replace(' ', 'T')}Z`);
   return Number.isFinite(sent) && Date.now() - sent < RESEND_INTERVAL_MS;
 }
 
@@ -358,6 +365,83 @@ router.post('/resend-verification', limitResend, (req, res) => {
 
   res.json({ success: true, message: CHECK_YOUR_EMAIL });
 });
+
+// ─── POST /forgot-password ────────────────────────────────────────────────────
+//
+// Mails a one-time link to choose a new password. Only the digest is kept, a
+// newer link replaces an older one, and the link lasts an hour. An address that
+// signs in with Google or Facebook is told so instead, since it has no password
+// here; an unknown address gets nothing. The answer is the same in every case.
+
+router.post('/forgot-password', limitForgot, (req, res) => {
+  const email = normalizeEmail(req.body?.email);
+  if (!isEmailAddress(email)) {
+    return res.status(400).json({ success: false, error: 'Please enter a valid email address.' });
+  }
+
+  const local = localAccountFor(email);
+  if (local) {
+    if (!sentTooRecently(local, 'password_reset_sent_at')) {
+      const { token, hash } = createToken();
+      db.prepare(`
+        UPDATE users
+           SET password_reset_hash = ?,
+               password_reset_expires_at = datetime('now', ?),
+               password_reset_sent_at = datetime('now')
+         WHERE id = ?
+      `).run(hash, `+${accountMail.RESET_TTL_MINUTES} minutes`, local.id);
+      accountMail.resetPassword({ name: local.name, email: local.email, token });
+    }
+  } else {
+    const other = anyAccountFor(email);
+    if (other && !sentTooRecently(other, 'password_reset_sent_at')) {
+      db.prepare("UPDATE users SET password_reset_sent_at = datetime('now') WHERE id = ?").run(other.id);
+      accountMail.noPasswordToReset({ name: other.name, email, provider: other.provider });
+    }
+  }
+
+  res.json({ success: true, message: RESET_SENT });
+});
+
+// ─── POST /reset-password  { token, password } ────────────────────────────────
+//
+// Sets the new password from the link, and clears any lockout from guessing at
+// the old one. It does not sign them in, and it changes nothing else: an
+// address still to be confirmed, or an account still waiting for approval, is
+// exactly where it was.
+
+router.post('/reset-password', limitReset, asyncRoute(async (req, res) => {
+  const token    = String(req.body?.token ?? '');
+  const password = req.body?.password;
+
+  const user = token && db.prepare(`
+    SELECT * FROM users
+     WHERE provider = 'local' AND password_reset_hash <> '' AND password_reset_hash = ?
+  `).get(hashToken(token));
+
+  const dead = () => res.status(400).json({
+    success: false, code: 'reset_invalid',
+    error: 'That link to choose a new password is no longer valid. It may have expired or already been used — ask for a new one below.',
+  });
+  if (!user) return dead();
+  if (db.prepare("SELECT datetime('now') > ? AS expired").get(user.password_reset_expires_at).expired) return dead();
+
+  const problem = passwordProblem(password, { email: user.email, name: user.name });
+  if (problem) return res.status(400).json({ success: false, error: problem });
+
+  const digest = await hashPassword(password);
+  db.prepare(`
+    UPDATE users
+       SET password_hash = ?,
+           password_reset_hash = '',
+           password_reset_expires_at = NULL,
+           failed_logins = 0,
+           locked_until = NULL
+     WHERE id = ?
+  `).run(digest, user.id);
+
+  res.json({ success: true, message: 'Your password has been changed. Please sign in with it.' });
+}));
 
 // ─── POST /login ──────────────────────────────────────────────────────────────
 
@@ -909,4 +993,6 @@ module.exports.resetRateLimits = () => {
   limitSignIn.reset();
   limitRegister.reset();
   limitResend.reset();
+  limitForgot.reset();
+  limitReset.reset();
 };

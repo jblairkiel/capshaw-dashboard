@@ -75,6 +75,9 @@ export default function MailDeliveryView() {
       <div>
         <h2 className="section-heading mb-1">Email Delivery</h2>
         <p className="text-sm text-gray-500">Who receives their own email while the site is in test mode.</p>
+        <p className="text-xs text-gray-400 mt-1">
+          Account emails — confirming an address, approval, and password resets — always go to the person they are for.
+        </p>
       </div>
 
       {data.redirecting && data.all.on ? (

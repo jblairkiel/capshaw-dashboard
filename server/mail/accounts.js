@@ -5,6 +5,11 @@
 // Every message goes through the outbox in mailer.js, which means a mail
 // server that is slow, misconfigured, or absent never blocks a registration —
 // the message waits and goes out on the next sweep.
+//
+// What goes to the person whose account it is skips the test-mode redirect
+// (`realRecipient`): a confirmation or reset link only works for the person
+// who asked for it. The note to the admins follows Admin → Email Delivery like
+// everything else.
 
 const db     = require('../db');
 const mailer = require('./mailer');
@@ -21,6 +26,14 @@ function clientUrl() {
 function verifyUrl(token) {
   return `${clientUrl()}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
 }
+
+// A reset link opens the portal itself, which shows the "choose a new password"
+// form and sends the token back with the new password.
+function resetUrl(token) {
+  return `${clientUrl()}/?reset=${encodeURIComponent(token)}`;
+}
+
+const RESET_TTL_MINUTES = 60;
 
 const SIGNATURE = [
   '',
@@ -79,13 +92,57 @@ compose.addressAlreadyRegistered = ({ name, provider }) => {
     '',
     `The portal is here: ${clientUrl()}`,
     '',
-    'If you have forgotten your password, reply to this message and the church',
-    'office will sort it out with you.',
+    provider === 'google' || provider === 'facebook'
+      ? 'There is no password to remember: just use that button.'
+      : 'If you have forgotten your password, choose "Forgot your password?" on\nthe sign-in page and we will email you a link to choose a new one.',
     '',
     'If this was not you, nothing has changed and there is nothing to do.',
     SIGNATURE,
   ].join('\n');
   return { subject: 'You already have a Capshaw member portal account', body };
+};
+
+compose.resetPassword = ({ name, token }) => ({
+  subject: 'Choose a new password for the Capshaw member portal',
+  body: [
+    `Hello ${name || 'there'},`,
+    '',
+    'Somebody — we hope it was you — asked to reset the password for your',
+    'Capshaw Church of Christ member portal account.',
+    '',
+    'To choose a new password, open this link:',
+    '',
+    `  ${resetUrl(token)}`,
+    '',
+    `The link works once, for the next ${RESET_TTL_MINUTES} minutes.`,
+    '',
+    'If this was not you, simply ignore this message. Your password has not',
+    'changed, and nobody can change it without this link.',
+    SIGNATURE,
+  ].join('\n'),
+});
+
+// Asked for a reset on an address whose account signs in with Google or
+// Facebook: there is no password here to reset, so say how they do sign in.
+compose.noPasswordToReset = ({ name, provider }) => {
+  const via = provider === 'facebook' ? 'Facebook' : 'Google';
+  return {
+    subject: 'Signing in to the Capshaw member portal',
+    body: [
+      `Hello ${name || 'there'},`,
+      '',
+      'Somebody asked to reset the password for this address on the Capshaw',
+      'Church of Christ member portal.',
+      '',
+      `Your account there signs in with ${via}, so it has no password of its`,
+      `own to reset. Use the "Sign in with ${via}" button instead:`,
+      '',
+      `  ${clientUrl()}`,
+      '',
+      'If this was not you, nothing has changed and there is nothing to do.',
+      SIGNATURE,
+    ].join('\n'),
+  };
 };
 
 compose.awaitingApproval = ({ user }) => ({
@@ -140,6 +197,7 @@ function confirmAddress({ name, email, token }) {
     to: [{ email, name: name || '' }],
     ...compose.confirmAddress({ name, token }),
     context: 'account:verify',
+    realRecipient: true,
   });
 }
 
@@ -151,6 +209,27 @@ function addressAlreadyRegistered({ email, name, provider }) {
     to: [{ email, name: name || '' }],
     ...compose.addressAlreadyRegistered({ name, provider }),
     context: 'account:duplicate',
+    realRecipient: true,
+  });
+}
+
+// ─── Forgotten passwords ──────────────────────────────────────────────────────
+
+function resetPassword({ name, email, token }) {
+  return mailer.send({
+    to: [{ email, name: name || '' }],
+    ...compose.resetPassword({ name, token }),
+    context: 'account:reset',
+    realRecipient: true,
+  });
+}
+
+function noPasswordToReset({ name, email, provider }) {
+  return mailer.send({
+    to: [{ email, name: name || '' }],
+    ...compose.noPasswordToReset({ name, provider }),
+    context: 'account:reset-no-password',
+    realRecipient: true,
   });
 }
 
@@ -188,14 +267,19 @@ function approved({ user, personName }) {
     to: [{ email: user.email, name: user.name }],
     ...compose.approved({ user, personName }),
     context: `account:${user.id}:approved`,
+    realRecipient: true,
   });
 }
 
 module.exports = {
   compose,
   verifyUrl,
+  resetUrl,
+  RESET_TTL_MINUTES,
   confirmAddress,
   addressAlreadyRegistered,
+  resetPassword,
+  noPasswordToReset,
   awaitingApproval,
   approved,
   admins,

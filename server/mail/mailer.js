@@ -13,6 +13,11 @@
 // In between, an admin can let particular roles or people through to their
 // own address while everyone else stays redirected (./delivery.js, set on
 // Admin → Email Delivery). Nothing let through means everybody redirected.
+//
+// Mail about a person's own account — confirming their address, resetting
+// their password — is sent with `realRecipient` and always reaches them: a
+// confirmation link that lands in somebody else's inbox is no use to anyone,
+// and only goes to the address that asked for it.
 
 const fs     = require('fs');
 const path   = require('path');
@@ -89,8 +94,8 @@ function validAddress(email) {
 
 // Queues one message per recipient. Returns the rows created, so a caller (or
 // a test) can see exactly what was queued without touching a mail server.
-function enqueue({ to, subject, body, context = '', attachments = [] }) {
-  const { redirectTo } = config();
+function enqueue({ to, subject, body, context = '', attachments = [], realRecipient = false }) {
+  const redirectTo = realRecipient ? '' : config().redirectTo;
   const recipients = (Array.isArray(to) ? to : [to]).filter(r => validAddress(r?.email));
 
   // One row per address, deduped: being in three groups should not mean
