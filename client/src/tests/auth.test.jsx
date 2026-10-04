@@ -120,7 +120,7 @@ describe('App — the Church Office and Admin menus', () => {
     await screen.findByText(portalFooter);
     expect(menu('Church Office').length).toBeGreaterThan(0);
     fireEvent.click(menu('Admin')[0]);
-    for (const page of ['Members & Access', 'Church Records', 'Action History', 'Bug Reports']) {
+    for (const page of ['Members & Access', 'Church Records', 'Action History', 'Bug Reports', 'Email Delivery']) {
       expect(screen.getAllByRole('button', { name: page }).length).toBeGreaterThan(0);
     }
   });

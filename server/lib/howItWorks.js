@@ -260,6 +260,7 @@ const SECTIONS = [
       { p: '**Church Office → Emails** lists every kind of email the site sends, in four tabs (Notifications, Bulletin, Groups, Reports), with how many went in the last 30 days, a preview of each, and every message sent — searchable, and each can be opened.' },
       { p: 'Every email is queued first and sent from the queue, so a mail server being down never loses one; the queue is retried every five minutes, and **Send waiting mail now** tries at once.' },
       { note: 'While the server is in test mode (MAIL_REDIRECT_TO is set), every email goes to that one address instead of its real recipient, and the Emails page says so at the top.' },
+      { p: '**Admin → Email Delivery** lets some of it through while test mode is on. Turn on a role (Admins, or an area such as Song Tracker) and everyone given it gets their own email; add a person by name or address to let just them through, or to keep them redirected while their role is on — a person\'s own setting beats any role. The page lists exactly who is getting their own email and why. Nothing turned on means every email comes to the redirect address.' },
       { p: '**Church Office → Email Groups** decides who is on each mailing list. A church group\'s list follows its roll.' },
     ],
   },

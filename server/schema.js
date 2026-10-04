@@ -1240,6 +1240,27 @@ function initSchema(db) {
       .forEach((s, i) => addStatus.run(...s, i));
   }
 
+  // ─── Who gets real mail while the site is in test mode ────────────────────────
+  // While MAIL_REDIRECT_TO is set, every email goes to that one address — unless
+  // an admin has let a role or a person through here. `kind` is 'role' (an
+  // account role such as admin, or an area such as songs) or 'person' (keyed by
+  // email address, since that is what mail is sent to). `deliver` 1 sends to
+  // the real address; a person can also be 0, which keeps them redirected even
+  // when a role they hold is let through. Nothing here matters once the
+  // redirect is cleared: then everybody gets real mail.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS mail_redirect_rules (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind       TEXT    NOT NULL,                 -- role | person
+      key        TEXT    NOT NULL,                 -- role or area id, or a lowercased email
+      label      TEXT    NOT NULL DEFAULT '',      -- a person's name, for the page
+      deliver    INTEGER NOT NULL DEFAULT 1,
+      updated_by TEXT    NOT NULL DEFAULT '',
+      updated_at TEXT    NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (kind, key)
+    );
+  `);
+
   // ─── Seed the distribution groups ─────────────────────────────────────────────
   // Created empty; an admin fills in who is in each from Admin → Email Groups.
 

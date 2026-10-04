@@ -8,13 +8,18 @@
 // the row and written into the body. That is deliberately the default: it
 // means a mistake in a workflow, a group, or a test cannot mail the
 // congregation. Clearing MAIL_REDIRECT_TO is the single, explicit step that
-// makes this site able to write to real people.
+// makes this site able to write to everybody for real.
+//
+// In between, an admin can let particular roles or people through to their
+// own address while everyone else stays redirected (./delivery.js, set on
+// Admin → Email Delivery). Nothing let through means everybody redirected.
 
 const fs     = require('fs');
 const path   = require('path');
 const crypto = require('crypto');
 const db     = require('../db');
 const paths  = require('../lib/paths');
+const delivery = require('./delivery');
 
 const MAX_ATTEMPTS = 3;
 
@@ -95,15 +100,18 @@ function enqueue({ to, subject, body, context = '', attachments = [] }) {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
   const attached = JSON.stringify(attachments.map(({ file, filename, contentType }) => ({ file, filename, contentType })));
+  // Read once for the whole message, not once per recipient.
+  const allowed = redirectTo ? delivery.rules() : null;
 
   for (const recipient of recipients) {
     const email = recipient.email.trim().toLowerCase();
     if (seen.has(email)) continue;
     seen.add(email);
 
-    const deliverTo   = redirectTo || email;
-    const intendedFor = redirectTo ? email : '';
-    const finalBody   = redirectTo ? redirectNotice(email, recipient.name) + body : body;
+    const redirect    = !!redirectTo && !delivery.decide(email, allowed).deliver;
+    const deliverTo   = redirect ? redirectTo : email;
+    const intendedFor = redirect ? email : '';
+    const finalBody   = redirect ? redirectNotice(email, recipient.name) + body : body;
 
     const { lastInsertRowid: id } = insert.run(
       deliverTo, recipient.name || '', intendedFor, subject, finalBody, context, attached
@@ -118,7 +126,7 @@ function redirectNotice(email, name) {
   return [
     '[TEST MODE] This message was not sent to its real recipient.',
     `It was addressed to: ${name ? `${name} <${email}>` : email}`,
-    'Clear MAIL_REDIRECT_TO in the environment to deliver to real recipients.',
+    'An admin can let people through to their own address on Admin → Email Delivery.',
     '',
     '─────────────────────────────────────────',
     '',
