@@ -1240,34 +1240,6 @@ function initSchema(db) {
       .forEach((s, i) => addStatus.run(...s, i));
   }
 
-  // ─── Worship participation ────────────────────────────────────────────────────
-  // What actually happened to a slot on the serving schedule once its day came:
-  // the man down for it served, somebody else did it instead, or nobody did.
-  // Kept apart from job_assignments, which the scraper rewrites wholesale, so a
-  // slot is named by what it is — its day, service and job (and, should a
-  // schedule ever list one job twice in a service, which of them) — rather than
-  // by a row id that will not survive the next sync. The name the slot carried
-  // when it was checked is kept with it, so a later change to the schedule does
-  // not rewrite who was expected.
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS worship_participation (
-      id             INTEGER PRIMARY KEY AUTOINCREMENT,
-      date           TEXT    NOT NULL,                 -- YYYY-MM-DD
-      service        TEXT    NOT NULL,
-      job            TEXT    NOT NULL,
-      position       INTEGER NOT NULL DEFAULT 0,
-      scheduled_name TEXT    NOT NULL DEFAULT '',
-      outcome        TEXT    NOT NULL,                 -- served | substitute | missed
-      served_name    TEXT    NOT NULL DEFAULT '',      -- who did it, for a substitute
-      note           TEXT    NOT NULL DEFAULT '',
-      user_id        INTEGER REFERENCES users(id) ON DELETE SET NULL,
-      user_name      TEXT    NOT NULL DEFAULT '',
-      updated_at     TEXT    NOT NULL DEFAULT (datetime('now')),
-      UNIQUE (date, service, job, position)
-    );
-    CREATE INDEX IF NOT EXISTS idx_worship_participation_date ON worship_participation(date);
-  `);
-
   // ─── Seed the distribution groups ─────────────────────────────────────────────
   // Created empty; an admin fills in who is in each from Admin → Email Groups.
 

@@ -121,13 +121,9 @@ const SECTIONS = [
   {
     id: 'worship-participation', title: 'Worship participation', audience: 'everyone',
     blocks: [
-      { p: '**Church Office → Worship Participation** is for whoever keeps the serving schedule (and admins); nobody else sees it. It records who actually served, which is not always who was on the schedule.' },
-      { steps: [
-        'After a service, open it on the **Record** tab. Every job on the schedule for it is listed with the man who was down for it.',
-        'Mark each one **Served**, **Someone else** (and say who), or **Nobody**. If it all went to plan, **It went as scheduled** marks the rest at once.',
-      ] },
-      { p: 'The **Analysis** tab shows, for the last few months: who is carrying the load and in which jobs, how many different men have done each job, who stepped in for somebody and who missed, and the men who said they would do a job and have not been used for it. Choose a man to see his own record beside what he said he would do.' },
-      { note: 'A service nobody has checked is counted as served by whoever was scheduled, and shown as "not checked". Tick "Checked services only" to leave those out.' },
+      { p: '**Church Office → Worship Participation** is for whoever keeps the serving schedule (and admins); nobody else sees it. Nothing has to be entered on it: the serving schedule, as it was last left, is taken to be what happened. When somebody swaps or drops out, change the schedule and the record follows.' },
+      { p: 'The **Analysis** tab shows, for the last few months: who is carrying the load and in which jobs, how many different men have done each job, the jobs never filled, and the men who said they would do a job and have not been used for it. Choose a man to see his own record, what he is down for next, and what he said beside what he has done.' },
+      { p: 'The **Preferences** tab lists every man against every job, with what he has said (glad to, willing, rather not, or nothing yet) and how often he has served it. Above it, how each job is covered; a job with fewer than three men glad or willing is marked thin. Men set their own on **My Household & Preferences**; the schedule keeper can record them on the **Service Roster**.' },
     ],
   },
   {

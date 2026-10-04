@@ -1,6 +1,6 @@
-// Worship participation: checking who actually served each job on the serving
-// schedule, what the analysis makes of it (unchecked weeks included, and said
-// to be), and that only the schedule keeper and admins can see any of it.
+// Worship participation: the serving schedule, as it was last left, read as
+// who served; what each man has said he will do; and that only the schedule
+// keeper and admins can see any of it.
 jest.mock('../db', () => require('./helpers/memoryDb').createMemoryDb());
 
 const request = require('supertest');
@@ -22,11 +22,13 @@ function buildApp(user) {
   return app;
 }
 
-const slot = (date, service, job, name) =>
-  db.prepare('INSERT INTO job_assignments (month, date, service, job, name) VALUES (?, ?, ?, ?, ?)').run('September 2026', date, service, job, name);
+const slot = (date, service, job, name, month = 'September 2026') =>
+  db.prepare('INSERT INTO job_assignments (month, date, service, job, name) VALUES (?, ?, ?, ?, ?)').run(month, date, service, job, name);
 const man = (name, gender = 'male') => db.prepare('INSERT INTO directory (name, gender) VALUES (?, ?)').run(name, gender).lastInsertRowid;
+const prefer = (personId, role, level) =>
+  db.prepare('INSERT INTO worship_preferences (directory_id, role, level) VALUES (?, ?, ?)').run(personId, role, level);
 
-let al, ben, cal;
+let al, ben, cal, dee;
 
 beforeAll(() => {
   const add = db.prepare("INSERT INTO users (id, provider, provider_id, email, name, role) VALUES (?, 'local', ?, ?, ?, ?)");
@@ -34,110 +36,52 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-  for (const t of ['worship_participation', 'job_assignments', 'worship_preferences', 'directory']) db.prepare(`DELETE FROM ${t}`).run();
-  al = man('Al Adams'); ben = man('Ben Brown'); cal = man('Cal Cole');
+  for (const t of ['job_assignments', 'worship_preferences', 'worship_profile', 'directory']) db.prepare(`DELETE FROM ${t}`).run();
+  al = man('Al Adams'); ben = man('Ben Brown'); cal = man('Cal Cole'); dee = man('Dee Dunn', 'female');
   // Two Sundays that have happened, and one still to come.
   slot('September 20', 'Sunday Worship', 'Song Leader', 'Al Adams');
   slot('September 20', 'Sunday Worship', 'Opening Prayer', 'Ben Brown');
   slot('September 20', 'Sunday Worship', 'Communion', '');
   slot('September 27', 'Sunday Worship', 'Song Leader', 'Al Adams');
-  slot('September 27', 'Sunday Worship', 'Opening Prayer', 'Ben Brown');
+  slot('September 27', 'Sunday Worship', 'Opening Prayer', 'Cal Cole');
   slot('September 27', 'Sunday Worship', 'Communion', 'Cal Cole');
-  slot('October 4', 'Sunday Worship', 'Song Leader', 'Ben Brown');
+  slot('October 4', 'Sunday Worship', 'Song Leader', 'Ben Brown', 'October 2026');
 });
-
-const check = (date, job, outcome, servedName) =>
-  participation.record({ date, service: 'Sunday Worship', job, position: 0, outcome, servedName }, KEEPER, { today: TODAY });
 
 describe('who may see it', () => {
   test('nobody without the Serving Schedule area', async () => {
-    for (const path of ['/services', '/analysis', '/person?name=Al%20Adams']) {
+    for (const path of ['/analysis', '/person?name=Al%20Adams', '/preferences']) {
       expect((await request(buildApp(MEMBER)).get(`/api/participation${path}`)).status).toBe(403);
     }
-    expect((await request(buildApp(MEMBER)).put('/api/participation/check').send({})).status).toBe(403);
   });
 
   test('the schedule keeper and admins', async () => {
     for (const user of [KEEPER, ADMIN]) {
-      expect((await request(buildApp(user)).get('/api/participation/services')).status).toBe(200);
+      for (const path of ['/analysis', '/preferences']) {
+        expect((await request(buildApp(user)).get(`/api/participation${path}`)).status).toBe(200);
+      }
     }
   });
-});
 
-describe('checking a service', () => {
-  test('lists the services that have happened, newest first, with how many are checked', () => {
-    check('2026-09-27', 'Song Leader', 'served');
-    expect(participation.services({ today: TODAY })).toEqual([
-      { date: '2026-09-27', service: 'Sunday Worship', slots: 3, checked: 1, unfilled: 0 },
-      { date: '2026-09-20', service: 'Sunday Worship', slots: 3, checked: 0, unfilled: 1 },
-    ]);
-  });
-
-  test('served, somebody else, nobody — and taken back off', () => {
-    expect(check('2026-09-27', 'Song Leader', 'served').check).toEqual({ outcome: 'served', servedName: '' });
-    expect(check('2026-09-27', 'Opening Prayer', 'substitute', ' Cal  Cole ').check).toEqual({ outcome: 'substitute', servedName: 'Cal Cole' });
-    expect(check('2026-09-27', 'Communion', 'missed').check.outcome).toBe('missed');
-
-    const { slots } = participation.service({ date: '2026-09-27', service: 'Sunday Worship' });
-    expect(slots.map(s => [s.job, s.check.outcome, s.check.scheduledThen, s.check.by])).toEqual([
-      ['Song Leader', 'served', 'Al Adams', 'Schedule Keeper'],
-      ['Opening Prayer', 'substitute', 'Ben Brown', 'Schedule Keeper'],
-      ['Communion', 'missed', 'Cal Cole', 'Schedule Keeper'],
-    ]);
-
-    check('2026-09-27', 'Communion', null);
-    expect(participation.service({ date: '2026-09-27', service: 'Sunday Worship' }).slots[2].check).toBeNull();
-  });
-
-  test('refuses what cannot be true', () => {
-    expect(check('2026-10-04', 'Song Leader', 'served').error).toMatch(/not happened yet/);
-    expect(check('2026-09-27', 'Usher', 'served').error).toMatch(/not on the schedule/);
-    expect(check('2026-09-27', 'Song Leader', 'substitute', '').error).toMatch(/who served/);
-    expect(check('2026-09-27', 'Song Leader', 'substitute', 'al adams').error).toMatch(/mark it served/);
-    expect(check('2026-09-20', 'Communion', 'served').error).toMatch(/Nobody was scheduled/);
-    expect(check('2026-09-27', 'Song Leader', 'bogus').error).toMatch(/Served, somebody else, or nobody/);
-  });
-
-  test('a check survives the schedule being re-read from the church site', () => {
-    check('2026-09-27', 'Opening Prayer', 'substitute', 'Cal Cole');
-    db.prepare('DELETE FROM job_assignments').run();
-    slot('September 27', 'Sunday Worship', 'Opening Prayer', 'Ben Brown');
-    expect(participation.service({ date: '2026-09-27', service: 'Sunday Worship' }).slots[0].check.outcome).toBe('substitute');
-  });
-
-  test('"went as scheduled" marks every filled, unchecked slot served, and is logged', async () => {
-    check('2026-09-20', 'Opening Prayer', 'missed');
-    const res = await request(buildApp(KEEPER)).post('/api/participation/served').send({ date: '2026-09-20', service: 'Sunday Worship' });
-    // Only the song leader: the prayer was already checked, and nobody was down for communion.
-    expect(res.body.count).toBe(1);
-    const { slots } = participation.service({ date: '2026-09-20', service: 'Sunday Worship' });
-    expect(slots.map(s => s.check?.outcome ?? null)).toEqual(['served', 'missed', null]);
-    expect(db.prepare("SELECT COUNT(*) AS n FROM action_log WHERE entity = 'worship participation'").get().n).toBe(1);
+  test('nothing here changes anything: there is no way to write', async () => {
+    expect((await request(buildApp(KEEPER)).put('/api/participation/check').send({})).status).toBe(404);
   });
 });
 
-describe('analysis', () => {
-  beforeEach(() => {
-    check('2026-09-27', 'Song Leader', 'served');
-    check('2026-09-27', 'Opening Prayer', 'substitute', 'Cal Cole');
-    check('2026-09-27', 'Communion', 'missed');
-  });
-
-  test('counts checked weeks and unchecked ones (as scheduled), and says which is which', () => {
+describe('analysis: the schedule as last left is what happened', () => {
+  test('each filled past slot counts as served; an empty one as unfilled; the future not yet', () => {
     const a = participation.analysis({ weeks: 4, today: TODAY });
-    expect(a.summary).toMatchObject({
-      services: 2, checkedServices: 1, slots: 6,
-      served: 4, confirmed: 2, assumed: 2, substitutes: 1, missed: 1, unfilled: 1, people: 3,
-    });
+    expect(a.summary).toEqual({ services: 2, slots: 6, served: 5, unfilled: 1, people: 3 });
     const by = Object.fromEntries(a.people.map(p => [p.name, p]));
-    expect(by['Al Adams']).toMatchObject({ served: 2, confirmed: 1, assumed: 1, byRole: { 'Song Leader': 2 }, lastServed: '2026-09-27', personId: al });
-    expect(by['Ben Brown']).toMatchObject({ served: 1, scheduled: 2, replaced: 1, missed: 0 });
-    expect(by['Cal Cole']).toMatchObject({ served: 1, steppedIn: 1, missed: 1, byRole: { 'Opening Prayer': 1 } });
+    expect(by['Al Adams']).toMatchObject({ served: 2, byRole: { 'Song Leader': 2 }, lastServed: '2026-09-27', personId: al, nextScheduled: null });
+    expect(by['Ben Brown']).toMatchObject({ served: 1, lastServed: '2026-09-20', nextScheduled: '2026-10-04' });
+    expect(by['Cal Cole']).toMatchObject({ served: 2, byRole: { 'Opening Prayer': 1, Communion: 1 } });
   });
 
-  test('checked services only', () => {
-    const a = participation.analysis({ weeks: 4, checkedOnly: true, today: TODAY });
-    expect(a.summary).toMatchObject({ services: 1, served: 2, assumed: 0 });
+  test('a change to the schedule is a change to the record', () => {
+    db.prepare("UPDATE job_assignments SET name = 'Ben Brown' WHERE date = 'September 27' AND job = 'Song Leader'").run();
+    const by = Object.fromEntries(participation.analysis({ weeks: 4, today: TODAY }).people.map(p => [p.name, p.served]));
+    expect(by).toMatchObject({ 'Al Adams': 1, 'Ben Brown': 2 });
   });
 
   test('one job only, and how concentrated it is', () => {
@@ -146,31 +90,68 @@ describe('analysis', () => {
     expect(a.byRole).toEqual([{ role: 'Song Leader', slots: 2, served: 2, people: 1, topShare: 100 }]);
   });
 
+  test('a shorter window', () => {
+    expect(participation.analysis({ weeks: 1, today: TODAY }).summary.services).toBe(1);
+  });
+
   test('names the men who said they would and have not been used', () => {
-    db.prepare("INSERT INTO worship_preferences (directory_id, role, level) VALUES (?, 'Song Leader', 'willing'), (?, 'Communion', 'preferred'), (?, 'Song Leader', 'unavailable')").run(ben, cal, cal);
-    const a = participation.analysis({ weeks: 4, today: TODAY });
-    expect(a.unused).toEqual([
+    prefer(ben, 'Song Leader', 'willing');
+    prefer(cal, 'Scripture Reading', 'preferred');
+    prefer(cal, 'Song Leader', 'unavailable');
+    expect(participation.analysis({ weeks: 4, today: TODAY }).unused).toEqual([
       { personId: ben, name: 'Ben Brown', roles: [{ role: 'Song Leader', level: 'willing' }], servedAtAll: 1 },
-      { personId: cal, name: 'Cal Cole', roles: [{ role: 'Communion', level: 'preferred' }], servedAtAll: 1 },
+      { personId: cal, name: 'Cal Cole', roles: [{ role: 'Scripture Reading', level: 'preferred' }], servedAtAll: 2 },
     ]);
   });
 
-  test("one man's record", () => {
+  test("one man's record, what he said, and what is coming up", () => {
+    prefer(ben, 'Opening Prayer', 'preferred');
     const p = participation.person({ personId: ben }, { weeks: 4, today: TODAY });
-    expect(p.person).toMatchObject({ name: 'Ben Brown', served: 1, replaced: 1 });
-    // The window ends today: the Sunday still to come is not in it.
-    expect(p.history.map(h => [h.date, h.job, h.kind, h.other])).toEqual([
-      ['2026-09-27', 'Opening Prayer', 'replaced', 'Cal Cole'],
-      ['2026-09-20', 'Opening Prayer', 'assumed', ''],
+    expect(p.person).toMatchObject({ name: 'Ben Brown', served: 1, nextScheduled: '2026-10-04' });
+    expect(p.preferences).toEqual({ 'Opening Prayer': 'preferred' });
+    expect(p.history).toEqual([
+      { date: '2026-10-04', service: 'Sunday Worship', job: 'Song Leader', upcoming: true },
+      { date: '2026-09-20', service: 'Sunday Worship', job: 'Opening Prayer', upcoming: false },
     ]);
-    expect(participation.person({ name: 'Cal Cole' }, { weeks: 4, today: TODAY }).history.map(h => h.kind))
-      .toEqual(['stepped-in', 'missed']);
+  });
+
+  test('a man who has not served yet still has a record', () => {
+    const d = man('Ed Evans');
+    expect(participation.person({ personId: d }, { weeks: 4, today: TODAY }).person).toMatchObject({ name: 'Ed Evans', served: 0 });
   });
 
   test('over the API', async () => {
-    const res = await request(buildApp(KEEPER)).get(`/api/participation/person?personId=${ben}&weeks=4`);
-    expect(res.status).toBe(200);
-    expect(res.body.person.name).toBe('Ben Brown');
+    const res = await request(buildApp(KEEPER)).get(`/api/participation/person?personId=${al}&weeks=4`);
+    expect(res.body.person.name).toBe('Al Adams');
     expect((await request(buildApp(KEEPER)).get('/api/participation/person?personId=9999')).status).toBe(404);
+  });
+});
+
+describe('what each man has said', () => {
+  beforeEach(() => {
+    prefer(al, 'Song Leader', 'preferred');
+    prefer(al, 'Communion', 'unavailable');
+    prefer(ben, 'Song Leader', 'willing');
+    prefer(dee, 'Song Leader', 'preferred'); // not a man: not on this list
+    db.prepare("INSERT INTO worship_profile (directory_id, notes) VALUES (?, 'Mornings only')").run(al);
+  });
+
+  test('every man, his answers, his notes, and what he has served beside them', () => {
+    const p = participation.preferences({ weeks: 4, today: TODAY });
+    expect(p.men.map(m => m.name)).toEqual(['Al Adams', 'Ben Brown', 'Cal Cole']);
+    expect(p.men[0]).toMatchObject({
+      personId: al, said: 2, notes: 'Mornings only',
+      preferences: { 'Song Leader': 'preferred', Communion: 'unavailable' },
+      served: { 'Song Leader': 2 }, servedTotal: 2,
+    });
+    expect(p.men[0].updatedAt).toEqual(expect.any(String));
+    expect(p.men[2]).toMatchObject({ said: 0, updatedAt: null, servedTotal: 2 });
+  });
+
+  test('how each job is covered, and who has said nothing', () => {
+    const p = participation.preferences({ weeks: 4, today: TODAY });
+    expect(p.coverage.find(c => c.role === 'Song Leader')).toEqual({ role: 'Song Leader', glad: 1, willing: 1, unavailable: 0, unsaid: 1 });
+    expect(p.coverage.find(c => c.role === 'Communion')).toEqual({ role: 'Communion', glad: 0, willing: 0, unavailable: 1, unsaid: 2 });
+    expect(p.summary).toEqual({ men: 3, said: 2, unsaid: 1 });
   });
 });

@@ -2,50 +2,54 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import WorshipParticipationView from '../components/WorshipParticipationView';
 
-const SERVICES = [
-  { date: '2026-09-27', service: 'Sunday Worship', slots: 3, checked: 0, unfilled: 0 },
-  { date: '2026-09-20', service: 'Sunday Worship', slots: 3, checked: 3, unfilled: 0 },
-];
 const SERVERS = [{ name: 'Al Adams', personId: 1 }, { name: 'Ben Brown', personId: 2 }, { name: 'Cal Cole', personId: 3 }];
-const SLOTS = [
-  { date: '2026-09-27', service: 'Sunday Worship', job: 'Song Leader', position: 0, scheduled: 'Al Adams', check: null },
-  { date: '2026-09-27', service: 'Sunday Worship', job: 'Opening Prayer', position: 0, scheduled: 'Ben Brown', check: { outcome: 'substitute', servedName: 'Cal Cole', by: 'Keeper' } },
-  { date: '2026-09-27', service: 'Sunday Worship', job: 'Communion', position: 0, scheduled: '', check: null },
-];
 const ANALYSIS = {
   success: true, weeks: 26, roles: ['Song Leader', 'Opening Prayer'],
-  summary: { services: 2, checkedServices: 1, slots: 6, served: 4, confirmed: 2, assumed: 2, substitutes: 1, missed: 1, unfilled: 1, people: 3 },
+  summary: { services: 2, slots: 6, served: 5, unfilled: 1, people: 2 },
   byRole: [
     { role: 'Song Leader', slots: 4, served: 4, people: 1, topShare: 100 },
-    { role: 'Opening Prayer', slots: 2, served: 2, people: 2, topShare: 50 },
+    { role: 'Opening Prayer', slots: 2, served: 1, people: 1, topShare: 100 },
   ],
   people: [
-    { key: 'al adams', name: 'Al Adams', personId: 1, served: 4, confirmed: 2, assumed: 2, steppedIn: 0, replaced: 0, missed: 0, scheduled: 4, byRole: { 'Song Leader': 4 }, lastServed: '2026-09-27' },
-    { key: 'ben brown', name: 'Ben Brown', personId: 2, served: 1, confirmed: 0, assumed: 1, steppedIn: 0, replaced: 1, missed: 0, scheduled: 2, byRole: { 'Opening Prayer': 1 }, lastServed: '2026-09-20' },
+    { key: 'al adams', name: 'Al Adams', personId: 1, served: 4, byRole: { 'Song Leader': 4 }, lastServed: '2026-09-27', nextScheduled: null },
+    { key: 'ben brown', name: 'Ben Brown', personId: 2, served: 1, byRole: { 'Opening Prayer': 1 }, lastServed: '2026-09-20', nextScheduled: '2026-10-11' },
   ],
   unused: [{ personId: 3, name: 'Cal Cole', roles: [{ role: 'Song Leader', level: 'willing' }], servedAtAll: 0 }],
   servers: SERVERS,
 };
 const PERSON = {
   success: true, weeks: 26, roles: ['Song Leader', 'Opening Prayer'],
-  person: { ...ANALYSIS.people[1] },
+  person: ANALYSIS.people[1],
   preferences: { 'Opening Prayer': 'preferred', 'Song Leader': 'unavailable' },
+  notes: 'Evenings are hard',
   history: [
-    { date: '2026-09-27', service: 'Sunday Worship', job: 'Opening Prayer', kind: 'replaced', other: 'Cal Cole', note: '' },
-    { date: '2026-09-20', service: 'Sunday Worship', job: 'Opening Prayer', kind: 'assumed', other: '', note: '' },
+    { date: '2026-10-11', service: 'Sunday Worship', job: 'Song Leader', upcoming: true },
+    { date: '2026-09-20', service: 'Sunday Worship', job: 'Opening Prayer', upcoming: false },
   ],
+};
+const PREFERENCES = {
+  success: true, weeks: 26, roles: ['Song Leader', 'Opening Prayer', 'Communion'],
+  men: [
+    { personId: 1, name: 'Al Adams', preferences: { 'Song Leader': 'preferred', Communion: 'unavailable' }, said: 2, updatedAt: '2026-08-01 10:00:00', notes: 'Mornings only', served: { 'Song Leader': 4 }, servedTotal: 4 },
+    { personId: 2, name: 'Ben Brown', preferences: { 'Opening Prayer': 'willing' }, said: 1, updatedAt: '2026-07-01 10:00:00', notes: '', served: { 'Opening Prayer': 1 }, servedTotal: 1 },
+    { personId: 3, name: 'Cal Cole', preferences: {}, said: 0, updatedAt: null, notes: '', served: {}, servedTotal: 0 },
+  ],
+  coverage: [
+    { role: 'Song Leader', glad: 1, willing: 0, unavailable: 0, unsaid: 2 },
+    { role: 'Opening Prayer', glad: 0, willing: 1, unavailable: 0, unsaid: 2 },
+    { role: 'Communion', glad: 0, willing: 0, unavailable: 1, unsaid: 2 },
+  ],
+  summary: { men: 3, said: 2, unsaid: 1 },
 };
 
 function mockApi() {
   const calls = [];
-  vi.stubGlobal('fetch', vi.fn((url, options = {}) => {
-    calls.push({ url, method: options.method || 'GET', body: options.body ? JSON.parse(options.body) : undefined });
-    let body = { success: true };
-    if (url.startsWith('/api/participation/services')) body = { success: true, services: SERVICES, servers: SERVERS };
-    else if (url.startsWith('/api/participation/service?')) body = { success: true, date: '2026-09-27', service: 'Sunday Worship', slots: SLOTS };
-    else if (url.startsWith('/api/participation/analysis')) body = ANALYSIS;
+  vi.stubGlobal('fetch', vi.fn(url => {
+    calls.push(url);
+    let body = { success: false };
+    if (url.startsWith('/api/participation/analysis')) body = ANALYSIS;
     else if (url.startsWith('/api/participation/person')) body = PERSON;
-    else if (url.startsWith('/api/participation/served')) body = { success: true, count: 1 };
+    else if (url.startsWith('/api/participation/preferences')) body = PREFERENCES;
     return Promise.resolve({ json: () => Promise.resolve(body) });
   }));
   return calls;
@@ -53,82 +57,86 @@ function mockApi() {
 
 afterEach(() => vi.unstubAllGlobals());
 
-const jobRow = job => screen.getByRole('group', { name: `What happened: ${job}` });
-
-describe('recording a service', () => {
-  test('lists the services, opens the newest, and shows what is already checked', async () => {
-    mockApi();
-    render(<WorshipParticipationView />);
-    expect(await screen.findByText('Song Leader')).toBeInTheDocument();
-    expect(screen.getAllByText('Not checked').length).toBeGreaterThan(0);
-    expect(screen.getByText(/Served by/)).toHaveTextContent('Served by Cal Cole instead');
-    expect(within(jobRow('Opening Prayer')).getByRole('button', { name: 'Someone else' })).toHaveAttribute('aria-pressed', 'true');
-    // Nobody was down for communion, so "Served" is not offered.
-    expect(within(jobRow('Communion')).queryByRole('button', { name: 'Served' })).not.toBeInTheDocument();
-  });
-
-  test('a job is marked served, nobody, or someone else by name', async () => {
-    const calls = mockApi();
-    render(<WorshipParticipationView />);
-    await screen.findByText('Song Leader');
-
-    fireEvent.click(within(jobRow('Song Leader')).getByRole('button', { name: 'Served' }));
-    await waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toMatchObject({ job: 'Song Leader', outcome: 'served', date: '2026-09-27' }));
-
-    fireEvent.click(within(jobRow('Communion')).getByRole('button', { name: 'Someone did it' }));
-    fireEvent.change(screen.getByLabelText('Who served Communion instead'), { target: { value: 'Cal Cole' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(calls.filter(c => c.method === 'PUT').at(-1).body).toMatchObject({ job: 'Communion', outcome: 'substitute', servedName: 'Cal Cole' }));
-  });
-
-  test('pressing the active choice again takes the check back off', async () => {
-    const calls = mockApi();
-    render(<WorshipParticipationView />);
-    await screen.findByText('Song Leader');
-    fireEvent.click(within(jobRow('Opening Prayer')).getByRole('button', { name: 'Someone else' }));
-    await waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toMatchObject({ job: 'Opening Prayer', outcome: null }));
-  });
-
-  test('"It went as scheduled" marks the rest served', async () => {
-    const calls = mockApi();
-    render(<WorshipParticipationView />);
-    fireEvent.click(await screen.findByRole('button', { name: 'It went as scheduled' }));
-    await waitFor(() => expect(calls.find(c => c.url === '/api/participation/served')?.body).toEqual({ date: '2026-09-27', service: 'Sunday Worship' }));
-  });
-});
-
 describe('analysis', () => {
-  test('everyone: the totals, who is carrying it, by job, and who has not been used', async () => {
+  test('opens on the analysis, read straight from the schedule — there is nothing to confirm', async () => {
     mockApi();
     render(<WorshipParticipationView />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Analysis' }));
     expect(await screen.findByText('Who is carrying it')).toBeInTheDocument();
-    expect(screen.getByText('4 of 6')).toBeInTheDocument();
-    expect(screen.getByText(/Services nobody has checked are counted/)).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Record' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /went as scheduled/i })).not.toBeInTheDocument();
+    expect(screen.getByText('5 of 6')).toBeInTheDocument();
+    expect(screen.getByText(/as it stands/)).toBeInTheDocument();
     expect(screen.getByText('Willing, but not used for it')).toBeInTheDocument();
-    expect(screen.getByText('Song Leader · Willing')).toBeInTheDocument();
-    expect(screen.getByText('Did not serve when scheduled')).toBeInTheDocument();
   });
 
   test('a man picked from the chart opens his record, with what he said beside what he did', async () => {
     const calls = mockApi();
     render(<WorshipParticipationView />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Analysis' }));
     await screen.findByText('Who is carrying it');
     fireEvent.click(screen.getAllByRole('button', { name: 'Ben Brown' })[0]);
-    expect(await screen.findByText('Jobs, and what he has said')).toBeInTheDocument();
-    expect(calls.some(c => c.url.startsWith('/api/participation/person?name=Ben%20Brown'))).toBe(true);
+    expect(await screen.findByText('What he said, and what he has done')).toBeInTheDocument();
+    expect(calls.some(c => c.startsWith('/api/participation/person?name=Ben%20Brown'))).toBe(true);
     expect(screen.getByText('Glad to')).toBeInTheDocument();
-    expect(screen.getByText('Replaced · Cal Cole')).toBeInTheDocument();
+    expect(screen.getByText('Rather not')).toBeInTheDocument();
+    expect(screen.getByText('Coming up')).toBeInTheDocument();
+    expect(screen.getByText(/Evenings are hard/)).toBeInTheDocument();
   });
 
   test('filters go to the server', async () => {
     const calls = mockApi();
     render(<WorshipParticipationView />);
-    fireEvent.click(screen.getByRole('tab', { name: 'Analysis' }));
     await screen.findByText('Who is carrying it');
-    fireEvent.click(screen.getByLabelText('Checked services only'));
     fireEvent.change(screen.getByLabelText('Weeks'), { target: { value: '13' } });
-    await waitFor(() => expect(calls.some(c => c.url.includes('weeks=13') && c.url.includes('checkedOnly=true'))).toBe(true));
+    fireEvent.change(screen.getByLabelText('Job'), { target: { value: 'Song Leader' } });
+    await waitFor(() => expect(calls.some(c => c.includes('weeks=13') && c.includes('role=Song%20Leader'))).toBe(true));
+  });
+});
+
+describe('preferences', () => {
+  const open = async () => {
+    render(<WorshipParticipationView />);
+    await screen.findByText('Who is carrying it');
+    fireEvent.click(screen.getByRole('tab', { name: 'Preferences' }));
+    await screen.findByText('How each job is covered');
+  };
+
+  test('every man against every job, with what he has served beside it and when he last changed it', async () => {
+    mockApi();
+    await open();
+    const row = screen.getByRole('button', { name: 'Al Adams' }).closest('tr');
+    expect(within(row).getByText('Glad')).toBeInTheDocument();
+    expect(within(row).getByText('No')).toBeInTheDocument();
+    expect(within(row).getByText('4×')).toBeInTheDocument();
+    expect(within(row).getByText(/Mornings only/)).toBeInTheDocument();
+    expect(within(screen.getByRole('button', { name: 'Cal Cole' }).closest('tr')).getByText('Not said')).toBeInTheDocument();
+  });
+
+  test('how each job is covered, with thin jobs marked, and who has not said', async () => {
+    mockApi();
+    await open();
+    expect(screen.getByRole('img', { name: 'Song Leader: 1 glad, 0 willing, 0 rather not, 2 not said' })).toBeInTheDocument();
+    expect(screen.getAllByText(/· thin/).length).toBe(3);
+    expect(screen.getByText('Not said yet', { selector: 'p' })).toBeInTheDocument();
+  });
+
+  test('filters the men by name, and to those who have not said', async () => {
+    mockApi();
+    await open();
+    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'unsaid' } });
+    expect(screen.queryByRole('button', { name: 'Al Adams' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cal Cole' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'all' } });
+    fireEvent.change(screen.getByLabelText('Find a name'), { target: { value: 'ben' } });
+    expect(screen.queryByRole('button', { name: 'Cal Cole' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Ben Brown' })).toBeInTheDocument();
+  });
+
+  test("a man's name opens his record on the analysis", async () => {
+    const calls = mockApi();
+    await open();
+    fireEvent.click(screen.getByRole('button', { name: 'Ben Brown' }));
+    expect(await screen.findByText('What he said, and what he has done')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Analysis' })).toHaveAttribute('aria-selected', 'true');
+    expect(calls.some(c => c.startsWith('/api/participation/person?name=Ben%20Brown'))).toBe(true);
   });
 });
