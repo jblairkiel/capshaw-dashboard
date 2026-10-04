@@ -108,6 +108,42 @@ function mockDeepLinkApi(user) {
   return fetchMock;
 }
 
+// ─── App — which menus each person gets ───────────────────────────────────────
+
+describe('App — the Church Office and Admin menus', () => {
+  const portalFooter = /Capshaw Church of Christ — Member Portal/;
+  const menu = name => screen.queryAllByRole('button', { name: new RegExp(`^${name}`) });
+
+  test('an admin gets both, with the admin-only pages in Admin alone', async () => {
+    mockApi({ id: 1, name: 'Ada', role: 'admin' });
+    render(<App />);
+    await screen.findByText(portalFooter);
+    expect(menu('Church Office').length).toBeGreaterThan(0);
+    fireEvent.click(menu('Admin')[0]);
+    for (const page of ['Members & Access', 'Church Records', 'Action History', 'Bug Reports']) {
+      expect(screen.getAllByRole('button', { name: page }).length).toBeGreaterThan(0);
+    }
+  });
+
+  test('somebody who looks after an area gets Church Office with that page, and no Admin', async () => {
+    mockApi({ id: 2, name: 'Rae', role: 'approved', areas: ['records'] });
+    render(<App />);
+    await screen.findByText(portalFooter);
+    expect(menu('Admin')).toHaveLength(0);
+    fireEvent.click(menu('Church Office')[0]);
+    expect(screen.getAllByRole('button', { name: 'Record Keeping' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Members & Access' })).not.toBeInTheDocument();
+  });
+
+  test('a member who looks after nothing gets neither', async () => {
+    mockApi({ id: 3, name: 'Mel', role: 'approved', areas: [] });
+    render(<App />);
+    await screen.findByText(portalFooter);
+    expect(menu('Church Office')).toHaveLength(0);
+    expect(menu('Admin')).toHaveLength(0);
+  });
+});
+
 describe('App — deep links from generated emails', () => {
   afterEach(() => { window.history.replaceState(null, '', '/'); });
 

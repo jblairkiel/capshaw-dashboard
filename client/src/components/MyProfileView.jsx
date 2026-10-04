@@ -257,7 +257,7 @@ export default function MyProfileView({ user }) {
           <p className="text-xs text-gray-400 mt-2">
             We match automatically when your sign-in email is the one in the directory
             {user?.email ? ` (yours is ${user.email})` : ''}. Ask the church office to link your account from
-            Church Office → Members &amp; Access.
+            Admin → Members &amp; Access.
           </p>
         </div>
       </div>
