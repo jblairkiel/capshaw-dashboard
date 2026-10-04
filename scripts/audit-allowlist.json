@@ -1,0 +1,11 @@
+{
+  "_comment": "High or critical advisories scripts/audit.js lets through, each until its date. Development dependencies only: an advisory reaching the production tree fails regardless. Every entry says why it is safe and what would remove it.",
+  "advisories": [
+    {
+      "id": "GHSA-vfj7-8cjw-p6xm",
+      "package": "braces",
+      "until": "2027-01-04",
+      "reason": "Stack exhaustion from deeply nested glob patterns. braces arrives only through Jest (root) and Tailwind CSS 3 (client), both dev dependencies run on our own config; neither the server nor the built site includes it, and no visitor input reaches a glob. No patched braces exists; the fixes are Jest 30 and Tailwind 4, both major upgrades. Remove this entry once those land, or a fixed braces is published."
+    }
+  ]
+}
