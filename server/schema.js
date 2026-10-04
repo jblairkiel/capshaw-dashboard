@@ -1246,13 +1246,14 @@ function initSchema(db) {
   // account role such as admin, or an area such as songs) or 'person' (keyed by
   // email address, since that is what mail is sent to). `deliver` 1 sends to
   // the real address; a person can also be 0, which keeps them redirected even
-  // when a role they hold is let through. Nothing here matters once the
+  // when a role they hold is let through. One 'all' row lets everybody through
+  // bar those kept redirected by name. Nothing here matters once the
   // redirect is cleared: then everybody gets real mail.
   db.exec(`
     CREATE TABLE IF NOT EXISTS mail_redirect_rules (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      kind       TEXT    NOT NULL,                 -- role | person
-      key        TEXT    NOT NULL,                 -- role or area id, or a lowercased email
+      kind       TEXT    NOT NULL,                 -- role | person | all
+      key        TEXT    NOT NULL,                 -- role or area id, a lowercased email, or '*' for all
       label      TEXT    NOT NULL DEFAULT '',      -- a person's name, for the page
       deliver    INTEGER NOT NULL DEFAULT 1,
       updated_by TEXT    NOT NULL DEFAULT '',

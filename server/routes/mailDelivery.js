@@ -37,6 +37,20 @@ router.put('/roles/:key', (req, res) => {
   res.json({ success: true, ...state() });
 });
 
+// ─── PUT /api/mail-delivery/all  { on: true | false } ─────────────────────────
+// Everybody gets their own email, bar anybody kept redirected by name.
+
+router.put('/all', (req, res) => {
+  const result = delivery.setAll(req.body?.on, req.user);
+  if (result.error) return bad(res, result.error);
+  actionLog.record(req.user, {
+    area: '', action: 'update', entity: 'email delivery', entityId: 'all',
+    summary: result.on ? 'Let everyone receive their own email in test mode' : 'Put everyone back on the test-mode redirect, bar the roles and people let through',
+    details: result,
+  });
+  res.json({ success: true, ...state() });
+});
+
 // ─── PUT /api/mail-delivery/people  { email, name, deliver } ──────────────────
 // ─── DELETE /api/mail-delivery/people?email= ──────────────────────────────────
 

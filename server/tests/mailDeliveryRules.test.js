@@ -93,6 +93,26 @@ describe('who gets real mail', () => {
     expect(whereTo()).toEqual({ 'member@example.com': 'real' });
   });
 
+  test('everyone on: all mail goes for real, bar anybody kept redirected by name', () => {
+    delivery.setAll(true, ADMIN);
+    delivery.setPerson({ email: 'member@example.com', deliver: false }, ADMIN);
+    send('admin@example.com', 'dir@example.com', 'stranger@example.org', 'member@example.com');
+    expect(whereTo()).toEqual({
+      'admin@example.com': 'real', 'dir@example.com': 'real', 'stranger@example.org': 'real', 'member@example.com': 'redirected',
+    });
+    expect(delivery.decide('dir@example.com')).toEqual({ deliver: true, why: 'all' });
+    expect(mailer.isRedirecting()).toBe(false);
+  });
+
+  test('turning everyone off goes back to the roles and people as they were', () => {
+    delivery.setRole('songs', true, ADMIN);
+    delivery.setAll(true, ADMIN);
+    delivery.setAll(false, ADMIN);
+    expect(delivery.decide('songs@example.com').deliver).toBe(true);
+    expect(delivery.decide('dir@example.com').deliver).toBe(false);
+    expect(mailer.isRedirecting()).toBe(true);
+  });
+
   test('refuses what is not a role or an address', () => {
     expect(delivery.setRole('nope', true, ADMIN).error).toMatch(/No such role/);
     expect(delivery.setPerson({ email: 'not-an-email', deliver: true }, ADMIN).error).toMatch(/not an email/);
@@ -115,6 +135,19 @@ describe('the page', () => {
     expect(res.body.roles[0]).toMatchObject({ key: 'admin', label: 'Admins', deliver: false });
     expect(res.body.addressBook.map(p => p.email)).toEqual(['dir@example.com', 'admin@example.com', 'member@example.com', 'songs@example.com']);
     expect(res.body.real).toEqual([{ email: 'songs@example.com', name: 'Song Keeper', why: 'role', roleLabel: 'Song Tracker' }]);
+  });
+
+  test('the everyone switch, over the API', async () => {
+    const app = buildApp(ADMIN);
+    expect((await request(buildApp(KEEPER)).put('/api/mail-delivery/all').send({ on: true })).status).toBe(403);
+    expect((await request(app).put('/api/mail-delivery/all').send({ on: 'yes' })).status).toBe(400);
+    let res = await request(app).put('/api/mail-delivery/all').send({ on: true });
+    expect(res.body.all).toMatchObject({ on: true, by: 'Office Admin' });
+    expect(res.body.real.map(p => p.email)).toEqual(['dir@example.com', 'admin@example.com', 'member@example.com', 'songs@example.com']);
+    res = await request(app).put('/api/mail-delivery/all').send({ on: false });
+    expect(res.body.all).toEqual({ on: false });
+    expect(res.body.real).toEqual([]);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM action_log WHERE entity_id = 'all'").get().n).toBe(2);
   });
 
   test('people are set, changed and cleared, and every change is in the history', async () => {

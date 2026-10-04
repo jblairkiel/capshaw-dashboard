@@ -3,8 +3,9 @@ import { useState, useEffect, useMemo } from 'react';
 // Email Delivery (admins only): while the site is in test mode every email goes
 // to the redirect address instead of the person it is for. This page lets
 // particular roles and people through to their own address; everyone else
-// stays redirected. A person's own setting beats any role they hold. The
-// server decides (server/mail/delivery.js) and checks this is an admin.
+// stays redirected. A person's own setting beats any role they hold, and the
+// "Everyone" switch lets all mail through bar anybody kept redirected by name.
+// The server decides (server/mail/delivery.js) and checks this is an admin.
 
 const API = '/api/mail-delivery';
 
@@ -49,6 +50,10 @@ export default function MailDeliveryView() {
     setBusy(true); setError('');
     try { setData(await request()); } catch (e) { setError(e.message); } finally { setBusy(false); }
   }
+  const setAll = on => {
+    if (on && !window.confirm('Send everyone their own email? Every message the site sends will go to the real person it is for, except anybody kept redirected below.')) return;
+    act(() => call(`${API}/all`, { method: 'PUT', body: JSON.stringify({ on }) }));
+  };
   const setRole = (key, deliver) => act(() => call(`${API}/roles/${encodeURIComponent(key)}`, { method: 'PUT', body: JSON.stringify({ deliver }) }));
   const setPerson = (email, name, deliver) => act(() => call(`${API}/people`, { method: 'PUT', body: JSON.stringify({ email, name, deliver }) }));
   const removePerson = email => act(() => call(`${API}/people?email=${encodeURIComponent(email)}`, { method: 'DELETE' }));
@@ -72,7 +77,13 @@ export default function MailDeliveryView() {
         <p className="text-sm text-gray-500">Who receives their own email while the site is in test mode.</p>
       </div>
 
-      {data.redirecting ? (
+      {data.redirecting && data.all.on ? (
+        <div className="card border border-emerald-200 bg-emerald-50 text-sm text-emerald-900">
+          <strong>Everyone is getting their own email.</strong> Every email goes to the person it is for
+          {data.kept ? `, except the ${data.kept} ${data.kept === 1 ? 'person' : 'people'} kept redirected below` : ''}.
+          Turn &ldquo;Everyone&rdquo; off to go back to sending everything to <span className="font-mono">{data.redirectTo}</span>.
+        </div>
+      ) : data.redirecting ? (
         <div className="card border border-amber-200 bg-amber-50 text-sm text-amber-900">
           <strong>Test mode is on.</strong> Every email goes to <span className="font-mono">{data.redirectTo}</span> instead
           of the person it is for — except to the roles and people turned on below. Nothing turned on means everything
@@ -87,6 +98,21 @@ export default function MailDeliveryView() {
 
       {error && <div className="card text-sm text-red-600" role="alert">{error}</div>}
 
+      {data.redirecting && (
+        <section className={`card flex items-center gap-4 ${data.all.on ? 'border border-emerald-300' : ''}`} aria-label="Everyone">
+          <div className="flex-1 min-w-0">
+            <h3 className="font-semibold text-church-navy">Everyone</h3>
+            <p className="text-xs text-gray-500">
+              {data.all.on
+                ? `On${data.all.by ? ` · turned on by ${data.all.by}` : ''}. Every email goes to the person it is for, bar anybody kept redirected by name.`
+                : 'Turn on to send every email to the person it is for. Anybody set to "Keep redirected" below still comes to you.'}
+            </p>
+          </div>
+          <span className={`text-xs ${data.all.on ? 'text-emerald-800' : 'text-gray-400'}`}>{data.all.on ? 'All on' : 'Off'}</span>
+          <Switch on={data.all.on} disabled={busy} onChange={setAll} label="Everyone: send their own email" />
+        </section>
+      )}
+
       <section className="card space-y-2" aria-label="Who gets their own email now">
         <h3 className="font-semibold text-church-navy">Getting their own email now ({data.real.length})</h3>
         {data.real.length === 0 ? (
@@ -98,7 +124,7 @@ export default function MailDeliveryView() {
                 <span className="text-church-navy">{p.name || p.email}</span>
                 {p.name && <span className="text-gray-400 font-mono text-xs">{p.email}</span>}
                 <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
-                  {p.why === 'person' ? 'Turned on by name' : `As ${p.roleLabel}`}
+                  {p.why === 'person' ? 'Turned on by name' : p.why === 'all' ? 'Everyone is on' : `As ${p.roleLabel}`}
                 </span>
               </li>
             ))}
@@ -109,6 +135,9 @@ export default function MailDeliveryView() {
       <section className="card space-y-2" aria-label="Roles">
         <h3 className="font-semibold text-church-navy">Roles</h3>
         <p className="text-xs text-gray-500">Turn a role on and everyone given it gets their own email. Being an admin does not count as holding every area here.</p>
+        {data.all.on && (
+          <p className="text-xs text-emerald-800 bg-emerald-50 rounded px-2 py-1">Everyone is on, so these make no difference until it is turned off. They are kept as they are for when it is.</p>
+        )}
         <ul className="divide-y divide-gray-100">
           {data.roles.map(r => (
             <li key={r.key} className="py-2.5 flex items-center gap-3">

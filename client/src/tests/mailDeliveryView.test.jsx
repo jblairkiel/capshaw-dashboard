@@ -6,6 +6,8 @@ const BASE = {
   success: true,
   redirecting: true,
   redirectTo: 'jblairkiel@gmail.com',
+  all: { on: false },
+  kept: 1,
   roles: [
     { key: 'admin', label: 'Admins', description: '', deliver: false, holders: [{ name: 'Office Admin', email: 'admin@example.com' }] },
     { key: 'songs', label: 'Song Tracker', description: '', deliver: true, holders: [{ name: 'Song Keeper', email: 'songs@example.com' }] },
@@ -82,6 +84,36 @@ describe('Email Delivery', () => {
     fireEvent.change(screen.getByLabelText('Their setting'), { target: { value: 'false' } });
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     await waitFor(() => expect(calls.find(c => c.method === 'PUT')?.body).toEqual({ email: 'new@example.com', name: '', deliver: false }));
+  });
+
+  test('the Everyone switch asks first, then turns all mail on', async () => {
+    const calls = mockApi();
+    const confirm = vi.fn(() => true);
+    vi.stubGlobal('confirm', confirm);
+    render(<MailDeliveryView />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Everyone: send their own email' }));
+    expect(confirm).toHaveBeenCalled();
+    await waitFor(() => expect(calls.find(c => c.url === '/api/mail-delivery/all')).toMatchObject({ method: 'PUT', body: { on: true } }));
+  });
+
+  test('saying no to the question changes nothing', async () => {
+    const calls = mockApi();
+    vi.stubGlobal('confirm', vi.fn(() => false));
+    render(<MailDeliveryView />);
+    fireEvent.click(await screen.findByRole('switch', { name: 'Everyone: send their own email' }));
+    expect(calls.some(c => c.url === '/api/mail-delivery/all')).toBe(false);
+  });
+
+  test('with everyone on, says so, and says the roles wait until it is off', async () => {
+    const calls = mockApi({ ...BASE, all: { on: true, by: 'Office Admin' }, real: [{ email: 'dir@example.com', name: 'Dir Person', why: 'all' }] });
+    render(<MailDeliveryView />);
+    expect((await screen.findByText(/Everyone is getting their own email/)).closest('div')).toHaveTextContent('except the 1 person kept redirected below');
+    expect(screen.getByRole('switch', { name: 'Everyone: send their own email' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByText(/these make no difference until it is turned off/)).toBeInTheDocument();
+    expect(screen.getByText('Everyone is on')).toBeInTheDocument();
+    // Turning it off needs no question.
+    fireEvent.click(screen.getByRole('switch', { name: 'Everyone: send their own email' }));
+    await waitFor(() => expect(calls.find(c => c.url === '/api/mail-delivery/all')?.body).toEqual({ on: false }));
   });
 
   test('when test mode is off, says these settings do nothing for now', async () => {

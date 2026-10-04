@@ -40,8 +40,11 @@ function isConfigured() {
   return !!host;
 }
 
+// Whether mail is being redirected at all. With everyone let through on
+// Admin → Email Delivery it is not — short of anybody kept redirected by name,
+// which that page shows.
 function isRedirecting() {
-  return !!config().redirectTo;
+  return !!config().redirectTo && !delivery.allOn();
 }
 
 // ─── Attachments ──────────────────────────────────────────────────────────────

@@ -9,6 +9,9 @@
 //   · a person — by email address, either let through or kept redirected. A
 //     person's own setting beats any role: "everyone on the song tracker,
 //     except him" and "just her" are both one setting each.
+//   · everyone — one switch that lets all mail through, short of anybody
+//     kept redirected by name. The role switches are left as they were and
+//     take over again when it is turned off.
 //
 // Everybody else stays redirected, so the default — nothing set — is exactly
 // what it always was: all mail to the redirect address. Clearing
@@ -32,7 +35,9 @@ const normal = email => String(email || '').trim().toLowerCase();
 
 function rules() {
   const rows = db.prepare('SELECT kind, key, label, deliver, updated_by, updated_at FROM mail_redirect_rules').all();
+  const all = rows.find(r => r.kind === 'all');
   return {
+    all: all ? { on: !!all.deliver, by: all.updated_by, at: all.updated_at } : { on: false },
     roles: new Map(rows.filter(r => r.kind === 'role').map(r => [r.key, r])),
     people: new Map(rows.filter(r => r.kind === 'person').map(r => [r.key, r])),
   };
@@ -61,6 +66,7 @@ function decide(email, set = rules()) {
   const key = normal(email);
   const own = set.people.get(key);
   if (own) return { deliver: !!own.deliver, why: 'person' };
+  if (set.all.on) return { deliver: true, why: 'all' };
   for (const role of rolesOf(key)) {
     if (set.roles.get(role)?.deliver) return { deliver: true, why: 'role', role, roleLabel: role === 'admin' ? 'Admins' : areaLabel(role) };
   }
@@ -81,6 +87,22 @@ function setRole(key, deliver, user) {
   }
   return { key, deliver: !!deliver };
 }
+
+// Everyone on, or back to roles and people.
+function setAll(on, user) {
+  if (typeof on !== 'boolean') return { error: 'Say whether everyone gets their own email' };
+  if (on) {
+    db.prepare(`
+      INSERT INTO mail_redirect_rules (kind, key, deliver, updated_by, updated_at) VALUES ('all', '*', 1, ?, datetime('now'))
+      ON CONFLICT (kind, key) DO UPDATE SET deliver = 1, updated_by = excluded.updated_by, updated_at = excluded.updated_at
+    `).run(user?.name || '');
+  } else {
+    db.prepare("DELETE FROM mail_redirect_rules WHERE kind = 'all'").run();
+  }
+  return { on };
+}
+
+const allOn = () => rules().all.on;
 
 const VALID = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -145,6 +167,8 @@ function overview({ redirectTo }) {
   return {
     redirecting: !!redirectTo,
     redirectTo: redirectTo || null,
+    all: set.all,
+    kept: [...set.people.values()].filter(r => !r.deliver).length,
     roles: roles().map(r => ({ ...r, deliver: !!set.roles.get(r.key)?.deliver, holders: who.get(r.key) || [] })),
     people: [...set.people.values()]
       .map(r => ({ email: r.key, name: r.label, deliver: !!r.deliver, updatedBy: r.updated_by, updatedAt: r.updated_at }))
@@ -154,4 +178,4 @@ function overview({ redirectTo }) {
   };
 }
 
-module.exports = { roles, rules, rolesOf, decide, setRole, setPerson, removePerson, addressBook, overview };
+module.exports = { roles, rules, rolesOf, decide, setRole, setAll, allOn, setPerson, removePerson, addressBook, overview };
