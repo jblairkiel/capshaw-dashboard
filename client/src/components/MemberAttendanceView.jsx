@@ -4,6 +4,7 @@ import PersonPhoto from './PersonPhoto';
 import MemberAttendanceAnalytics from './MemberAttendanceAnalytics';
 import MemberAttendanceImport from './MemberAttendanceImport';
 import { API, TONES, TONE_NAMES, toneHex, call, photoUrl, localToday } from '../lib/memberAttendance';
+import DateInput from './DateInput';
 
 // Member Attendance: who was at each service, one tap per person, and what it
 // adds up to. For whoever holds the Member Attendance area, and admins — the
@@ -186,7 +187,7 @@ function RollTab({ services, statuses }) {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <label className="block">
             <span className={label}>Date</span>
-            <input type="date" value={date} onChange={e => setDate(e.target.value)} className={field} />
+            <DateInput value={date} onChange={setDate} className={field} />
           </label>
           <label className="block">
             <span className={label}>Service</span>

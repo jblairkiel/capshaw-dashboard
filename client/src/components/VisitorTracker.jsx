@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import Dialog from './Dialog';
 import WorkflowDialogButton from './WorkflowDialogButton';
 import { useIsNarrow } from '../lib/useMediaQuery';
+import DateInput from './DateInput';
 
 // Our guests: who they are, how to reach them, and when they have been with us.
 //
@@ -317,10 +318,10 @@ function GuestForm({ guest, onClose, onSaved, onDeleted }) {
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
               <span className={label}>First visit</span>
-              <input
+              <DateInput
+                format="mdy"
                 value={visit.date}
-                placeholder="06/07/26"
-                onChange={e => setVisit(v => ({ ...v, date: e.target.value }))}
+                onChange={date => setVisit(v => ({ ...v, date }))}
                 className={field}
               />
             </label>
@@ -503,11 +504,11 @@ function GuestDetail({ guest, canManage, user, onClose, onChanged, onEdit, onFol
             <form onSubmit={addVisit} className="flex items-end gap-2 mb-3 flex-wrap">
               <label className="block">
                 <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Date</span>
-                <input
+                <DateInput
+                  format="mdy"
                   value={visit.date}
-                  placeholder="06/07/26"
-                  onChange={e => setVisit(v => ({ ...v, date: e.target.value }))}
-                  className="mt-1 block w-32 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold"
+                  onChange={date => setVisit(v => ({ ...v, date }))}
+                  className="mt-1 block w-40 bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold"
                 />
               </label>
               <label className="block">

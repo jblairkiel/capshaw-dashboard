@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import SampleDataPanel from './SampleDataPanel';
+import DateInput, { MonthInput } from './DateInput';
+import { isoFromMonthDay, monthDayOf, monthLabelOf } from '../lib/dates';
 
 const API = '/api/admin';
 
@@ -10,7 +12,7 @@ const TABLE_DEFS = {
     label: 'Attendance',
     group: 'Congregation',
     fields: [
-      { key: 'date',    label: 'Date',    type: 'text',   placeholder: 'MM/DD/YY' },
+      { key: 'date',    label: 'Date',    type: 'date' },
       { key: 'service', label: 'Service', type: 'text',   placeholder: 'Sunday Worship' },
       { key: 'count',   label: 'Count',   type: 'number', placeholder: '0' },
     ],
@@ -19,7 +21,7 @@ const TABLE_DEFS = {
     label: 'Sermons',
     group: 'Congregation',
     fields: [
-      { key: 'date',    label: 'Date',    type: 'text', placeholder: 'MM/DD/YY' },
+      { key: 'date',    label: 'Date',    type: 'date', format: 'mdy' },
       { key: 'title',   label: 'Title',   type: 'text' },
       { key: 'speaker', label: 'Speaker', type: 'text' },
       { key: 'type',    label: 'Type',    type: 'text', placeholder: 'Sunday AM' },
@@ -31,8 +33,8 @@ const TABLE_DEFS = {
     label: 'Job Assignments',
     group: 'Congregation',
     fields: [
-      { key: 'month',   label: 'Month',   type: 'text', placeholder: 'April 2026' },
-      { key: 'date',    label: 'Date',    type: 'text', placeholder: 'Apr 6' },
+      { key: 'month',   label: 'Month',   type: 'month' },
+      { key: 'date',    label: 'Date',    type: 'monthDay' },
       { key: 'service', label: 'Service', type: 'text', placeholder: 'Sunday Worship' },
       { key: 'job',     label: 'Job',     type: 'text' },
       { key: 'name',    label: 'Name',    type: 'text' },
@@ -50,7 +52,7 @@ const TABLE_DEFS = {
     group: 'Congregation',
     fields: [
       { key: 'visitor_id', label: 'Visitor ID', type: 'number' },
-      { key: 'date',       label: 'Date',       type: 'text', placeholder: 'MM/DD/YY' },
+      { key: 'date',       label: 'Date',       type: 'date', format: 'mdy' },
       { key: 'service',    label: 'Service',    type: 'text' },
     ],
   },
@@ -96,7 +98,7 @@ const TABLE_DEFS = {
       { key: 'type',       label: 'Type',       type: 'text',     placeholder: 'announcement' },
       { key: 'title',      label: 'Title',      type: 'text' },
       { key: 'body',       label: 'Body',       type: 'textarea' },
-      { key: 'event_date', label: 'Event Date', type: 'text' },
+      { key: 'event_date', label: 'Event Date', type: 'date' },
       { key: 'event_time', label: 'Event Time', type: 'text' },
       { key: 'location',   label: 'Location',   type: 'text' },
       { key: 'priority',   label: 'Priority',   type: 'text',     placeholder: 'normal' },
@@ -116,7 +118,7 @@ const TABLE_DEFS = {
     label: 'Song Services',
     group: 'Worship',
     fields: [
-      { key: 'date',    label: 'Date',    type: 'text' },
+      { key: 'date',    label: 'Date',    type: 'date' },
       { key: 'service', label: 'Service', type: 'text' },
       { key: 'leader',  label: 'Leader',  type: 'text' },
     ],
@@ -184,7 +186,17 @@ function RowModal({ tableKey, def, row, onSave, onClose }) {
           {def.fields.map(f => (
             <label key={f.key} className="block">
               <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">{f.label}</span>
-              {f.type === 'textarea' ? (
+              {f.type === 'date' ? (
+                <DateInput format={f.format} value={form[f.key]} onChange={v => setForm(p => ({ ...p, [f.key]: v }))} />
+              ) : f.type === 'month' ? (
+                <MonthInput label={f.label} value={form[f.key]} onChange={v => setForm(p => ({ ...p, [f.key]: v }))} />
+              ) : f.type === 'monthDay' ? (
+                // A serving slot's "June 7", kept with its "June 2026".
+                <DateInput
+                  value={isoFromMonthDay(form.month, form[f.key]) || form[f.key]}
+                  onChange={iso => setForm(p => (iso ? { ...p, [f.key]: monthDayOf(iso), month: monthLabelOf(iso) } : { ...p, [f.key]: '' }))}
+                />
+              ) : f.type === 'textarea' ? (
                 <textarea
                   className="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold resize-none"
                   rows={4}

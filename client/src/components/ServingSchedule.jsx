@@ -3,6 +3,8 @@ import Dialog from './Dialog';
 import TimeAway from './TimeAway';
 import BlackoutCalendar from './BlackoutCalendar';
 import { describeRange, parseMonthLabel } from '../lib/timeAway';
+import DateInput, { MonthInput } from './DateInput';
+import { isoFromMonthDay, monthDayOf, monthLabelOf } from '../lib/dates';
 
 // The serving schedule, from both sides of it:
 //
@@ -79,17 +81,10 @@ function BuildMonthDialog({ services, onClose, onBuilt }) {
   return (
     <Dialog title="Build a month of serving jobs" subtitle="Empty slots, ready for people to be put against them" onClose={onClose} width="max-w-md">
       <form onSubmit={submit} className="space-y-4">
-        <label className="block">
+        <div>
           <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Month</span>
-          <input
-            autoFocus
-            required
-            value={month}
-            onChange={e => setMonth(e.target.value)}
-            placeholder="June 2026"
-            className="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold"
-          />
-        </label>
+          <MonthInput required value={month} onChange={setMonth} />
+        </div>
 
         <fieldset className="border-0 p-0 m-0">
           <legend className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Services to lay out</legend>
@@ -178,13 +173,20 @@ function SlotDialog({ slot, month, jobs, services, onClose, onSaved, onDeleted }
     <Dialog title={isNew ? 'Add a serving job' : 'Edit this serving job'} onClose={onClose} width="max-w-md">
       <form onSubmit={submit} className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
-          <label className="block">
+          <div>
             <span className={label}>Month</span>
-            <input required value={form.month} onChange={e => set('month', e.target.value)} className={field} />
-          </label>
+            <MonthInput required value={form.month} onChange={v => set('month', v)} />
+          </div>
           <label className="block">
             <span className={label}>Date</span>
-            <input value={form.date} placeholder="June 7" onChange={e => set('date', e.target.value)} className={field} />
+            {/* Stored as "June 2026" and "June 7", as the roster has always
+                been; picking a day sets the month to match. Blank means the
+                job covers the whole month. */}
+            <DateInput
+              value={isoFromMonthDay(form.month, form.date) || form.date}
+              onChange={iso => setForm(p => (iso ? { ...p, date: monthDayOf(iso), month: monthLabelOf(iso) } : { ...p, date: '' }))}
+              className={field}
+            />
           </label>
         </div>
 

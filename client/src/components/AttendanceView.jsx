@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { toCsv, downloadCsv } from '../lib/csv';
 import { hasArea, isAdmin } from '../lib/roles';
 import Dialog from './Dialog';
+import DateInput from './DateInput';
 
 // Attendance counts come off the church site with the rest of the scrape, but
 // whoever looks after Attendance can also record one here and correct an
@@ -90,8 +91,7 @@ function AttendanceForm({ record, serviceTypes, onClose, onSaved }) {
       <form onSubmit={submit} className="space-y-3">
         <label className="block">
           <span className={label}>Date</span>
-          <input autoFocus required value={form.date} placeholder="2026-06-07"
-            onChange={e => set('date', e.target.value)} className={field} />
+          <DateInput autoFocus required value={form.date} onChange={v => set('date', v)} className={field} />
         </label>
         <label className="block">
           <span className={label}>Service</span>

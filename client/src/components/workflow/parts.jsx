@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import WorkflowChart from '../WorkflowChart';
 import { API, call, TONE_BUTTON, OUTCOME_BADGE } from './api';
+import DateInput from '../DateInput';
 
 // ─── Taking an action ─────────────────────────────────────────────────────────
 
@@ -152,9 +153,11 @@ export function StartForm({ definitions, prefill = null, onStarted, onCancel }) 
               </>
             ) : field.type === 'textarea' ? (
               <textarea rows={3} value={value} placeholder={field.placeholder} onChange={e => set(e.target.value)} className={common} />
+            ) : field.type === 'date' ? (
+              <DateInput value={value} onChange={set} className={common} />
             ) : (
               <input
-                type={field.type === 'date' ? 'date' : 'text'}
+                type="text"
                 value={value}
                 placeholder={field.placeholder}
                 onChange={e => set(e.target.value)}
