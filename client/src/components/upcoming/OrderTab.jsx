@@ -1,5 +1,5 @@
 import OrderOfService from '../OrderOfService';
-import { StatusBadge } from './shared';
+import { StatusBadge, CopyLinkButton } from './shared';
 import { dayLabel } from './api';
 
 // ─── Order of Worship ─────────────────────────────────────────────────────────
@@ -73,6 +73,7 @@ function ServiceCard({ slot, canOrganize, busy, onOpen, onConfirm }) {
               {plan ? 'Change it' : 'Submit this service'}
             </button>
           )}
+          <CopyLinkButton date={slot.date} service={slot.service} />
         </div>
       </div>
     </section>

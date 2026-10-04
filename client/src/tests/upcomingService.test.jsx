@@ -218,6 +218,40 @@ describe('a link to one service', () => {
     expect(screen.getByLabelText('Which service')).toHaveValue('2026-10-07|Wednesday Bible Study');
     expect(fetchMock.mock.calls.some(([u]) => u === '/api/worship/plans/for?date=2026-10-07&service=Wednesday%20Bible%20Study')).toBe(true);
   });
+
+  test('a service beyond the next two weeks still shows as the one chosen', async () => {
+    const fetchMock = mockApi();
+    render(<Page tab="service" initialSelection={{ date: '2026-11-08', service: 'Sunday AM Worship' }} />);
+    await screen.findByLabelText('Order of the service');
+    const picker = screen.getByLabelText('Which service');
+    expect(picker).toHaveValue('2026-11-08|Sunday AM Worship');
+    expect(screen.queryByLabelText('Date')).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([u]) => u === '/api/worship/plans/for?date=2026-11-08&service=Sunday%20AM%20Worship')).toBe(true);
+    // Choosing "another date" still works from there.
+    fireEvent.change(picker, { target: { value: 'other' } });
+    expect(screen.getByLabelText('Date')).toHaveValue('2026-11-08');
+  });
+
+  test('Copy link puts the service\'s own link on the clipboard', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } });
+    mockApi();
+    render(<Page tab="service" initialSelection={{ date: '2026-10-07', service: 'Wednesday Bible Study' }} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy the link to Wednesday Bible Study, 2026-10-07' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(
+      `${window.location.origin}/?page=upcoming&tab=service&date=2026-10-07&service=Wednesday+Bible+Study`));
+    expect(await screen.findByRole('button', { name: /Copy the link/ })).toHaveTextContent('Link copied');
+  });
+
+  test('where the clipboard is not allowed, the link is shown to copy by hand', async () => {
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText: () => Promise.reject(new Error('denied')) } });
+    mockApi();
+    render(<Page tab="order" />);
+    const card = await screen.findByRole('region', { name: /Wednesday Bible Study/ });
+    fireEvent.click(within(card).getByRole('button', { name: /Copy the link/ }));
+    expect(await within(card).findByLabelText('Link to this service'))
+      .toHaveValue(`${window.location.origin}/?page=upcoming&tab=service&date=2026-10-07&service=Wednesday+Bible+Study`);
+  });
 });
 
 describe('Song Requests', () => {
