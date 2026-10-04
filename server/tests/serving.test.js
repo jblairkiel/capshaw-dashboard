@@ -99,6 +99,48 @@ describe('laying out next month', () => {
 
 // ─── Filling a slot — the roster role's to do ──────────────────────────────────
 
+describe('a special service', () => {
+  const add = (user, body) => request(buildApp(user)).post('/api/serving/special').send(body);
+  const MEETING = { service: 'Gospel Meeting', from: '2026-11-15', through: '2026-11-18', jobs: ['Song Leader', 'Opening Prayer', 'Closing Prayer'] };
+
+  test('lays out each night of a gospel meeting with the jobs asked for, empty', async () => {
+    const res = await add(KEEPER, MEETING);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ created: 12, month: 'November 2026' });
+    const rows = slotsIn('November 2026');
+    expect([...new Set(rows.map(r => r.date))]).toEqual(['November 15', 'November 16', 'November 17', 'November 18']);
+    expect(rows.every(r => r.service === 'Gospel Meeting' && r.name === '')).toBe(true);
+    expect(db.prepare("SELECT summary FROM action_log WHERE entity = 'serving schedule'").get().summary)
+      .toBe('Added Gospel Meeting, November 15 – November 18 (4 nights) — 12 empty slots');
+
+    // Twice never doubles it up.
+    expect((await add(KEEPER, MEETING)).body.created).toBe(0);
+  });
+
+  test('one night, and a run that crosses into the next month', async () => {
+    expect((await add(KEEPER, { ...MEETING, from: '2026-11-29', through: '' })).body.created).toBe(3);
+    await add(KEEPER, { ...MEETING, from: '2026-11-30', through: '2026-12-01' });
+    expect(slotsIn('December 2026').map(r => r.date)).toEqual(['December 1', 'December 1', 'December 1']);
+  });
+
+  test('only from the church\'s list of services, and only what the regular rosters do not cover', async () => {
+    const res = await request(buildApp(KEEPER)).get('/api/serving');
+    expect(res.body.specialServices).toEqual(expect.arrayContaining(['Gospel Meeting', 'Monthly Singing']));
+    expect(res.body.specialServices).not.toEqual(expect.arrayContaining(['Sunday AM Worship']));
+    expect(res.body.specialServices).not.toEqual(expect.arrayContaining(['Sunday PM Worship']));
+    expect((await add(KEEPER, { ...MEETING, service: 'Sunday AM Worship' })).status).toBe(400);
+    expect((await add(KEEPER, { ...MEETING, service: 'Made Up' })).status).toBe(400);
+  });
+
+  test('refuses what does not make sense, and anyone but the schedule keeper', async () => {
+    expect((await add(MAN, MEETING)).status).toBe(403);
+    expect((await add(KEEPER, { ...MEETING, from: '' })).body.error).toMatch(/Choose the day/);
+    expect((await add(KEEPER, { ...MEETING, through: '2026-11-01' })).body.error).toMatch(/before the first/);
+    expect((await add(KEEPER, { ...MEETING, through: '2026-12-31' })).body.error).toMatch(/more than 14 nights/);
+    expect((await add(KEEPER, { ...MEETING, jobs: ['Juggler'] })).body.error).toMatch(/at least one job/);
+  });
+});
+
 describe('filling a slot by hand', () => {
   test('there is no self sign-up any more — the route is gone', async () => {
     await request(buildApp(KEEPER)).post('/api/serving/months').send({ month: 'June 2026', services: ['Sunday Worship'] });

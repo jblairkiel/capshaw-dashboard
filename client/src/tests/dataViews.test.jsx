@@ -664,6 +664,45 @@ describe('ServingSchedule', () => {
     expect(screen.queryByRole('heading', { name: 'April 2025' })).not.toBeInTheDocument();
   });
 
+  test('adding a special service posts the service, its nights and its jobs', async () => {
+    const fetchMock = mockSchedule({ canManage: true, specialServices: ['Gospel Meeting', 'Monthly Singing'], jobs: ['Song Leader', 'Opening Prayer', 'Closing Prayer', 'Speaker'] });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a special service' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('First night'), { target: { value: '2026-11-15' } });
+    fireEvent.change(within(dialog).getByLabelText(/^Last night/), { target: { value: '2026-11-18' } });
+    fireEvent.click(within(dialog).getByLabelText('Speaker'));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add it' }));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, opts]) => String(url).endsWith('/special') && opts?.method === 'POST');
+      expect(JSON.parse(call[1].body)).toEqual({
+        service: 'Gospel Meeting', from: '2026-11-15', through: '2026-11-18',
+        jobs: ['Song Leader', 'Opening Prayer', 'Closing Prayer', 'Speaker'],
+      });
+    });
+  });
+
+  test('with no special services on the list, it says where an admin adds one', async () => {
+    mockSchedule({ canManage: true, specialServices: [] });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a special service' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('Church Records → Service Types');
+  });
+
+  test('a day with a special service keeps each service\'s jobs under its own name', async () => {
+    mockSchedule({ assignments: [
+      ...ASSIGNMENTS,
+      { id: 9, month: 'April 2025', date: 'April 6', service: 'Gospel Meeting', job: 'Song Leader', name: 'Visiting Leader' },
+    ] });
+    render(<ServingSchedule />);
+    const meeting = await screen.findByRole('columnheader', { name: 'Gospel Meeting' });
+    expect(screen.getByRole('columnheader', { name: 'Sunday Worship' })).toBeInTheDocument();
+    // Gospel Meeting's rows come after Sunday Worship's.
+    const rows = screen.getAllByRole('row').map(r => r.textContent);
+    expect(rows.findIndex(t => t.includes('Visiting Leader'))).toBeGreaterThan(rows.findIndex(t => t === meeting.textContent));
+    expect(rows.findIndex(t => t.includes('Tom Nelson'))).toBeLessThan(rows.findIndex(t => t === meeting.textContent));
+  });
+
   test('building a month posts the month and the services chosen', async () => {
     const fetchMock = mockSchedule({ canManage: true });
     render(<ServingSchedule />);

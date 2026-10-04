@@ -283,6 +283,50 @@ describe('song requests', () => {
   });
 });
 
+describe('names from the Serving Schedule', () => {
+  const slot = db => db.prepare('INSERT INTO job_assignments (month, date, service, job, name) VALUES (?, ?, ?, ?, ?)');
+
+  test('a part with no job linked is filled from a job of the same name, and the sermon from the speaker', () => {
+    const add = slot(db);
+    add.run('October 2026', 'October 4', 'Sunday Worship', 'Speaker', 'Sam Preacher');
+    add.run('October 2026', 'October 4', 'Sunday Worship', 'Announcements', 'Ann Nouncer');
+    const items = plans.template(SUNDAY, 'Sunday AM Worship').items;
+    const who = name => items.find(i => i.partName === name).person;
+    expect(who('Opening prayer')).toBe('Mo Member');
+    expect(who('Sermon')).toBe('Sam Preacher');
+    expect(who('Announcements')).toBe('Ann Nouncer');
+  });
+
+  test('a Sunday Bible class is not given the worship service\'s names', () => {
+    expect(plans.servingFor(SUNDAY, 'Sunday Bible Study').jobs).toEqual({});
+    expect(plans.servingFor(SUNDAY, 'Sunday AM Worship').jobs).toMatchObject({ 'Song Leader': ['Leader, Lee'] });
+  });
+
+  test('a special service put down by its own name is filled, listed, and its leader may submit it', () => {
+    const add = slot(db);
+    add.run('October 2026', 'October 6', 'Gospel Meeting', 'Song Leader', 'Lee Leader');
+    add.run('October 2026', 'October 6', 'Gospel Meeting', 'Opening Prayer', 'Mo Member');
+    add.run('October 2026', 'October 7', 'Gospel Meeting', 'Song Leader', '');
+
+    const { jobs, leader } = plans.servingFor('2026-10-06', 'Gospel Meeting');
+    expect(jobs).toEqual({ 'Song Leader': ['Lee Leader'], 'Opening Prayer': ['Mo Member'] });
+    expect(leader).toBe('Lee Leader');
+    expect(plans.template('2026-10-06', 'Gospel Meeting').items.find(i => i.partName === 'Opening prayer').person).toBe('Mo Member');
+
+    const upcoming = plans.upcoming(PEOPLE.leader, { days: 9, today: '2026-09-30' });
+    expect(upcoming.map(u => `${u.date} ${u.service}`)).toEqual([
+      '2026-09-30 Wednesday Bible Study', '2026-10-04 Sunday AM Worship',
+      '2026-10-06 Gospel Meeting', '2026-10-07 Wednesday Bible Study', '2026-10-07 Gospel Meeting',
+    ]);
+    const meeting = upcoming.find(u => u.date === '2026-10-06');
+    expect(meeting).toMatchObject({ leader: 'Lee Leader', canSubmit: true, serving: { 'Opening Prayer': ['Mo Member'] } });
+    // Not the regular rosters, and not a service the church does not list.
+    add.run('October 2026', 'October 8', 'Not A Service', 'Song Leader', 'Lee Leader');
+    expect(plans.specialServices({ from: '2026-10-01', to: '2026-10-31' }).map(s => `${s.date} ${s.service}`))
+      .toEqual(['2026-10-06 Gospel Meeting', '2026-10-07 Gospel Meeting']);
+  });
+});
+
 describe('the overview', () => {
   test('lists each weekly service coming up, who leads it, and whether it is in', async () => {
     await submit(PEOPLE.leader);

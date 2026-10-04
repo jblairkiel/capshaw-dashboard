@@ -22,7 +22,8 @@ const db      = require('../db');
 const { requireAuth, requireApproved, requireArea, holdsArea } = require('../middleware/auth');
 const { WORSHIP_ROLES, PREFERENCE_LEVELS } = require('../lib/people');
 const worship = require('../lib/worship');
-const { SERVICE_ROLES, SERVICES, parseMonth, servicesIn } = require('../workflows/scheduling');
+const { SERVICE_ROLES, SERVICES, MONTHS, parseMonth, servicesIn } = require('../workflows/scheduling');
+const plans = require('../lib/worshipPlans');
 const actionLog = require('../lib/actionLog');
 const blackouts = require('../lib/blackouts');
 
@@ -132,6 +133,10 @@ router.get('/', (req, res) => {
     jobs:        WORSHIP_ROLES,
     services:    SERVICES,
     serviceJobs: SERVICE_ROLES,
+    // What can be added as a special service — a gospel meeting, a singing:
+    // the church's own list of services, kept by an admin, less the ones the
+    // regular rosters already cover.
+    specialServices: specialChoices(),
     canManage,
     // Everyone's time away is the schedule keeper's to see — it is why a slot
     // is empty. Everybody else sees only their own.
@@ -191,6 +196,73 @@ router.post('/months', requireApproved, manageOnly, (req, res) => {
   });
 
   res.json({ success: true, month: parsed.label, created, assignments: assignmentsIn(parsed.label) });
+});
+
+// ─── POST /api/serving/special ────────────────────────────────────────────────
+// A service that does not come round every week — a gospel meeting, a monthly
+// singing — on one day or each night of a run of days, with the jobs it needs
+// and nobody against them yet. It is put down by the service's own name, which
+// is how Upcoming Service finds it, fills its parts, and reminds its song
+// leader.
+
+const isIsoDate = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) && !Number.isNaN(Date.parse(`${s}T12:00:00Z`));
+const MAX_NIGHTS = 14;
+
+function specialChoices() {
+  const regular = new Set(SERVICES.map(s => s.toLowerCase()));
+  return plans.activeServices()
+    .filter(s => !regular.has(s.name.toLowerCase()) && !plans.servingServiceFor(s.name) && !(s.tracking === 'weekly' && s.weekday !== null))
+    .map(s => s.name);
+}
+
+router.post('/special', requireApproved, manageOnly, (req, res) => {
+  const type = plans.serviceType(req.body?.service);
+  if (!type || !type.active || !specialChoices().includes(type.name)) {
+    return res.status(400).json({ success: false, error: 'Choose which service it is. An admin adds services to the list under Church Records → Service Types.' });
+  }
+  const from = String(req.body?.from || '');
+  const through = String(req.body?.through || '') || from;
+  if (!isIsoDate(from) || !isIsoDate(through)) return res.status(400).json({ success: false, error: 'Choose the day it is held' });
+  if (through < from) return res.status(400).json({ success: false, error: 'The last night is before the first' });
+
+  const nights = [];
+  for (let d = new Date(`${from}T12:00:00Z`); d.toISOString().slice(0, 10) <= through; d.setUTCDate(d.getUTCDate() + 1)) {
+    nights.push(new Date(d));
+    if (nights.length > MAX_NIGHTS) return res.status(400).json({ success: false, error: `That is more than ${MAX_NIGHTS} nights — add a longer meeting in parts` });
+  }
+
+  const asked = Array.isArray(req.body?.jobs) ? req.body.jobs : [];
+  const jobs = WORSHIP_ROLES.filter(j => asked.includes(j));
+  if (!jobs.length) return res.status(400).json({ success: false, error: 'Choose at least one job it needs' });
+
+  const label = d => ({ month: `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`, date: `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}` });
+  const exists = db.prepare('SELECT 1 FROM job_assignments WHERE month = ? AND date = ? AND lower(service) = lower(?) AND job = ?');
+  const insert = db.prepare('INSERT INTO job_assignments (month, date, service, job, name) VALUES (?, ?, ?, ?, ?)');
+  const created = db.transaction(() => {
+    let n = 0;
+    for (const night of nights) {
+      const { month, date } = label(night);
+      for (const job of jobs) {
+        if (exists.get(month, date, type.name, job)) continue;
+        insert.run(month, date, type.name, job, '');
+        n++;
+      }
+    }
+    return n;
+  })();
+
+  const first = label(nights[0]);
+  const when = nights.length === 1 ? first.date : `${first.date} – ${label(nights.at(-1)).date}`;
+  actionLog.record(req.user, {
+    area:     AREA,
+    action:   'create',
+    entity:   'serving schedule',
+    entityId: `${type.name}:${from}`,
+    summary:  `Added ${type.name}, ${when}${nights.length > 1 ? ` (${nights.length} nights)` : ''} — ${created} empty slot${created === 1 ? '' : 's'}`,
+    details:  { service: type.name, from, through, jobs, created },
+  });
+
+  res.json({ success: true, created, month: first.month, assignments: assignmentsWithConflicts(first.month) });
 });
 
 // ─── Slots ────────────────────────────────────────────────────────────────────
