@@ -780,6 +780,12 @@ function initSchema(db) {
   // attempts for a while. Reset the moment a correct password arrives.
   addColumn('users', 'failed_logins', 'INTEGER NOT NULL DEFAULT 0');
   addColumn('users', 'locked_until', 'TEXT');
+  // An outstanding "forgot my password" link: its SHA-256 (never the token),
+  // when it stops working, and when it was sent, so the form cannot be used to
+  // mail somebody over and over.
+  addColumn('users', 'password_reset_hash', "TEXT NOT NULL DEFAULT ''");
+  addColumn('users', 'password_reset_expires_at', 'TEXT');
+  addColumn('users', 'password_reset_sent_at', 'TEXT');
   // Who let this account in, and when. An approval is the moment an account
   // gains access to the congregation's information, so it is worth a record.
   addColumn('users', 'approved_at', 'TEXT');
@@ -1239,6 +1245,28 @@ function initSchema(db) {
     [['Present', 'blue', 1], ['Sick', 'orange', 0], ['Out of town', 'aqua', 0], ['Absent', 'yellow', 0]]
       .forEach((s, i) => addStatus.run(...s, i));
   }
+
+  // ─── Who gets real mail while the site is in test mode ────────────────────────
+  // While MAIL_REDIRECT_TO is set, every email goes to that one address — unless
+  // an admin has let a role or a person through here. `kind` is 'role' (an
+  // account role such as admin, or an area such as songs) or 'person' (keyed by
+  // email address, since that is what mail is sent to). `deliver` 1 sends to
+  // the real address; a person can also be 0, which keeps them redirected even
+  // when a role they hold is let through. One 'all' row lets everybody through
+  // bar those kept redirected by name. Nothing here matters once the
+  // redirect is cleared: then everybody gets real mail.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS mail_redirect_rules (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind       TEXT    NOT NULL,                 -- role | person | all
+      key        TEXT    NOT NULL,                 -- role or area id, a lowercased email, or '*' for all
+      label      TEXT    NOT NULL DEFAULT '',      -- a person's name, for the page
+      deliver    INTEGER NOT NULL DEFAULT 1,
+      updated_by TEXT    NOT NULL DEFAULT '',
+      updated_at TEXT    NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (kind, key)
+    );
+  `);
 
   // ─── Seed the distribution groups ─────────────────────────────────────────────
   // Created empty; an admin fills in who is in each from Admin → Email Groups.

@@ -62,6 +62,7 @@ const NOT_FILLED = {
   user_areas: 'Who may do what, which follows from the accounts.',
   action_log: 'Append-only, and the record of what really happened. Filling it would be a lie about the past, and removing a batch would tear pages out of it.',
   mail_outbox: 'Mail waiting to be sent. Anything put here is liable to actually go out.',
+  mail_redirect_rules: 'Who gets real mail while the site is in test mode. A made-up rule could send a real person real mail.',
   scraped_meta: 'One row saying when the church site was last read. Sample data would misreport it.',
   service_types: 'The list of services every attendance record agrees on. Seeded once at start-up and shared by real records, so a batch must not take it away.',
   workflow_participants: 'Who may see a workflow, which is earned by taking part. Sample follow-ups are not aimed at a real account, so nobody is a participant in one.',

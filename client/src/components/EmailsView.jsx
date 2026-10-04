@@ -263,7 +263,7 @@ export default function EmailsView() {
 
       {catalog.redirect && (
         <div className="card border border-amber-200 bg-amber-50 text-sm text-amber-800">
-          Test mode: every email is going to <strong>{catalog.redirect}</strong> instead of the person it is for.
+          Test mode: every email is going to <strong>{catalog.redirect}</strong> instead of the person it is for, except to the roles and people an admin has turned on under Admin → Email Delivery.
         </div>
       )}
       {notice && <div className="card text-sm text-gray-700">{notice}</div>}

@@ -89,6 +89,22 @@ const EMAILS = [
     preview: () => accounts.compose.addressAlreadyRegistered({ name: SAMPLE.user.name, provider: 'local' }),
   },
   {
+    id: 'account-reset', category: 'notifications',
+    name: 'Choose a new password',
+    audience: 'The person who asked to reset their password',
+    trigger: 'Somebody chooses "Forgot your password?" on the sign-in page for an account with a password.',
+    like: ['account:reset'],
+    preview: () => accounts.compose.resetPassword({ name: SAMPLE.user.name, token: 'sample-token' }),
+  },
+  {
+    id: 'account-reset-no-password', category: 'notifications',
+    name: 'No password to reset',
+    audience: 'The owner of a Google or Facebook account who asked to reset a password',
+    trigger: 'Somebody chooses "Forgot your password?" for an address that signs in with Google or Facebook.',
+    like: ['account:reset-no-password'],
+    preview: () => accounts.compose.noPasswordToReset({ name: SAMPLE.user.name, provider: 'google' }),
+  },
+  {
     id: 'account-awaiting', category: 'notifications',
     name: 'Waiting for approval',
     audience: 'Every admin with an address on file',

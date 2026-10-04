@@ -53,7 +53,7 @@ const SECTIONS = [
     id: 'getting-started', title: 'Getting started', audience: 'everyone',
     blocks: [
       { p: 'The member portal is a private website for the Capshaw church family. Everything in it is behind sign-in: nobody outside the congregation can see the directory, the schedule or anything else here.' },
-      { p: 'You can sign in with **Google**, **Facebook**, or an **email address and a password**. A new account has to be approved by the church office before it can see anything. If you registered with an email address, you will first get an email asking you to confirm it.' },
+      { p: 'You can sign in with **Google**, **Facebook**, or an **email address and a password**. A new account has to be approved by the church office before it can see anything. If you registered with an email address, you will first get an email asking you to confirm it. Forgotten your password? Choose **Forgot your password?** on the sign-in page and we will email you a link to choose a new one; it works once, for an hour.' },
       { chart: flow('Getting an account', ['You sign up', 'You confirm your email', 'The office approves you', 'You can sign in']) },
       { p: 'The menu across the top groups the pages: **Worship**, **Our Church Family**, **Grow** and **My Church**. Whoever looks after part of the site also gets **Church Office**, with the pages for what they look after, and admins get **Admin** as well. On a phone, the same menu opens from the button at the top of the screen. Every page works on a phone; there is nothing to install.' },
       { list: [
@@ -260,6 +260,7 @@ const SECTIONS = [
       { p: '**Church Office → Emails** lists every kind of email the site sends, in four tabs (Notifications, Bulletin, Groups, Reports), with how many went in the last 30 days, a preview of each, and every message sent — searchable, and each can be opened.' },
       { p: 'Every email is queued first and sent from the queue, so a mail server being down never loses one; the queue is retried every five minutes, and **Send waiting mail now** tries at once.' },
       { note: 'While the server is in test mode (MAIL_REDIRECT_TO is set), every email goes to that one address instead of its real recipient, and the Emails page says so at the top.' },
+      { p: '**Admin → Email Delivery** lets some of it through while test mode is on. Turn on a role (Admins, or an area such as Song Tracker) and everyone given it gets their own email; add a person by name or address to let just them through, or to keep them redirected while their role is on — a person\'s own setting beats any role. **Everyone** at the top sends every email to the person it is for, bar anybody kept redirected by name; turning it off goes back to the roles and people as they were. The page lists exactly who is getting their own email and why. Nothing turned on means every email comes to the redirect address. Mail about a person\'s own account — confirming their address, telling them they are approved, a link to choose a new password — always goes to that person, test mode or not, since a link sent to anybody else is no use.' },
       { p: '**Church Office → Email Groups** decides who is on each mailing list. A church group\'s list follows its roll.' },
     ],
   },
