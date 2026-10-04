@@ -77,7 +77,7 @@ function addMember(groupId, { directoryId = null, email = '' }) {
   }
 
   const address = String(email).trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) return { error: 'That is not a valid email address' };
+  if (!/^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(address)) return { error: 'That is not a valid email address' };
 
   const already = db.prepare('SELECT 1 FROM mail_group_members WHERE group_id = ? AND lower(email) = ?')
     .get(groupId, address);

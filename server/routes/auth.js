@@ -185,7 +185,7 @@ function normalizeEmail(value) {
 }
 
 function isEmailAddress(value) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  return /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(value);
 }
 
 function cleanName(value) {

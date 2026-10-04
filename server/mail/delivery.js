@@ -104,7 +104,7 @@ function setAll(on, user) {
 
 const allOn = () => rules().all.on;
 
-const VALID = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const VALID = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/;
 
 function setPerson({ email, name = '', deliver }, user) {
   const key = normal(email);
