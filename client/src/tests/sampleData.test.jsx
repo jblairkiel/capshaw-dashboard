@@ -122,6 +122,29 @@ describe('the sample data panel', () => {
     expect(await screen.findByText(/Removed 42 rows. Nothing else was touched./)).toBeInTheDocument();
   });
 
+  test('rows real records still use are kept, and it says which and why', async () => {
+    mockApi({
+      batches: [BATCH],
+      onDelete: () => ({
+        success: true, rows: 42, deleted: 40, batches: [{ ...BATCH, rows: 2 }],
+        kept: [
+          { table: 'songs', id: 7, label: 'Amazing Grace', usedBy: [{ table: 'song_requests', rows: 1 }, { table: 'worship_plan_items', rows: 2 }] },
+          { table: 'attendance_statuses', id: 3, label: 'Sick (sample)', usedBy: [{ table: 'member_attendance', rows: 1 }] },
+        ],
+      }),
+    });
+    render(<SampleDataPanel />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove' }));
+    fireEvent.click(screen.getByRole('button', { name: /Yes, remove it/ }));
+
+    const note = await screen.findByText(/2 sample rows were kept/);
+    const box = note.closest('div');
+    expect(box).toHaveTextContent('Nothing real was deleted');
+    expect(box).toHaveTextContent('song “Amazing Grace” — used by 1 song request, 2 worship plan items');
+    expect(box).toHaveTextContent('attendance status “Sick (sample)” — used by 1 member attendance');
+    expect(screen.getByText(/Removed 40 rows/)).toBeInTheDocument();
+  });
+
   test('changing your mind leaves the batch alone', async () => {
     const fetchMock = mockApi({ batches: [BATCH] });
     render(<SampleDataPanel />);

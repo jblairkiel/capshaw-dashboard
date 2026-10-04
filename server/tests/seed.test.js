@@ -151,6 +151,61 @@ describe('taking it back out', () => {
   });
 });
 
+// ─── When something real has come to use sample data ─────────────────────────
+//
+// On a live site, people use the portal while sample data is in it: a song
+// leader picks a sample song, somebody marks attendance with a sample status.
+// Removing the batch must not fail for that, and must not take the real row
+// with it either.
+
+describe('taking it out once something real uses it', () => {
+  const sampleSong = batch => db.prepare(`
+    SELECT s.id, s.title FROM songs s
+      JOIN seed_records r ON r.table_name = 'songs' AND r.row_id = s.id AND r.batch = ?
+     LIMIT 1`).get(batch);
+
+  test('a real song request on a sample song: the rest goes, the song stays, and it says so', () => {
+    const made = seed.generate({ generators: ['worship'], scale: 1 });
+    const song = sampleSong(made.batch);
+    db.prepare("INSERT INTO song_requests (song_id, requester_name) VALUES (?, 'A Real Member')").run(song.id);
+
+    const gone = seed.remove(made.batch);
+
+    expect(gone.kept).toEqual([expect.objectContaining({ table: 'songs', id: song.id })]);
+    expect(gone.deleted).toBe(gone.rows - 1);
+    // The real request and the one song it needs are still there.
+    expect(db.prepare("SELECT COUNT(*) AS n FROM song_requests WHERE requester_name = 'A Real Member'").get().n).toBe(1);
+    expect(db.prepare('SELECT title FROM songs').all()).toEqual([{ title: song.title }]);
+    // Everything else the batch made is gone.
+    expect(db.prepare('SELECT COUNT(*) AS n FROM song_services').get().n).toBe(0);
+    // The batch stays listed, holding only what was kept, so it can be
+    // removed later once nothing uses it.
+    expect(seed.batches()).toEqual([expect.objectContaining({ id: made.batch, rows: 1 })]);
+
+    db.prepare('DELETE FROM song_requests').run();
+    const later = seed.remove(made.batch);
+    expect(later).toMatchObject({ rows: 1, deleted: 1, kept: [] });
+    expect(seed.batches()).toEqual([]);
+  });
+
+  test('real attendance marked with a sample status keeps that status', () => {
+    const made = seed.generate({ generators: ['directory', 'member-attendance'], scale: 1 });
+    const status = db.prepare(`
+      SELECT a.id FROM attendance_statuses a
+        JOIN seed_records r ON r.table_name = 'attendance_statuses' AND r.row_id = a.id AND r.batch = ?
+       LIMIT 1`).get(made.batch);
+    const { lastInsertRowid: person } = db.prepare("INSERT INTO directory (name) VALUES ('A Real Member')").run();
+    db.prepare("INSERT INTO member_attendance (person_id, date, service, status_id) VALUES (?, '2026-10-04', 'Sunday AM Worship', ?)")
+      .run(person, status.id);
+
+    const gone = seed.remove(made.batch);
+
+    expect(gone.kept.map(k => [k.table, k.id])).toEqual([['attendance_statuses', status.id]]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM member_attendance').get().n).toBe(1);
+    expect(db.prepare("SELECT name FROM directory").all()).toEqual([{ name: 'A Real Member' }]);
+  });
+});
+
 // ─── It has to speak the site's own vocabulary ────────────────────────────────
 //
 // Sample data that says "song-leader" where the site says "Song Leader" is

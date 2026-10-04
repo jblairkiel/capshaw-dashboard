@@ -34,6 +34,15 @@ function when(raw) {
   return `${Number(month)}/${Number(day)} at ${hour}:${minute}`;
 }
 
+// "song_requests" → "song request" / "song requests", for the kept-rows note.
+function noun(table, count) {
+  const words = String(table).replace(/_/g, ' ');
+  if (count !== 1) return words;
+  if (/ies$/.test(words)) return words.replace(/ies$/, 'y');
+  if (/uses$/.test(words)) return words.replace(/es$/, '');
+  return words.replace(/(?<!s)s$/, '');
+}
+
 export default function SampleDataPanel() {
   const [catalogue, setCatalogue] = useState([]);
   const [notFilled, setNotFilled] = useState({});
@@ -44,6 +53,9 @@ export default function SampleDataPanel() {
   const [busy, setBusy]           = useState('');
   const [error, setError]         = useState('');
   const [message, setMessage]     = useState('');
+  // Sample rows real records still use (a sample song in a real service plan),
+  // which removing the batch keeps rather than failing or taking the real row.
+  const [kept, setKept]           = useState([]);
   const [loading, setLoading]     = useState(true);
   const [confirming, setConfirming] = useState('');
 
@@ -81,12 +93,13 @@ export default function SampleDataPanel() {
   }
 
   async function removeBatch(id) {
-    setBusy(id); setError(''); setMessage('');
+    setBusy(id); setError(''); setMessage(''); setKept([]);
     try {
       const json = await send(`${API}/${encodeURIComponent(id)}`, { method: 'DELETE' });
       setBatches(json.batches);
       setConfirming('');
       setMessage(`Removed ${json.deleted} rows. Nothing else was touched.`);
+      setKept(json.kept || []);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -118,6 +131,23 @@ export default function SampleDataPanel() {
 
       {error && (
         <p className="px-4 py-2.5 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">{error}</p>
+      )}
+      {kept.length > 0 && (
+        <div role="status" className="px-4 py-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900 space-y-1">
+          <p>
+            <strong>{kept.length} sample {kept.length === 1 ? 'row was' : 'rows were'} kept</strong> because real records
+            use {kept.length === 1 ? 'it' : 'them'}. Nothing real was deleted. Change those records to use something else,
+            then remove the batch again to take {kept.length === 1 ? 'it' : 'them'} too.
+          </p>
+          <ul className="list-disc pl-5">
+            {kept.map(k => (
+              <li key={`${k.table}:${k.id}`}>
+                {noun(k.table, 1)}{k.label ? ` “${k.label}”` : ''}
+                {k.usedBy?.length > 0 && <> — used by {k.usedBy.map(u => `${u.rows} ${noun(u.table, u.rows)}`).join(', ')}</>}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       {message && (
         <p className="px-4 py-2.5 rounded-lg bg-emerald-50 border border-emerald-200 text-sm text-emerald-800">{message}</p>

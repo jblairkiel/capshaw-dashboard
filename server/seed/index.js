@@ -194,30 +194,62 @@ function countFor(batch) {
 // Newest first, so a row something else points at goes after the thing that
 // points at it. A row already gone — removed by hand, or taken by a cascade
 // when its parent went — is not an error: the point is that it is not there.
+//
+// On a live site people use the portal while sample data is in it: a song
+// leader picks a sample song, somebody marks attendance with a sample status.
+// The database refuses to delete a row a real one still points at, and that
+// refusal must neither abort the whole removal nor be got round by deleting
+// the real row. So such a row is kept, said so, and left in the batch: once
+// nothing uses it any more, removing the batch again takes it.
 function remove(batch) {
   const known = new Set(schemaTables());
 
   const run = db.transaction(() => {
     const rows = db.prepare(
-      'SELECT id, table_name, row_id FROM seed_records WHERE batch = ? ORDER BY id DESC'
+      'SELECT id, table_name, row_id, label FROM seed_records WHERE batch = ? ORDER BY id DESC'
     ).all(batch);
 
     let deleted = 0;
+    const kept = [];
+    const forget = db.prepare('DELETE FROM seed_records WHERE id = ?');
     for (const row of rows) {
       const name = [...known].find(t => t === row.table_name);
-      if (!name) continue;
+      if (!name) { forget.run(row.id); continue; }
       // By rowid rather than by id: not every table has an id column — a join
       // table keyed on two columns has none — and for the ones that do, the id
       // is the rowid. One statement then works for every shape of table.
-      deleted += db.prepare(`DELETE FROM "${name}" WHERE rowid = ?`).run(row.row_id).changes;
+      try {
+        deleted += db.prepare(`DELETE FROM "${name}" WHERE rowid = ?`).run(row.row_id).changes;
+        forget.run(row.id);
+      } catch (err) {
+        if (err.code !== 'SQLITE_CONSTRAINT_FOREIGNKEY') throw err;
+        // Only this one statement is undone; the rest of the removal goes on.
+        kept.push({ table: name, id: row.row_id, label: row.label || '', usedBy: usedBy(name, row.row_id) });
+      }
     }
 
-    db.prepare('DELETE FROM seed_records WHERE batch = ?').run(batch);
-    db.prepare('DELETE FROM seed_batches WHERE id = ?').run(batch);
-    return { rows: rows.length, deleted };
+    if (!kept.length) db.prepare('DELETE FROM seed_batches WHERE id = ?').run(batch);
+    return { rows: rows.length, deleted, kept };
   });
 
   return run();
+}
+
+// What still points at a row, as "2 song requests"-style counts per table, so
+// the person removing sample data can be told why something stayed.
+function usedBy(table, rowId) {
+  const uses = [];
+  for (const other of schemaTables()) {
+    for (const fk of db.prepare(`PRAGMA foreign_key_list("${other}")`).all()) {
+      if (fk.table !== table) continue;
+      const target = fk.to || 'rowid';
+      const n = db.prepare(
+        `SELECT COUNT(*) AS n FROM "${other}" WHERE "${fk.from}" = (SELECT "${target}" FROM "${table}" WHERE rowid = ?)`
+      ).get(rowId).n;
+      if (n) uses.push({ table: other, rows: n });
+    }
+  }
+  return uses;
 }
 
 // ─── What is there ────────────────────────────────────────────────────────────
