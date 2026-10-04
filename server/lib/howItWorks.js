@@ -55,7 +55,7 @@ const SECTIONS = [
       { p: 'The member portal is a private website for the Capshaw church family. Everything in it is behind sign-in: nobody outside the congregation can see the directory, the schedule or anything else here.' },
       { p: 'You can sign in with **Google**, **Facebook**, or an **email address and a password**. A new account has to be approved by the church office before it can see anything. If you registered with an email address, you will first get an email asking you to confirm it.' },
       { chart: flow('Getting an account', ['You sign up', 'You confirm your email', 'The office approves you', 'You can sign in']) },
-      { p: 'The menu across the top groups the pages: **Worship**, **Our Church Family**, **Grow** and **My Church**. On a phone, the same menu opens from the button at the top of the screen. Every page works on a phone; there is nothing to install.' },
+      { p: 'The menu across the top groups the pages: **Worship**, **Our Church Family**, **Grow** and **My Church**. Whoever looks after part of the site also gets **Church Office**, with the pages for what they look after, and admins get **Admin** as well. On a phone, the same menu opens from the button at the top of the screen. Every page works on a phone; there is nothing to install.' },
       { list: [
         '**My Church → My Household & Preferences** — keep your own details current (and your household\'s), and say which worship jobs you are glad to do, willing to do, or would rather not.',
         '**My Church → My Inbox** — anything waiting on you, such as a guest to follow up with, in one list.',
@@ -217,7 +217,7 @@ const SECTIONS = [
   {
     id: 'admin-accounts', title: 'Accounts and access', audience: 'admins',
     blocks: [
-      { p: '**Church Office → Members & Access** is where new accounts wait. Approving one lets them in and links them to their directory entry. From the same page, give each person only the areas they look after — the songs, the guests, the counters\' contributions — rather than making them an admin.' },
+      { p: '**Admin → Members & Access** is where new accounts wait. Approving one lets them in and links them to their directory entry. From the same page, give each person only the areas they look after — the songs, the guests, the counters\' contributions — rather than making them an admin.' },
       { steps: [
         'Open the waiting account and check it is somebody you know.',
         'Approve it, and match it to the right directory entry.',
@@ -278,10 +278,10 @@ const SECTIONS = [
   {
     id: 'admin-history', title: 'Action History, Church Records and Bug Reports', audience: 'admins',
     blocks: [
-      { p: '**Church Office → Action History** is every change anybody has made, with who, when, and the before and after. Filter it by area, by what happened, by who, or search it.' },
-      { p: '**Church Office → Church Records** edits any table directly, and its **Sample Data** tab fills the site with made-up records to look at — and takes exactly those back out again, touching nothing real.' },
+      { p: '**Admin → Action History** is every change anybody has made, with who, when, and the before and after. Filter it by area, by what happened, by who, or search it.' },
+      { p: '**Admin → Church Records** edits any table directly, and its **Sample Data** tab fills the site with made-up records to look at — and takes exactly those back out again, touching nothing real.' },
       { note: 'Church Records edits records directly. Prefer the page a record belongs to, where the checks are.' },
-      { p: '**Church Office → Bug Reports** is every problem reported, with the page it happened on and any screenshot. Move each through open, in progress, resolved or won\'t fix; the person who reported it is told.' },
+      { p: '**Admin → Bug Reports** is every problem reported, with the page it happened on and any screenshot. Move each through open, in progress, resolved or won\'t fix; the person who reported it is told.' },
     ],
   },
 ];

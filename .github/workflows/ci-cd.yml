@@ -49,11 +49,16 @@ jobs:
       # in `npm audit` output locally and in Dependabot PRs; they don't fail
       # the build, so an advisory in an unrelated dev tool can't hold every
       # PR hostage.
+      #
+      # scripts/audit.js is `npm audit --audit-level=high` plus a reviewed,
+      # expiring allowlist (scripts/audit-allowlist.json) for an advisory in a
+      # build or test tool with no fix short of a major upgrade. An advisory
+      # that reaches the production tree fails whatever the list says.
       - name: Security audit (root)
-        run: npm audit --audit-level=high
+        run: node scripts/audit.js
 
       - name: Security audit (client)
-        run: cd client && npm audit --audit-level=high
+        run: node scripts/audit.js client
 
       # ── Coverage reporting ───────────────────────────────────────────────────
       # Runs even if a test step above failed, so a coverage report is still

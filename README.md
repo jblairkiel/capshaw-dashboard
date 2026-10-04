@@ -201,7 +201,7 @@ unchanged.
 
 ### Handing an area out
 
-New sign-ins land on `pending`. An admin lets them in from **Church Office →
+New sign-ins land on `pending`. An admin lets them in from **Admin →
 Members & Access**, with the **Approve** button in the grid or from the
 person's detail panel; areas can be ticked in the same step or granted later
 from the detail panel.
@@ -296,7 +296,7 @@ An admin cannot see what a member sees: they hold every area, so every page is
 full and every button is there. "The Add button is missing for me" and "that
 page is empty" are the two hardest reports to answer from an admin account.
 
-So an admin can borrow one member's view of the site, from **Church Office →
+So an admin can borrow one member's view of the site, from **Admin →
 Members & Access** (the **View as** button on a row, or inside the detail
 panel). Every page then renders exactly as it does for that person, because
 every request really is answered as them.
@@ -498,7 +498,7 @@ would expect.
 
 That list is **an admin's to keep**, not the attendance area's: every record has
 to agree on it, so it is not one page's to change. Admins reach it from
-**Attendance → Service types** (and, like every other table, from Church Office
+**Attendance → Service types** (and, like every other table, from Admin
 → Church Records).
 
 | Action | What it does |
@@ -753,7 +753,7 @@ never typed in: which page they were on, the full URL, and their browser.
 
 Triage is admin-only. There is no area for it — it is not one part of the
 site to look after, it is the whole site, so it stays with whoever already
-holds everything else. **Church Office → Bug Reports** lists every report,
+holds everything else. **Admin → Bug Reports** lists every report,
 filterable by status, each one opening to its full description, context and
 screenshot, with a status to move it through:
 
@@ -891,7 +891,7 @@ Diagnose button reports how many, and downloading them is a small change.
 ### Diagnosing a section that looks empty
 
 A parse that silently matches nothing looks exactly like a genuinely empty
-page. **Church Office → Church Records → Scrape Status** has a **Diagnose** button on every
+page. **Admin → Church Records → Scrape Status** has a **Diagnose** button on every
 section: it re-fetches that page and reports the HTTP status, size, every table
 it found with a preview of the first rows, and what the parser made of them.
 It distinguishes:
@@ -1030,7 +1030,7 @@ and notes are both shown, separately, on the guest's details.
 used to look exactly like a section that is genuinely empty: the previous rows
 were kept and the scrape reported success. It now says
 `visitors: the page loaded but nothing could be read from it`, which shows up
-in Church Office → Church Records alongside the other scrape warnings.
+in Admin → Church Records alongside the other scrape warnings.
 
 ---
 
