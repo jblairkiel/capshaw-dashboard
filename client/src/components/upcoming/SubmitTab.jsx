@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { SongPicker, StatusBadge } from './shared';
+import { SongPicker, StatusBadge, CopyLinkButton } from './shared';
 import { call, dayLabel } from './api';
 import DateInput from '../DateInput';
 
@@ -71,8 +71,13 @@ function ItemRow({ item, index, count, editable, onChange, onMove, onRemove }) {
 }
 
 function OccasionPicker({ overview, selection, onSelect }) {
-  const known = overview.upcoming.some(u => u.date === selection?.date && u.service === selection?.service);
-  const [other, setOther] = useState(!!selection && !known);
+  // The list holds the next two weeks. A service further off — opened from its
+  // direct link, say — is added to it, so it shows as chosen rather than as
+  // "another date or service".
+  const listed = overview.upcoming.some(u => u.date === selection?.date && u.service === selection?.service);
+  const extra = !listed && selection?.date && selection?.service && overview.services.some(s => s.name === selection.service)
+    ? selection : null;
+  const [other, setOther] = useState(!!selection && !listed && !extra);
   const value = other ? 'other' : selection ? `${selection.date}|${selection.service}` : '';
 
   return (
@@ -90,6 +95,11 @@ function OccasionPicker({ overview, selection, onSelect }) {
           className="mt-1 w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-church-navy"
         >
           <option value="">Choose a service…</option>
+          {extra && !other && (
+            <option value={`${extra.date}|${extra.service}`}>
+              {dayLabel(extra.date, { weekday: 'short', month: 'short', day: 'numeric' })} — {extra.service}
+            </option>
+          )}
           {overview.upcoming.map(u => (
             <option key={`${u.date}|${u.service}`} value={`${u.date}|${u.service}`}>
               {dayLabel(u.date, { weekday: 'short', month: 'short', day: 'numeric' })} — {u.service}
@@ -235,6 +245,7 @@ export default function SubmitTab({ overview, selection, onSelect, onChanged }) 
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <StatusBadge status={plan?.status} />
             {plan && <span className="text-gray-500">Submitted by {plan.submittedByName || 'the song leader'}{plan.confirmedByName ? ` · confirmed by ${plan.confirmedByName}` : ''}</span>}
+            <CopyLinkButton date={selection.date} service={selection.service} className="sm:ml-auto" />
           </div>
         )}
         {loaded && !editable && (

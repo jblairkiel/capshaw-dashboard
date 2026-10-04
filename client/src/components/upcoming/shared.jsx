@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { call, songLabel, STATUS } from './api';
+import { call, songLabel, STATUS, serviceLink } from './api';
 
 // ─── What every tab of the Upcoming Service page shares ───────────────────────
 //
@@ -10,6 +10,46 @@ import { call, songLabel, STATUS } from './api';
 export function StatusBadge({ status }) {
   const s = STATUS[status || 'none'];
   return <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${s.tone}`}>{s.label}</span>;
+}
+
+// ─── A service's direct link ──────────────────────────────────────────────────
+//
+// Copies the link that opens this one service on Submit a Service, to text or
+// email to a song leader. Where the browser will not let the page write to the
+// clipboard (an older phone, a page not served over https), the link is shown
+// instead, ready to be selected and copied by hand.
+
+export function CopyLinkButton({ date, service, className = '' }) {
+  const [state, setState] = useState('');   // '' | 'copied' | 'shown'
+  const url = serviceLink(date, service);
+
+  useEffect(() => {
+    if (state !== 'copied') return undefined;
+    const t = setTimeout(() => setState(''), 2500);
+    return () => clearTimeout(t);
+  }, [state]);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(url);
+      setState('copied');
+    } catch {
+      setState('shown');
+    }
+  }
+
+  return (
+    <span className={`inline-flex flex-wrap items-center gap-2 ${className}`}>
+      <button type="button" onClick={copy} aria-label={`Copy the link to ${service}, ${date}`}
+        className="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-church-navy hover:text-church-navy">
+        {state === 'copied' ? 'Link copied' : 'Copy link'}
+      </button>
+      {state === 'shown' && (
+        <input readOnly value={url} aria-label="Link to this service" onFocus={e => e.target.select()} autoFocus
+          className="min-w-0 w-72 max-w-full border border-gray-300 rounded-lg px-2 py-1 text-xs text-gray-700" />
+      )}
+    </span>
+  );
 }
 
 // ─── Adding a song ────────────────────────────────────────────────────────────

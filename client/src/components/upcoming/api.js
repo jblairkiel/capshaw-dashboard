@@ -25,3 +25,9 @@ export const STATUS = {
   submitted: { label: 'Waiting to be confirmed',  tone: 'bg-amber-100 text-amber-800' },
   confirmed: { label: 'Confirmed',                tone: 'bg-emerald-100 text-emerald-800' },
 };
+
+// The direct link to one service on Submit a Service — the same link the song
+// leader's reminder email carries (server/mail/worshipReminders.js), read back
+// by App.jsx on load.
+export const serviceLink = (date, service, origin = window.location.origin) =>
+  `${origin}/?${new URLSearchParams({ page: 'upcoming', tab: 'service', date, service })}`;
