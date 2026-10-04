@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { toCsv, downloadCsv } from '../lib/csv';
 import { hasArea } from '../lib/roles';
 import Dialog from './Dialog';
+import DateInput from './DateInput';
 
 // The counter's weekly total — one number a week, never a per-giver ledger.
 // A single week goes through /api/records/contributions, which gates writes on
@@ -230,8 +231,7 @@ function ContributionForm({ record, onClose, onSaved }) {
       <form onSubmit={submit} className="space-y-3">
         <label className="block">
           <span className={label}>Week of</span>
-          <input autoFocus required value={form.date} placeholder="2026-06-07"
-            onChange={e => set('date', e.target.value)} className={field} />
+          <DateInput autoFocus required value={form.date} onChange={v => set('date', v)} className={field} />
         </label>
         <label className="block">
           <span className={label}>Total contribution</span>

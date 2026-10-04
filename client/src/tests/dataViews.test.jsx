@@ -352,7 +352,8 @@ describe('VisitorTracker', () => {
     type(within(dialog).getByLabelText(/^Name/), 'Dana Webb');
     type(within(dialog).getByLabelText(/^Phone/), '256-555-0170');
     type(within(dialog).getByLabelText(/^Our notes/), 'Neighbour of the Carters');
-    type(within(dialog).getByLabelText(/^First visit/), '05/04/25');
+    // The picker speaks ISO; the visit is still saved as MM/DD/YY.
+    type(within(dialog).getByLabelText(/^First visit/), '2025-05-04');
     fireEvent.click(within(dialog).getByRole('button', { name: /add guest/i }));
 
     await waitFor(() => {
@@ -669,7 +670,8 @@ describe('ServingSchedule', () => {
     fireEvent.click(await screen.findByRole('button', { name: /build next month/i }));
 
     const dialog = screen.getByRole('dialog');
-    type(within(dialog).getByLabelText(/^Month/), 'June 2026');
+    fireEvent.change(within(dialog).getByLabelText('Month: month'), { target: { value: '5' } });
+    fireEvent.change(within(dialog).getByLabelText('Month: year'), { target: { value: '2026' } });
     fireEvent.click(within(dialog).getByLabelText('Wednesday'));    // leave the Sundays on
     fireEvent.click(within(dialog).getByRole('button', { name: /build the month/i }));
 
