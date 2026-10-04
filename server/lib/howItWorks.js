@@ -119,6 +119,14 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'worship-participation', title: 'Worship participation', audience: 'everyone',
+    blocks: [
+      { p: '**Church Office → Worship Participation** is for whoever keeps the serving schedule (and admins); nobody else sees it. Nothing has to be entered on it: the serving schedule, as it was last left, is taken to be what happened. When somebody swaps or drops out, change the schedule and the record follows.' },
+      { p: 'The **Analysis** tab shows, for the last few months: who is carrying the load and in which jobs, how many different men have done each job, the jobs never filled, and the men who said they would do a job and have not been used for it. Choose a man to see his own record, what he is down for next, and what he said beside what he has done.' },
+      { p: 'The **Preferences** tab lists every man against every job, with what he has said (glad to, willing, rather not, or nothing yet) and how often he has served it. Above it, how each job is covered; a job with fewer than three men glad or willing is marked thin. Men set their own on **My Household & Preferences**; the schedule keeper can record them on the **Service Roster**.' },
+    ],
+  },
+  {
     id: 'guests', title: 'Guests and following up', audience: 'everyone',
     blocks: [
       { p: '**Our Church Family → Guests** lists everyone who has visited, each visit, who invited them, and whether anybody has been in touch yet. The **All follow-ups** tab arranges them by where that stands: nobody has reached out, someone is on it, reached, or never reached. **Follow Up**, at the top of the page, is where a follow-up is started or worked through.' },
