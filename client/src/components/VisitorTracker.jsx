@@ -498,6 +498,30 @@ function GuestDetail({ guest, canManage, user, onClose, onChanged, onEdit, onFol
         {/* Visits */}
         <section>
           <h4 className="text-sm font-semibold text-church-navy mb-2">Visit history</h4>
+          {/* Recording a visit comes first: it is what the section is opened for. */}
+          {canManage && (
+            <form onSubmit={addVisit} className="flex items-end gap-2 mb-3 flex-wrap">
+              <label className="block">
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Date</span>
+                <input
+                  value={visit.date}
+                  placeholder="06/07/26"
+                  onChange={e => setVisit(v => ({ ...v, date: e.target.value }))}
+                  className="mt-1 block w-32 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Service</span>
+                <input
+                  value={visit.service}
+                  placeholder="Sun AM"
+                  onChange={e => setVisit(v => ({ ...v, service: e.target.value }))}
+                  className="mt-1 block w-36 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold"
+                />
+              </label>
+              <button type="submit" disabled={busy} className="btn-primary text-sm disabled:opacity-50">Record a visit</button>
+            </form>
+          )}
           {guest.visits.length > 0 ? (
             <table className="w-full text-sm">
               <thead>
@@ -532,29 +556,6 @@ function GuestDetail({ guest, canManage, user, onClose, onChanged, onEdit, onFol
             <p className="text-sm text-gray-400">No visits recorded yet.</p>
           )}
 
-          {canManage && (
-            <form onSubmit={addVisit} className="flex items-end gap-2 mt-3 flex-wrap">
-              <label className="block">
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Date</span>
-                <input
-                  value={visit.date}
-                  placeholder="06/07/26"
-                  onChange={e => setVisit(v => ({ ...v, date: e.target.value }))}
-                  className="mt-1 block w-32 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold"
-                />
-              </label>
-              <label className="block">
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Service</span>
-                <input
-                  value={visit.service}
-                  placeholder="Sun AM"
-                  onChange={e => setVisit(v => ({ ...v, service: e.target.value }))}
-                  className="mt-1 block w-36 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold"
-                />
-              </label>
-              <button type="submit" disabled={busy} className="btn-primary text-sm disabled:opacity-50">Record a visit</button>
-            </form>
-          )}
         </section>
 
         {error && <p className="text-sm text-red-600">{error}</p>}
@@ -777,16 +778,21 @@ export default function VisitorTracker({ user }) {
 
   return (
     <div className="space-y-4">
+      {/* The heading and both buttons share one row, so the page starts
+          straight away rather than under a row of its own for Follow-ups. */}
       <div className="flex items-end justify-between flex-wrap gap-3">
         <h2 className="section-heading mb-0">Our Guests</h2>
-        {canManage && (
-          <button onClick={() => setEditing({})} className="btn-primary text-sm">Add a guest</button>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          <WorkflowDialogButton page="visitors" user={user} label="Follow Up" title="Guest follow-ups" />
+          {canManage && (
+            <button onClick={() => setEditing({})} className="btn-primary text-sm">Add a guest</button>
+          )}
+        </div>
       </div>
 
       {/* The same guests, two ways of reading them */}
       <div role="tablist" aria-label="How to read the guests" className="flex items-center gap-1 border-b border-gray-200">
-        {[['guests', 'Guests'], ['follow-ups', 'Follow-ups']].map(([id, label]) => (
+        {[['guests', 'Guests'], ['follow-ups', 'All follow-ups']].map(([id, label]) => (
           <button
             key={id}
             role="tab"

@@ -469,12 +469,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       )}
       {!updating && activeTab === 'visitors' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
-          <div className="space-y-4">
-            <div className="flex justify-end">
-              <WorkflowDialogButton page="visitors" user={user} label="Follow-ups" title="Guest follow-ups" />
-            </div>
-            <VisitorTracker user={user} />
-          </div>
+          <VisitorTracker user={user} />
         </main>
       )}
       {!updating && activeTab === 'leadership' && (
