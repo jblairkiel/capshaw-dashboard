@@ -236,8 +236,8 @@ router.delete('/sample-data/:batch', (req, res) => {
 
     actionLog.record(req.user, {
       area: 'admin', action: 'delete', entity: 'sample data', entityId: batch,
-      summary: `Removed ${gone.deleted} rows of sample data (${batch})`,
-      details: { batch, tracked: gone.rows, deleted: gone.deleted },
+      summary: `Removed ${gone.deleted} rows of sample data (${batch})${gone.kept.length ? `; kept ${gone.kept.length} that real records still use` : ''}`,
+      details: { batch, tracked: gone.rows, deleted: gone.deleted, kept: gone.kept },
     });
 
     res.json({ success: true, ...gone, batches: seed.batches() });

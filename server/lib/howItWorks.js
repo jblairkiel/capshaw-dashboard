@@ -288,7 +288,7 @@ const SECTIONS = [
     id: 'admin-history', title: 'Action History, Church Records and Bug Reports', audience: 'admins',
     blocks: [
       { p: '**Admin → Action History** is every change anybody has made, with who, when, and the before and after. Filter it by area, by what happened, by who, or search it.' },
-      { p: '**Admin → Church Records** edits any table directly, and its **Sample Data** tab fills the site with made-up records to look at — and takes exactly those back out again, touching nothing real.' },
+      { p: '**Admin → Church Records** edits any table directly, and its **Sample Data** tab fills the site with made-up records to look at — and takes exactly those back out again, touching nothing real. If something real has come to use a sample record — a sample song picked for a real service, say — that one record is kept and listed, and removing the batch again takes it once nothing uses it.' },
       { note: 'Church Records edits records directly. Prefer the page a record belongs to, where the checks are.' },
       { p: '**Admin → Bug Reports** is every problem reported, with the page it happened on and any screenshot. Move each through open, in progress, resolved or won\'t fix; the person who reported it is told.' },
     ],
