@@ -119,6 +119,18 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'worship-participation', title: 'Worship participation', audience: 'everyone',
+    blocks: [
+      { p: '**Church Office → Worship Participation** is for whoever keeps the serving schedule (and admins); nobody else sees it. It records who actually served, which is not always who was on the schedule.' },
+      { steps: [
+        'After a service, open it on the **Record** tab. Every job on the schedule for it is listed with the man who was down for it.',
+        'Mark each one **Served**, **Someone else** (and say who), or **Nobody**. If it all went to plan, **It went as scheduled** marks the rest at once.',
+      ] },
+      { p: 'The **Analysis** tab shows, for the last few months: who is carrying the load and in which jobs, how many different men have done each job, who stepped in for somebody and who missed, and the men who said they would do a job and have not been used for it. Choose a man to see his own record beside what he said he would do.' },
+      { note: 'A service nobody has checked is counted as served by whoever was scheduled, and shown as "not checked". Tick "Checked services only" to leave those out.' },
+    ],
+  },
+  {
     id: 'guests', title: 'Guests and following up', audience: 'everyone',
     blocks: [
       { p: '**Our Church Family → Guests** lists everyone who has visited, each visit, who invited them, and whether anybody has been in touch yet. The **All follow-ups** tab arranges them by where that stands: nobody has reached out, someone is on it, reached, or never reached. **Follow Up**, at the top of the page, is where a follow-up is started or worked through.' },

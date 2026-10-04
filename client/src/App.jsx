@@ -34,6 +34,7 @@ import HowItWorksView from './components/HowItWorksView';
 import MemberMatchView from './components/MemberMatchView';
 import ContributionsView from './components/ContributionsView';
 import MemberAttendanceView from './components/MemberAttendanceView';
+import WorshipParticipationView from './components/WorshipParticipationView';
 import { hasWriteAccess, isAdmin, hasArea } from './lib/roles';
 
 const API = '/api/members';
@@ -95,6 +96,7 @@ const OFFICE_ITEMS = [
   { id: 'record-keeping',    label: 'Record Keeping',    when: user => hasArea(user, 'records') },
   { id: 'member-attendance', label: 'Member Attendance', when: user => hasArea(user, 'member-attendance') },
   { id: 'service-roster',    label: 'Service Roster',    when: user => hasArea(user, 'serving-schedule') },
+  { id: 'participation',     label: 'Worship Participation', when: user => hasArea(user, 'serving-schedule') },
   { id: 'directory',         label: 'Member Directory',  when: user => hasArea(user, 'directory') },
   { id: 'bulletin',          label: 'Weekly Newsletter', when: user => hasArea(user, 'bulletin') },
   { id: 'mail-groups',       label: 'Email Groups',      when: user => hasArea(user, 'mail-groups') },
@@ -178,7 +180,7 @@ const STANDALONE_TABS = new Set([
   'bible-class', 'announcements', 'upcoming', 'calendar', 'users', 'database',
   'directory', 'profile', 'inbox', 'mail-groups', 'emails', 'record-keeping', 'livestreams',
   'assignments', 'visitors', 'leadership', 'action-history','service-roster', 'bulletin',
-  'groups', 'bug-reports', 'how-it-works', 'member-match', 'contributions', 'member-attendance',
+  'groups', 'bug-reports', 'how-it-works', 'member-match', 'contributions', 'member-attendance', 'participation',
 ]);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
@@ -550,6 +552,11 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       {!updating && activeTab === 'member-attendance' && hasArea(user, 'member-attendance') && (
         <main className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
           <MemberAttendanceView />
+        </main>
+      )}
+      {!updating && activeTab === 'participation' && hasArea(user, 'serving-schedule') && (
+        <main className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
+          <WorshipParticipationView />
         </main>
       )}
       {!updating && activeTab === 'directory' && hasArea(user, 'directory') && (
