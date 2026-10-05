@@ -65,7 +65,7 @@ export const AREAS = [
   {
     id:          'serving-schedule',
     label:       'Serving Schedule',
-    page:        'Serving Schedule',
+    page:        'Service Roster',
     description: 'Build next month\'s worship jobs, fill or clear any slot, record what each man will volunteer for and the days he is away, and see who has served and what each man has said he will do.',
     tone:        'bg-violet-100 text-violet-800',
   },

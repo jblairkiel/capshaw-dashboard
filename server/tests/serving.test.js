@@ -40,7 +40,7 @@ function slotsIn(month) {
 let KEEPER, MAN, OTHER_MAN, WOMAN, UNLINKED, man, otherMan, woman;
 
 beforeEach(() => {
-  for (const t of ['action_log', 'job_assignments', 'service_jobs', 'worship_preferences', 'worship_profile', 'user_areas', 'users', 'directory']) {
+  for (const t of ['notifications', 'mail_outbox', 'workflow_events', 'workflow_tasks', 'workflow_participants', 'workflow_instances', 'action_log', 'job_assignments', 'service_jobs', 'worship_preferences', 'worship_profile', 'user_areas', 'users', 'directory']) {
     db.prepare(`DELETE FROM ${t}`).run();
   }
 
@@ -218,46 +218,99 @@ describe('filling a slot by hand', () => {
 
 // ─── Taking your own name off ──────────────────────────────────────────────────
 
-describe('taking your own name off a slot', () => {
+describe('asking to be replaced', () => {
   let slot;
+  const ask = (user, body = { reason: 'Out of town that weekend' }) =>
+    request(buildApp(user)).post(`/api/serving/assignments/${slot.id}/replacement`).send(body);
+  const nameOn = () => db.prepare('SELECT name FROM job_assignments WHERE id = ?').get(slot.id).name;
+  const task = () => db.prepare("SELECT * FROM workflow_tasks WHERE status = 'pending' ORDER BY id DESC").get();
+  const instance = () => db.prepare("SELECT * FROM workflow_instances WHERE definition_id = 'serving-replacement' ORDER BY id DESC").get();
+  const engine = () => require('../workflows/engine');
 
   beforeEach(async () => {
     await request(buildApp(KEEPER)).post('/api/serving/months').send({ month: 'June 2026', services: ['Sunday Worship'] });
     slot = slotsIn('June 2026').find(s => s.job === 'Song Leader');
-    // Down for it the way a generated or hand-filled slot would be — nobody
-    // signs themselves up any more.
     db.prepare('UPDATE job_assignments SET name = ? WHERE id = ?').run('Joe Carter', slot.id);
   });
 
-  test('you may step back down from your own slot', async () => {
-    const res = await request(buildApp(MAN)).delete(`/api/serving/assignments/${slot.id}/signup`);
+  test('asking leaves your name on, and asks the schedule keeper by inbox, email and bell', async () => {
+    const res = await ask(MAN);
     expect(res.status).toBe(200);
-    expect(db.prepare('SELECT name FROM job_assignments WHERE id = ?').get(slot.id).name).toBe('');
+    expect(nameOn()).toBe('Joe Carter');
+
+    expect(task()).toMatchObject({ step_id: 'find-replacement', assignee_role: 'serving-schedule' });
+    expect(engine().inbox(KEEPER).map(t => t.title)).toEqual([`Replace Joe Carter: Song Leader, ${slot.date}, Sunday Worship`]);
+    expect(db.prepare("SELECT to_email, intended_for FROM mail_outbox WHERE context LIKE 'workflow:%:task:%'").all()
+      .map(r => r.intended_for || r.to_email)).toEqual(['cora@example.com']);
+    expect(db.prepare("SELECT user_id, kind, title, body FROM notifications").all()).toEqual([
+      { user_id: KEEPER.id, kind: 'serving-replacement-asked', title: `Joe Carter needs replacing: Song Leader, ${slot.date}, Sunday Worship`, body: 'Out of town that weekend' },
+    ]);
+    // The slot says it has been asked about.
+    const shown = res.body.assignments.find(a => a.id === slot.id);
+    expect(shown.replacement).toMatchObject({ askedBy: 'Joe', reason: 'Out of town that weekend' });
+    expect(db.prepare("SELECT summary FROM action_log WHERE entity = 'serving replacement'").get().summary)
+      .toBe(`Joe asked for Joe Carter to be replaced on Song Leader, ${slot.date}, Sunday Worship`);
   });
 
-  test('you may not take somebody else off, but the schedule keeper may', async () => {
-    const refused = await request(buildApp(OTHER_MAN)).delete(`/api/serving/assignments/${slot.id}/signup`);
-    expect(refused.status).toBe(403);
-    expect(db.prepare('SELECT name FROM job_assignments WHERE id = ?').get(slot.id).name).toBe('Joe Carter');
-
-    const cleared = await request(buildApp(KEEPER)).delete(`/api/serving/assignments/${slot.id}/signup`);
-    expect(cleared.status).toBe(200);
+  test('only for your own slot (or by the keeper), once, and never for an empty one', async () => {
+    expect((await ask(OTHER_MAN)).status).toBe(400);
+    expect((await ask(UNLINKED)).status).toBe(400);
+    expect((await ask(MAN)).status).toBe(200);
+    expect((await ask(MAN)).body.error).toMatch(/already been asked for/);
+    db.prepare("UPDATE job_assignments SET name = '' WHERE id = ?").run(slot.id);
+    const other = slotsIn('June 2026').find(s => s.job === 'Opening Prayer');
+    expect((await request(buildApp(KEEPER)).post(`/api/serving/assignments/${other.id}/replacement`).send({})).body.error).toMatch(/Nobody is down/);
   });
 
-  test('an account with no directory entry cannot claim a slot is theirs', async () => {
-    const res = await request(buildApp(UNLINKED)).delete(`/api/serving/assignments/${slot.id}/signup`);
-    expect(res.status).toBe(403);
-    expect(db.prepare('SELECT name FROM job_assignments WHERE id = ?').get(slot.id).name).toBe('Joe Carter');
+  test('the keeper says who is taking it, from the inbox: the slot changes and the asker is told', async () => {
+    await ask(MAN);
+    const done = engine().act({ taskId: task().id, actionId: 'replaced', note: 'Ned Poole', user: KEEPER });
+    expect(done.error).toBeUndefined();
+    expect(nameOn()).toBe('Ned Poole');
+    expect(instance()).toMatchObject({ status: 'completed', outcome: 'replaced' });
+    expect(db.prepare("SELECT title FROM notifications WHERE user_id = ?").get(MAN.id).title)
+      .toBe(`Ned Poole is taking Song Leader for you, ${slot.date}, Sunday Worship`);
+    expect(db.prepare("SELECT COUNT(*) n FROM mail_outbox WHERE context LIKE 'workflow:%:completed'").get().n).toBe(1);
   });
 
-  test('stepping down is recorded in the action history by name', async () => {
-    await request(buildApp(MAN)).delete(`/api/serving/assignments/${slot.id}/signup`);
+  test('or leaves it open, or keeps them on', async () => {
+    await ask(MAN);
+    engine().act({ taskId: task().id, actionId: 'leave-open', user: KEEPER });
+    expect(nameOn()).toBe('');
+    expect(instance().outcome).toBe('opened');
 
-    const entry = db.prepare('SELECT * FROM action_log ORDER BY id DESC').get();
-    expect(entry).toMatchObject({ area: 'serving-schedule', user_id: MAN.id });
-    expect(entry.summary).toMatch(/Joe Carter stepped down from Song Leader/);
+    db.prepare("UPDATE job_assignments SET name = 'Joe Carter' WHERE id = ?").run(slot.id);
+    await ask(MAN);
+    expect(engine().act({ taskId: task().id, actionId: 'keep', user: KEEPER }).error).toMatch(/needs a note/);
+    engine().act({ taskId: task().id, actionId: 'keep', note: 'Spoke to him — he can do it after all', user: KEEPER });
+    expect(nameOn()).toBe('Joe Carter');
+    expect(instance().outcome).toBe('kept');
+  });
+
+  test('changing the name on the slot closes the request too', async () => {
+    await ask(MAN);
+    await request(buildApp(KEEPER)).patch(`/api/serving/assignments/${slot.id}`).send({ name: 'Ned Poole' });
+    expect(instance()).toMatchObject({ status: 'completed', outcome: 'replaced' });
+    expect(task()).toBeUndefined();
+    const res = await request(buildApp(MAN)).get('/api/serving?month=June%202026');
+    expect(res.body.assignments.find(a => a.id === slot.id).replacement).toBeUndefined();
+  });
+
+  test('nobody can take a name off straight away any more', async () => {
+    expect((await request(buildApp(MAN)).delete(`/api/serving/assignments/${slot.id}/signup`)).status).toBe(404);
+    expect(nameOn()).toBe('Joe Carter');
+  });
+
+  test('it is not offered on the page\'s start form', async () => {
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => { req.user = KEEPER; next(); });
+    app.use('/api/workflows', require('../routes/workflows'));
+    const res = await request(app).get('/api/workflows/definitions?page=assignments');
+    expect(res.body.definitions.map(d => d.id)).toEqual(['worship-schedule']);
   });
 });
+
 
 // ─── The service roster ───────────────────────────────────────────────────────
 // What each man will volunteer for. He can say it himself on his profile; the

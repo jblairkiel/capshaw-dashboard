@@ -343,7 +343,7 @@ function inbox(user) {
       stepId:       row.step_id,
       stepTitle:    step?.title || row.step_id,
       instruction:  step?.instruction || '',
-      actions:      (step?.actions || []).map(a => ({ id: a.id, label: a.label, tone: a.tone || 'neutral', requiresNote: !!a.requiresNote })),
+      actions:      (step?.actions || []).map(a => ({ id: a.id, label: a.label, tone: a.tone || 'neutral', requiresNote: !!a.requiresNote, notePrompt: a.notePrompt || '' })),
       assignedRole: row.assignee_role,
       createdAt:    row.created_at,
     };
@@ -421,7 +421,7 @@ function list(user, { scope = 'mine', status = 'active', page = '' } = {}) {
       ...summary,
       myTaskId:  task.id,
       myActions: (definition?.steps?.[task.step_id]?.actions || [])
-        .map(a => ({ id: a.id, label: a.label, tone: a.tone || 'neutral', requiresNote: !!a.requiresNote })),
+        .map(a => ({ id: a.id, label: a.label, tone: a.tone || 'neutral', requiresNote: !!a.requiresNote, notePrompt: a.notePrompt || '' })),
     };
   });
 }
@@ -488,7 +488,7 @@ function detail(id, user) {
       id: myTask.id,
       stepId: myTask.step_id,
       actions: (definition?.steps?.[myTask.step_id]?.actions || [])
-        .map(a => ({ id: a.id, label: a.label, tone: a.tone || 'neutral', requiresNote: !!a.requiresNote })),
+        .map(a => ({ id: a.id, label: a.label, tone: a.tone || 'neutral', requiresNote: !!a.requiresNote, notePrompt: a.notePrompt || '' })),
     } : null,
   };
 }

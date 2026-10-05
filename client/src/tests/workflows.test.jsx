@@ -383,3 +383,16 @@ describe('WorkflowPanel', () => {
     expect(container).toBeEmptyDOMElement();
   });
 });
+
+describe('ActionBar', () => {
+  test('a note box asks the action\'s own question, and sends the answer', async () => {
+    const { ActionBar } = await import('../components/workflow/parts');
+    const onAct = vi.fn(() => Promise.resolve());
+    render(<ActionBar busy={false} onAct={onAct}
+      actions={[{ id: 'replaced', label: 'Someone else is taking it', tone: 'good', requiresNote: true, notePrompt: 'Who is taking it?' }]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Someone else is taking it' }));
+    fireEvent.change(screen.getByLabelText('Who is taking it?'), { target: { value: 'Ned Poole' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Someone else is taking it' }));
+    await waitFor(() => expect(onAct).toHaveBeenCalledWith('replaced', 'Ned Poole'));
+  });
+});

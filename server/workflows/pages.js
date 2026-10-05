@@ -5,7 +5,7 @@
 // send people back to where a task came from.
 
 const PAGES = [
-  { id: 'assignments', label: 'Job Assignments' },
+  { id: 'assignments', label: 'Service Roster' },
   { id: 'visitors',    label: 'Visitors' },
 ];
 

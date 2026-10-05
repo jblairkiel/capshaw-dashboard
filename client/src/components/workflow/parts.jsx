@@ -16,7 +16,7 @@ export function ActionBar({ actions, onAct, busy }) {
       <div className="space-y-2">
         <label className="block">
           <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-            {pending.label} — add a note
+            {pending.notePrompt || `${pending.label} — add a note`}
           </span>
           <textarea
             rows={2}
@@ -247,7 +247,8 @@ export function Detail({ detail, onAct, onBack, busy }) {
       {instance.preview?.rows?.length > 0 && (
         <div className="card">
           <h3 className="font-semibold text-church-navy text-sm mb-3">
-            Draft <span className="text-gray-400 font-normal">({instance.preview.rows.length} rows)</span>
+            {instance.preview.title || 'Draft'}
+            {instance.preview.rows.length > 1 && <span className="text-gray-400 font-normal"> ({instance.preview.rows.length} rows)</span>}
           </h3>
           <div className="overflow-x-auto max-h-96 overflow-y-auto">
             <table className="w-full text-sm">

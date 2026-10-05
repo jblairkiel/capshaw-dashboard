@@ -51,7 +51,7 @@ function mockRoster(members = MEMBERS) {
 
 async function renderRoster(members) {
   mockRoster(members);
-  render(<ServiceRosterView />);
+  render(<ServiceRosterView tab="roster" />);
   await screen.findByRole('button', { name: 'Details for Joe Carter' });
 }
 
@@ -146,7 +146,7 @@ describe('ServiceRosterView — the Details dialog', () => {
 
   test('opens a man who has said nothing and records a preference', async () => {
     const fetchMock = mockRoster();
-    render(<ServiceRosterView />);
+    render(<ServiceRosterView tab="roster" />);
     await screen.findByRole('button', { name: 'Details for Joe Carter' });
     await openDetails('Ned Poole');
 
@@ -179,7 +179,7 @@ describe('ServiceRosterView — the Details dialog', () => {
 
   test('blocking out days for a man posts them against him', async () => {
     const fetchMock = mockRoster();
-    render(<ServiceRosterView />);
+    render(<ServiceRosterView tab="roster" />);
     await screen.findByRole('button', { name: 'Details for Joe Carter' });
     await openDetails('Ned Poole');
 
@@ -224,7 +224,7 @@ describe('ServiceRosterView — when the server says no', () => {
     vi.stubGlobal('fetch', vi.fn(() =>
       Promise.resolve({ json: () => Promise.resolve({ success: false, error: 'Not your area' }) })
     ));
-    render(<ServiceRosterView />);
+    render(<ServiceRosterView tab="roster" />);
     expect(await screen.findByText('Not your area')).toBeInTheDocument();
   });
 });

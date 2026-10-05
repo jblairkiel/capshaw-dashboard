@@ -26,7 +26,7 @@ module.exports = {
   id:    'serving',
   label: 'Serving Schedule',
   area:  'serving-schedule',
-  page:  'Serving Schedule',
+  page:  'Service Roster → Scheduled',
   order: 50,
   describe: 'A month of worship jobs, filled from the directory, with some slots left open, and a few men away.',
   tables: ['job_assignments', 'job_blackouts'],
