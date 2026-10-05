@@ -143,6 +143,17 @@ function initSchema(db) {
     name    TEXT    NOT NULL DEFAULT ''
   );
 
+  -- The jobs each service needs on the Serving Schedule, as the schedule keeper
+  -- has set them: a regular roster ("Sunday Worship") or a special service by
+  -- its own name ("Gospel Meeting"). A service with no row uses the defaults
+  -- in server/workflows/scheduling.js. jobs is a JSON list, in order.
+  CREATE TABLE IF NOT EXISTS service_jobs (
+    service    TEXT    PRIMARY KEY,
+    jobs       TEXT    NOT NULL DEFAULT '[]',
+    updated_by TEXT    NOT NULL DEFAULT '',
+    updated_at TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS visitors (
     id   INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT    NOT NULL

@@ -21,12 +21,14 @@ const MONTHS = [
   'July', 'August', 'September', 'October', 'November', 'December',
 ];
 
-// Which roles each service needs. Sunday morning is the full set; the other
-// services are lighter, which matches how these rosters are usually built.
+// Which roles each service needs, until the schedule keeper says otherwise
+// (server/lib/serviceJobs.js keeps what they set). Sunday morning is the full
+// set; the other services are lighter, which matches how these rosters are
+// usually built. Every service ends with a closing prayer.
 const SERVICE_ROLES = {
-  'Sunday Worship':  ['Song Leader', 'Opening Prayer', 'Scripture Reading', 'Communion', 'Closing Prayer', 'Usher'],
+  'Sunday Worship':  ['Song Leader', 'Opening Prayer', 'Scripture Reading', 'Communion', 'Speaker', 'Announcements', 'Closing Prayer', 'Usher'],
   'Sunday Evening':  ['Song Leader', 'Opening Prayer', 'Closing Prayer'],
-  'Wednesday':       ['Song Leader', 'Opening Prayer'],
+  'Wednesday':       ['Song Leader', 'Opening Prayer', 'Closing Prayer'],
 };
 
 const SERVICES = Object.keys(SERVICE_ROLES);
@@ -55,13 +57,15 @@ function formatDate(date) {
 }
 
 // Every service in the month, in the order they happen.
-function servicesIn(month, wanted = SERVICES) {
+// `roles` is each service's jobs — the schedule keeper's, when they have set
+// them; the defaults above otherwise.
+function servicesIn(month, wanted = SERVICES, roles = SERVICE_ROLES) {
   const occasions = [];
 
   for (const service of wanted) {
     const weekday = service === 'Wednesday' ? 3 : 0;
     for (const date of datesFor(month, weekday)) {
-      occasions.push({ date, dateLabel: formatDate(date), service, roles: SERVICE_ROLES[service] || [] });
+      occasions.push({ date, dateLabel: formatDate(date), service, roles: roles[service] || [] });
     }
   }
 
@@ -125,13 +129,13 @@ function dayOf(date) {
  * than quietly left blank, since an unfilled slot is the thing a coordinator
  * most needs to know about.
  */
-function generateSchedule({ month, people = [], preferences = [], blackouts = [], services = SERVICES, attempt = 0 }) {
+function generateSchedule({ month, people = [], preferences = [], blackouts = [], services = SERVICES, roles = SERVICE_ROLES, attempt = 0 }) {
   const parsed = parseMonth(month);
   if (!parsed) return { error: `"${month}" is not a month I understand — try "June 2026"` };
 
   const byRole = candidatesByRole(people, preferences);
   const away = awayByPerson(blackouts);
-  const occasions = servicesIn(parsed, services);
+  const occasions = servicesIn(parsed, services, roles);
 
   const turnsTaken = new Map();     // directory id → how many turns so far
   const rows = [];

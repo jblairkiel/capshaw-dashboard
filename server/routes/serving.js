@@ -22,7 +22,8 @@ const db      = require('../db');
 const { requireAuth, requireApproved, requireArea, holdsArea } = require('../middleware/auth');
 const { WORSHIP_ROLES, PREFERENCE_LEVELS } = require('../lib/people');
 const worship = require('../lib/worship');
-const { SERVICE_ROLES, SERVICES, MONTHS, parseMonth, servicesIn } = require('../workflows/scheduling');
+const { SERVICES, MONTHS, parseMonth, servicesIn } = require('../workflows/scheduling');
+const serviceJobs = require('../lib/serviceJobs');
 const plans = require('../lib/worshipPlans');
 const actionLog = require('../lib/actionLog');
 const blackouts = require('../lib/blackouts');
@@ -132,7 +133,8 @@ router.get('/', (req, res) => {
     assignments: wanted ? assignmentsWithConflicts(wanted) : [],
     jobs:        WORSHIP_ROLES,
     services:    SERVICES,
-    serviceJobs: SERVICE_ROLES,
+    // The jobs each service needs — the schedule keeper's to change.
+    serviceJobs: serviceJobs.list(specialChoices()),
     // What can be added as a special service — a gospel meeting, a singing:
     // the church's own list of services, kept by an admin, less the ones the
     // regular rosters already cover.
@@ -165,7 +167,7 @@ router.post('/months', requireApproved, manageOnly, (req, res) => {
     : SERVICES;
   if (!wanted.length) return res.status(400).json({ success: false, error: 'Choose at least one service' });
 
-  const occasions = servicesIn(parsed, wanted);
+  const occasions = servicesIn(parsed, wanted, serviceJobs.rolesByService());
   if (!occasions.length) return res.status(400).json({ success: false, error: `No services fall in ${parsed.label}` });
 
   const existing = new Set(
@@ -231,7 +233,7 @@ router.post('/special', requireApproved, manageOnly, (req, res) => {
     if (nights.length > MAX_NIGHTS) return res.status(400).json({ success: false, error: `That is more than ${MAX_NIGHTS} nights — add a longer meeting in parts` });
   }
 
-  const asked = Array.isArray(req.body?.jobs) ? req.body.jobs : [];
+  const asked = Array.isArray(req.body?.jobs) ? req.body.jobs : serviceJobs.jobsFor(type.name);
   const jobs = WORSHIP_ROLES.filter(j => asked.includes(j));
   if (!jobs.length) return res.status(400).json({ success: false, error: 'Choose at least one job it needs' });
 
@@ -263,6 +265,32 @@ router.post('/special', requireApproved, manageOnly, (req, res) => {
   });
 
   res.json({ success: true, created, month: first.month, assignments: assignmentsWithConflicts(first.month) });
+});
+
+// ─── PUT /api/serving/service-jobs  { service, jobs } ───────────────────────────
+// The jobs a service needs, in order — what building a month lays out for it,
+// what the Monthly Worship Schedule fills, and what a special service starts
+// with. `jobs: null` puts it back on the defaults. Months already built keep
+// their slots; this is for the ones built after.
+
+router.put('/service-jobs', requireApproved, manageOnly, (req, res) => {
+  const service = String(req.body?.service || '');
+  if (!SERVICES.includes(service) && !specialChoices().includes(service)) {
+    return res.status(400).json({ success: false, error: 'Choose one of the services on the schedule' });
+  }
+  const result = serviceJobs.setJobs(service, req.body?.jobs ?? null, req.user);
+  if (result.error) return res.status(400).json({ success: false, error: result.error });
+  actionLog.record(req.user, {
+    area:     AREA,
+    action:   'update',
+    entity:   'service jobs',
+    entityId: service,
+    summary:  req.body?.jobs == null
+      ? `Put ${service} back on its usual jobs`
+      : `Set the jobs for ${service}: ${result.jobs.join(', ')}`,
+    details:  result,
+  });
+  res.json({ success: true, serviceJobs: serviceJobs.list(specialChoices()) });
 });
 
 // ─── Slots ────────────────────────────────────────────────────────────────────

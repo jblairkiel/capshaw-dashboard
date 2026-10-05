@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { levelInfo } from '../lib/worship';
 
-// Worship Participation: who has served in the worship jobs, and what each man
-// has said he will do. For whoever keeps the serving schedule, and admins; the
-// server checks the same (server/routes/participation.js).
+// Worship participation: who has served in the worship jobs, and what each man
+// has said he will do — the Analysis and Preferences tabs of the Service Roster
+// page (ServiceRosterView.jsx). For whoever keeps the serving schedule, and
+// admins; the server checks the same (server/routes/participation.js).
 //
 // Nothing is confirmed after a service: the serving schedule, as it was last
 // left, is taken to be what happened. The page only reads — the schedule is
@@ -264,7 +265,7 @@ function PersonView({ data }) {
   );
 }
 
-function AnalysisTab({ who, setWho }) {
+export function AnalysisTab({ who, setWho }) {
   const [weeks, setWeeks] = useState(26);
   const [role, setRole] = useState('');
   const [servers, setServers] = useState([]);
@@ -341,7 +342,7 @@ function Answer({ level, served }) {
   );
 }
 
-function PreferencesTab({ onPick }) {
+export function PreferencesTab({ onPick }) {
   const [weeks, setWeeks] = useState(26);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
@@ -440,37 +441,6 @@ function PreferencesTab({ onPick }) {
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-// ─── The page ─────────────────────────────────────────────────────────────────
-
-const TABS = [
-  { id: 'analysis',    label: 'Analysis' },
-  { id: 'preferences', label: 'Preferences' },
-];
-
-export default function WorshipParticipationView() {
-  const [tab, setTab] = useState('analysis');
-  const [who, setWho] = useState('');
-  // A name picked on the Preferences tab opens that man's record.
-  const openPerson = useCallback(name => { setWho(name); setTab('analysis'); }, []);
-  return (
-    <div className="space-y-4">
-      <div>
-        <h2 className="section-heading mb-1">Worship Participation</h2>
-        <p className="text-sm text-gray-500">Who has served in each worship job, how the load is spread, and what each man has said he will do.</p>
-      </div>
-      <div role="tablist" aria-label="Worship participation" className="flex gap-1 border-b border-gray-200">
-        {TABS.map(t => (
-          <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}
-            className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${tab === t.id ? 'border-church-gold text-church-navy' : 'border-transparent text-gray-500 hover:text-church-navy'}`}>
-            {t.label}
-          </button>
-        ))}
-      </div>
-      {tab === 'analysis' ? <AnalysisTab who={who} setWho={setWho} /> : <PreferencesTab onPick={openPerson} />}
     </div>
   );
 }

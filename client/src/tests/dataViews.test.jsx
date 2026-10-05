@@ -385,7 +385,7 @@ describe('ServingSchedule', () => {
       assignments: ASSIGNMENTS,
       jobs: ['Song Leader', 'Opening Prayer', 'Visuals', 'Visual Preparation'],
       services: ['Sunday Worship', 'Sunday Evening', 'Wednesday'],
-      serviceJobs: {},
+      serviceJobs: [],
       canManage: false,
       blackouts: [],
       me: { directoryId: null, name: '', gender: '', blackouts: [] },
@@ -680,6 +680,40 @@ describe('ServingSchedule', () => {
         jobs: ['Song Leader', 'Opening Prayer', 'Closing Prayer', 'Speaker'],
       });
     });
+  });
+
+  const SERVICE_JOBS = [
+    { service: 'Sunday Worship', special: false, jobs: ['Song Leader', 'Opening Prayer', 'Speaker'], defaults: ['Song Leader', 'Opening Prayer', 'Speaker'], custom: false, updatedBy: '' },
+    { service: 'Wednesday', special: false, jobs: ['Song Leader', 'Closing Prayer'], defaults: ['Song Leader', 'Opening Prayer', 'Closing Prayer'], custom: true, updatedBy: 'Cora' },
+    { service: 'Gospel Meeting', special: true, jobs: ['Song Leader', 'Speaker'], defaults: ['Song Leader', 'Opening Prayer', 'Closing Prayer'], custom: true, updatedBy: 'Cora' },
+  ];
+  const JOBS = ['Song Leader', 'Opening Prayer', 'Speaker', 'Closing Prayer'];
+
+  test('the schedule keeper sets the jobs each service needs', async () => {
+    const fetchMock = mockSchedule({ canManage: true, jobs: JOBS, serviceJobs: SERVICE_JOBS, specialServices: ['Gospel Meeting'] });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Jobs for each service' }));
+    const wednesday = screen.getByRole('region', { name: 'Jobs for Wednesday' });
+    expect(within(wednesday).getByText('Set by Cora')).toBeInTheDocument();
+    expect(within(wednesday).getByLabelText('Wednesday: Closing Prayer')).toBeChecked();
+    fireEvent.click(within(wednesday).getByLabelText('Wednesday: Opening Prayer'));
+    fireEvent.click(within(wednesday).getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, o]) => String(url).endsWith('/service-jobs') && o?.method === 'PUT');
+      expect(JSON.parse(call[1].body)).toEqual({ service: 'Wednesday', jobs: ['Song Leader', 'Opening Prayer', 'Closing Prayer'] });
+    });
+    fireEvent.click(within(screen.getByRole('region', { name: 'Jobs for Gospel Meeting' })).getByRole('button', { name: 'Back to the usual jobs' }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([url, o]) => String(url).endsWith('/service-jobs') && o?.method === 'PUT')
+      .map(([, o]) => JSON.parse(o.body))).toContainEqual({ service: 'Gospel Meeting', jobs: null }));
+  });
+
+  test('a special service starts from the jobs set for it', async () => {
+    mockSchedule({ canManage: true, jobs: JOBS, serviceJobs: SERVICE_JOBS, specialServices: ['Gospel Meeting'] });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a special service' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByLabelText('Speaker')).toBeChecked();
+    expect(within(dialog).getByLabelText('Opening Prayer')).not.toBeChecked();
   });
 
   test('with no special services on the list, it says where an admin adds one', async () => {

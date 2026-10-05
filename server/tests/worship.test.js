@@ -110,6 +110,25 @@ describe('what a service is made of', () => {
     db.prepare('DELETE FROM worship_parts WHERE name = ?').run('Welcome');
   });
 
+  test('the organizer can put every service on the default order at once', async () => {
+    const wednesday = plans.outlines().services.find(sv => /Wednesday/.test(sv.name));
+    const ownOrder = wednesday.partIds;
+    expect(wednesday.own).toBe(true);
+    expect((await request(buildApp(PEOPLE.keeper)).post('/api/worship/outlines/default/everywhere')).status).toBe(403);
+
+    const res = await request(buildApp(PEOPLE.organizer)).post('/api/worship/outlines/default/everywhere');
+    expect(res.status).toBe(200);
+    expect(res.body.outlines.services.every(sv => !sv.own && JSON.stringify(sv.partIds) === JSON.stringify(res.body.outlines.default))).toBe(true);
+    expect(db.prepare("SELECT summary FROM action_log WHERE entity = 'order of worship' ORDER BY id DESC").get().summary)
+      .toBe(`Put every service on the default order of worship (${wednesday.name} had their own)`);
+
+    // Giving one its own order again is named in the history.
+    await request(buildApp(PEOPLE.organizer)).put(`/api/worship/outlines/${wednesday.id}`).send({ partIds: ownOrder });
+    expect(db.prepare("SELECT summary FROM action_log WHERE entity = 'order of worship' ORDER BY id DESC").get().summary)
+      .toBe(`Gave ${wednesday.name} an order of worship of its own`);
+    expect(plans.outlines().services.find(sv => sv.id === wednesday.id).own).toBe(true);
+  });
+
   test('a new service comes laid out, with the Serving Schedule already filled in', async () => {
     const res = await request(buildApp(PEOPLE.leader)).get(`/api/worship/plans/for?date=${SUNDAY}&service=Sunday%20AM%20Worship`);
     expect(res.body.plan).toBeNull();

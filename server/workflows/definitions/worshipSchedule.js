@@ -7,6 +7,7 @@
 
 const { generateSchedule, asPreview, SERVICES } = require('../scheduling');
 const notify = require('../../mail/notify');
+const serviceJobs = require('../../lib/serviceJobs');
 
 // Reads the directory and everyone's stated preferences, then builds a draft.
 function buildDraft(db, { month, services, attempt }) {
@@ -22,6 +23,8 @@ function buildDraft(db, { month, services, attempt }) {
     preferences,
     blackouts,
     services: services ? services.split(',').map(s => s.trim()).filter(Boolean) : SERVICES,
+    // The jobs each service needs, as the schedule keeper has set them.
+    roles: serviceJobs.rolesByService(),
     attempt: Number(attempt) || 0,
   });
 }

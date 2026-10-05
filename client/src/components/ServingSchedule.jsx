@@ -128,13 +128,14 @@ function BuildMonthDialog({ services, onClose, onBuilt }) {
 // Upcoming Service picks it up from here: its parts are filled from these
 // slots, and its song leader is reminded like any other.
 
-const SPECIAL_JOBS = ['Song Leader', 'Opening Prayer', 'Closing Prayer'];
-
-function SpecialServiceDialog({ choices, jobs, onClose, onAdded }) {
+// What a special service needs each night starts from the jobs set for it
+// under Jobs for each service, and can be changed for this one meeting.
+function SpecialServiceDialog({ choices, jobs, serviceJobs = [], onClose, onAdded }) {
+  const usual = name => serviceJobs.find(s => s.service === name)?.jobs || ['Song Leader', 'Opening Prayer', 'Closing Prayer'];
   const [service, setService] = useState(choices[0] || '');
   const [from, setFrom]       = useState('');
   const [through, setThrough] = useState('');
-  const [chosen, setChosen]   = useState(() => new Set(SPECIAL_JOBS.filter(j => jobs.includes(j))));
+  const [chosen, setChosen]   = useState(() => new Set(usual(choices[0] || '').filter(j => jobs.includes(j))));
   const [busy, setBusy]       = useState(false);
   const [error, setError]     = useState('');
 
@@ -176,7 +177,7 @@ function SpecialServiceDialog({ choices, jobs, onClose, onAdded }) {
         <form onSubmit={submit} className="space-y-4">
           <label className="block">
             <span className={label}>Service</span>
-            <select value={service} onChange={e => setService(e.target.value)} className="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+            <select value={service} onChange={e => { setService(e.target.value); setChosen(new Set(usual(e.target.value))); }} className="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
               {choices.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </label>
@@ -219,6 +220,80 @@ function SpecialServiceDialog({ choices, jobs, onClose, onAdded }) {
           </div>
         </form>
       )}
+    </Dialog>
+  );
+}
+
+// ─── The jobs each service needs ──────────────────────────────────────────────
+//
+// What building a month lays out for each service, what the Monthly Worship
+// Schedule fills, and what a special service starts with. A month already
+// built keeps its slots; Add a job covers a one-off.
+
+function ServiceJobsRow({ entry, jobs, onSaved }) {
+  const [chosen, setChosen] = useState(() => new Set(entry.jobs));
+  const [busy, setBusy]     = useState(false);
+  const [error, setError]   = useState('');
+  const picked  = jobs.filter(j => chosen.has(j));
+  const changed = picked.join('|') !== jobs.filter(j => entry.jobs.includes(j)).join('|');
+
+  async function save(list) {
+    setBusy(true); setError('');
+    try {
+      const json = await send(`${API}/service-jobs`, { method: 'PUT', ...jsonBody({ service: entry.service, jobs: list }) });
+      onSaved(json.serviceJobs);
+      if (list === null) setChosen(new Set(entry.defaults));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="py-3 border-t border-gray-100 first:border-t-0" aria-label={`Jobs for ${entry.service}`}>
+      <div className="flex items-baseline justify-between gap-2 flex-wrap">
+        <h4 className="text-sm font-semibold text-church-navy">
+          {entry.service}
+          {entry.special && <span className="ml-2 text-xs font-normal text-gray-400">special service</span>}
+        </h4>
+        <span className="text-xs text-gray-400">{entry.custom ? `Set${entry.updatedBy ? ` by ${entry.updatedBy}` : ''}` : 'The usual jobs'}</span>
+      </div>
+      <div className="mt-1.5 grid grid-cols-2 sm:grid-cols-3 gap-1">
+        {jobs.map(job => (
+          <label key={job} className="flex items-center gap-2 text-sm text-gray-700">
+            <input type="checkbox" checked={chosen.has(job)} className="accent-church-gold"
+              aria-label={`${entry.service}: ${job}`}
+              onChange={() => setChosen(prev => { const next = new Set(prev); if (next.has(job)) next.delete(job); else next.add(job); return next; })} />
+            {job}
+          </label>
+        ))}
+      </div>
+      <div className="mt-2 flex items-center gap-3">
+        <button type="button" onClick={() => save(picked)} disabled={busy || !changed || !picked.length}
+          className="btn-primary text-xs py-1.5 px-3 disabled:opacity-40">Save</button>
+        {entry.custom && (
+          <button type="button" onClick={() => save(null)} disabled={busy} className="text-xs text-gray-500 underline">Back to the usual jobs</button>
+        )}
+        {error && <span className="text-xs text-red-600">{error}</span>}
+      </div>
+    </section>
+  );
+}
+
+function ServiceJobsDialog({ serviceJobs, jobs, onClose, onSaved }) {
+  return (
+    <Dialog title="Jobs for each service" subtitle="What a month is built with, for each service" onClose={onClose} width="max-w-2xl">
+      <p className="text-xs text-gray-500 mb-1">
+        Building a month, and the Monthly Worship Schedule, lay out these jobs for every service. A month already
+        built keeps the slots it has — use Add a job for a one-off.
+      </p>
+      {serviceJobs.map(entry => (
+        <ServiceJobsRow key={`${entry.service}:${entry.jobs.join('|')}`} entry={entry} jobs={jobs} onSaved={onSaved} />
+      ))}
+      <div className="flex justify-end pt-2">
+        <button type="button" onClick={onClose} className="text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600">Done</button>
+      </div>
     </Dialog>
   );
 }
@@ -350,6 +425,7 @@ export default function ServingSchedule() {
   const [busyId, setBusyId]   = useState(null);
   const [building, setBuilding] = useState(false);
   const [addingSpecial, setAddingSpecial] = useState(false);
+  const [editingJobs, setEditingJobs] = useState(false);
   const [editing, setEditing] = useState(null);   // a slot, or {} for a new one
   const [awayView, setAwayView] = useState('list');   // 'list' or 'calendar', for the keeper's view of who is away
   const [blockingOut, setBlockingOut] = useState(false);   // the member's own time-away dialog
@@ -505,6 +581,12 @@ export default function ServingSchedule() {
               >
                 Add a special service
               </button>
+              <button
+                onClick={() => setEditingJobs(true)}
+                className="text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold hover:text-church-navy transition-colors"
+              >
+                Jobs for each service
+              </button>
             </>
           )}
         </div>
@@ -657,10 +739,20 @@ export default function ServingSchedule() {
         />
       )}
 
+      {editingJobs && (
+        <ServiceJobsDialog
+          serviceJobs={Array.isArray(data?.serviceJobs) ? data.serviceJobs : []}
+          jobs={data?.jobs ?? []}
+          onClose={() => setEditingJobs(false)}
+          onSaved={list => setData(d => ({ ...d, serviceJobs: list }))}
+        />
+      )}
+
       {addingSpecial && (
         <SpecialServiceDialog
           choices={data?.specialServices ?? []}
           jobs={data?.jobs ?? []}
+          serviceJobs={Array.isArray(data?.serviceJobs) ? data.serviceJobs : []}
           onClose={() => setAddingSpecial(false)}
           onAdded={json => { setAddingSpecial(false); setWeek(''); load(json.month); }}
         />

@@ -34,7 +34,6 @@ import HowItWorksView from './components/HowItWorksView';
 import MemberMatchView from './components/MemberMatchView';
 import ContributionsView from './components/ContributionsView';
 import MemberAttendanceView from './components/MemberAttendanceView';
-import WorshipParticipationView from './components/WorshipParticipationView';
 import MailDeliveryView from './components/MailDeliveryView';
 import { hasWriteAccess, isAdmin, hasArea } from './lib/roles';
 
@@ -97,7 +96,6 @@ const OFFICE_ITEMS = [
   { id: 'record-keeping',    label: 'Record Keeping',    when: user => hasArea(user, 'records') },
   { id: 'member-attendance', label: 'Member Attendance', when: user => hasArea(user, 'member-attendance') },
   { id: 'service-roster',    label: 'Service Roster',    when: user => hasArea(user, 'serving-schedule') },
-  { id: 'participation',     label: 'Worship Participation', when: user => hasArea(user, 'serving-schedule') },
   { id: 'directory',         label: 'Member Directory',  when: user => hasArea(user, 'directory') },
   { id: 'bulletin',          label: 'Weekly Newsletter', when: user => hasArea(user, 'bulletin') },
   { id: 'mail-groups',       label: 'Email Groups',      when: user => hasArea(user, 'mail-groups') },
@@ -133,6 +131,8 @@ function officeGroupsFor(user) {
 const PAGE_ALIASES = {
   order: { page: 'upcoming', tab: 'order' },
   songs: { page: 'upcoming', tab: 'tracker' },
+  // Worship Participation is now two tabs of the Service Roster.
+  participation: { page: 'service-roster', tab: 'analysis' },
 };
 
 const ALL_TAB_IDS = new Set([
@@ -182,7 +182,7 @@ const STANDALONE_TABS = new Set([
   'bible-class', 'announcements', 'upcoming', 'calendar', 'users', 'database',
   'directory', 'profile', 'inbox', 'mail-groups', 'emails', 'record-keeping', 'livestreams',
   'assignments', 'visitors', 'leadership', 'action-history','service-roster', 'bulletin',
-  'groups', 'bug-reports', 'how-it-works', 'member-match', 'contributions', 'member-attendance', 'participation', 'mail-delivery',
+  'groups', 'bug-reports', 'how-it-works', 'member-match', 'contributions', 'member-attendance', 'mail-delivery',
 ]);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
@@ -250,12 +250,14 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
   // it always has.
   const [deepLink] = useState(deepLinkFromUrl);
   const [activeTab,   setActiveTab]   = useState(deepLink?.page || 'upcoming');
-  const [upcomingTab, setUpcomingTab] = useState(deepLink?.tab || 'order');
+  const [upcomingTab, setUpcomingTab] = useState(deepLink?.page === 'upcoming' && deepLink.tab || 'order');
+  const [rosterTab,   setRosterTab]   = useState(deepLink?.page === 'service-roster' && deepLink.tab || 'roster');
   // Every way of moving between pages goes through here, so a page that became
   // a tab ("songs", "order") still arrives where it should.
   const goTo = useCallback(id => {
     const alias = PAGE_ALIASES[id];
-    if (alias) setUpcomingTab(alias.tab);
+    if (alias?.page === 'upcoming') setUpcomingTab(alias.tab);
+    if (alias?.page === 'service-roster') setRosterTab(alias.tab);
     setActiveTab(alias ? alias.page : id);
   }, []);
   const [siteData,    setSiteData]    = useState(null);
@@ -498,7 +500,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       )}
       {!updating && activeTab === 'service-roster' && hasArea(user, 'serving-schedule') && (
         <main className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
-          <ServiceRosterView />
+          <ServiceRosterView tab={rosterTab} onTabChange={setRosterTab} />
         </main>
       )}
       {!updating && activeTab === 'action-history' && admin && (
@@ -559,11 +561,6 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       {!updating && activeTab === 'member-attendance' && hasArea(user, 'member-attendance') && (
         <main className="max-w-4xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
           <MemberAttendanceView />
-        </main>
-      )}
-      {!updating && activeTab === 'participation' && hasArea(user, 'serving-schedule') && (
-        <main className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
-          <WorshipParticipationView />
         </main>
       )}
       {!updating && activeTab === 'directory' && hasArea(user, 'directory') && (

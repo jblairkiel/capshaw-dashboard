@@ -14,7 +14,7 @@ module.exports = {
   id:    'participation',
   label: 'Worship Participation',
   area:  'serving-schedule',
-  page:  'Worship Participation',
+  page:  'Service Roster → Analysis',
   order: 55,
   describe: 'The last three months of worship jobs, with a few men doing most of them and the odd slot left unfilled.',
   tables: ['job_assignments'],

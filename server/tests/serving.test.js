@@ -40,7 +40,7 @@ function slotsIn(month) {
 let KEEPER, MAN, OTHER_MAN, WOMAN, UNLINKED, man, otherMan, woman;
 
 beforeEach(() => {
-  for (const t of ['action_log', 'job_assignments', 'worship_preferences', 'worship_profile', 'user_areas', 'users', 'directory']) {
+  for (const t of ['action_log', 'job_assignments', 'service_jobs', 'worship_preferences', 'worship_profile', 'user_areas', 'users', 'directory']) {
     db.prepare(`DELETE FROM ${t}`).run();
   }
 
@@ -98,6 +98,46 @@ describe('laying out next month', () => {
 });
 
 // ─── Filling a slot — the roster role's to do ──────────────────────────────────
+
+describe('the jobs each service needs', () => {
+  const setJobs = (user, body) => request(buildApp(user)).put('/api/serving/service-jobs').send(body);
+  const jobsOf = (list, service) => list.find(s => s.service === service);
+
+  test('start from the usual ones: Wednesday closes with a prayer, Sunday morning has its speaker and announcements', async () => {
+    const { body } = await request(buildApp(KEEPER)).get('/api/serving');
+    expect(jobsOf(body.serviceJobs, 'Wednesday')).toMatchObject({ jobs: ['Song Leader', 'Opening Prayer', 'Closing Prayer'], custom: false });
+    expect(jobsOf(body.serviceJobs, 'Sunday Worship').jobs).toEqual(expect.arrayContaining(['Speaker', 'Announcements', 'Closing Prayer']));
+    expect(jobsOf(body.serviceJobs, 'Gospel Meeting')).toMatchObject({ special: true, jobs: ['Song Leader', 'Opening Prayer', 'Closing Prayer'] });
+  });
+
+  test('the schedule keeper changes them, and the next month built follows', async () => {
+    const res = await setJobs(KEEPER, { service: 'Wednesday', jobs: ['Song Leader', 'Scripture Reading', 'Closing Prayer'] });
+    expect(res.status).toBe(200);
+    expect(jobsOf(res.body.serviceJobs, 'Wednesday')).toMatchObject({ jobs: ['Song Leader', 'Scripture Reading', 'Closing Prayer'], custom: true, updatedBy: 'Cora' });
+
+    await request(buildApp(KEEPER)).post('/api/serving/months').send({ month: 'June 2026', services: ['Wednesday'] });
+    const june3 = slotsIn('June 2026').filter(s => s.date === 'June 3').map(s => s.job);
+    expect(june3).toEqual(['Song Leader', 'Scripture Reading', 'Closing Prayer']);
+    expect(db.prepare("SELECT summary FROM action_log WHERE entity = 'service jobs'").get().summary)
+      .toBe('Set the jobs for Wednesday: Song Leader, Scripture Reading, Closing Prayer');
+  });
+
+  test('a special service starts with its own jobs, and goes back to the usual ones when cleared', async () => {
+    await setJobs(KEEPER, { service: 'Gospel Meeting', jobs: ['Song Leader', 'Speaker'] });
+    await request(buildApp(KEEPER)).post('/api/serving/special').send({ service: 'Gospel Meeting', from: '2026-11-15' });
+    expect(slotsIn('November 2026').map(s => s.job)).toEqual(['Song Leader', 'Speaker']);
+
+    const res = await setJobs(KEEPER, { service: 'Gospel Meeting', jobs: null });
+    expect(jobsOf(res.body.serviceJobs, 'Gospel Meeting')).toMatchObject({ custom: false, jobs: ['Song Leader', 'Opening Prayer', 'Closing Prayer'] });
+  });
+
+  test('refuses an unknown job, no jobs, a service not on the schedule, and anyone but the keeper', async () => {
+    expect((await setJobs(KEEPER, { service: 'Wednesday', jobs: ['Juggler'] })).body.error).toMatch(/not one of the worship jobs/);
+    expect((await setJobs(KEEPER, { service: 'Wednesday', jobs: [] })).body.error).toMatch(/at least one job/);
+    expect((await setJobs(KEEPER, { service: 'Made Up', jobs: ['Song Leader'] })).status).toBe(400);
+    expect((await setJobs(MAN, { service: 'Wednesday', jobs: ['Song Leader'] })).status).toBe(403);
+  });
+});
 
 describe('a special service', () => {
   const add = (user, body) => request(buildApp(user)).post('/api/serving/special').send(body);

@@ -344,11 +344,30 @@ describe('Service Parts', () => {
     render(<Page tab="parts" />);
     const order = await screen.findByRole('region', { name: 'Usual order' });
     fireEvent.change(within(order).getByLabelText("Which service's order"), { target: { value: '4' } });
-    fireEvent.click(within(order).getByRole('button', { name: /Use the order for every service instead/ }));
+    fireEvent.click(within(order).getByRole('button', { name: /Use the default order instead/ }));
     await waitFor(() => {
       const [[, opts]] = calls(fetchMock, 'PUT', '/api/worship/outlines/4');
       expect(JSON.parse(opts.body)).toEqual({ partIds: null });
     });
+  });
+
+  test('the default order says which services have their own, and can be made every service\'s', async () => {
+    const fetchMock = partsApi();
+    vi.stubGlobal('confirm', vi.fn(() => true));
+    render(<Page tab="parts" />);
+    const order = await screen.findByRole('region', { name: 'Usual order' });
+    expect(order).toHaveTextContent('Every service starts from this order except Wednesday Bible Study, which has its own.');
+    fireEvent.click(within(order).getByRole('button', { name: 'Use this order for every service' }));
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringMatching(/Wednesday Bible Study will lose its own order/));
+    await waitFor(() => expect(calls(fetchMock, 'POST', '/api/worship/outlines/default/everywhere')).toHaveLength(1));
+  });
+
+  test('a part can be filled from any worship job, the speaker and announcements included', async () => {
+    partsApi();
+    render(<Page tab="parts" />);
+    await screen.findByRole('region', { name: 'Service parts' });
+    const jobs = [...screen.getAllByLabelText('Filled from the Serving Schedule job')[0].options].map(o => o.value);
+    expect(jobs).toEqual(expect.arrayContaining(['Speaker', 'Announcements', 'Closing Prayer']));
   });
 
   test('a new part says what it collects', async () => {
