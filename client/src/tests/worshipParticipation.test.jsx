@@ -58,13 +58,21 @@ function mockApi() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('the Service Roster page', () => {
-  test('has the roster, the analysis and the preferences as its three tabs', async () => {
+  test('has the schedule, the roster, the analysis and the preferences as its tabs', async () => {
     mockApi();
     render(<ServiceRosterView tab="analysis" />);
     await screen.findByText('Who is carrying it');
-    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['Roster', 'Analysis', 'Preferences']);
+    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['Scheduled', 'Roster', 'Analysis', 'Preferences']);
     expect(screen.getByRole('heading', { name: 'Service Roster' })).toBeInTheDocument();
   });
+});
+
+test('a member who does not keep the schedule sees only the schedule', async () => {
+  vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ success: true, months: [], month: '', assignments: [], jobs: [], services: [], serviceJobs: [], canManage: false, blackouts: [], me: {} }) })));
+  render(<ServiceRosterView canManage={false} tab="analysis" />);
+  expect(screen.queryByRole('tab')).not.toBeInTheDocument();
+  expect(await screen.findByText(/ask to be replaced/i)).toBeInTheDocument();
+  expect(screen.queryByText('Who is carrying it')).not.toBeInTheDocument();
 });
 
 describe('analysis', () => {

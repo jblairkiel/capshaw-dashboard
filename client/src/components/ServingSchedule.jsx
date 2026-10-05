@@ -224,6 +224,48 @@ function SpecialServiceDialog({ choices, jobs, serviceJobs = [], onClose, onAdde
   );
 }
 
+// ─── Asking to be replaced ────────────────────────────────────────────────────
+
+function ReplacementDialog({ slot, onClose, onAsked }) {
+  const [reason, setReason] = useState('');
+  const [busy, setBusy]     = useState(false);
+  const [error, setError]   = useState('');
+
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true); setError('');
+    try {
+      await send(`${API}/assignments/${slot.id}/replacement`, { method: 'POST', ...jsonBody({ reason }) });
+      onAsked();
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog title="Ask to be replaced" subtitle={`${slot.job} · ${[slot.date || slot.month, slot.service].filter(Boolean).join(', ')}`} onClose={onClose} width="max-w-md">
+      <form onSubmit={submit} className="space-y-3">
+        <p className="text-sm text-gray-600">
+          Whoever keeps the serving schedule is emailed and finds this in their inbox. Your name stays on
+          until they have found someone, and you will hear when they have.
+        </p>
+        <label className="block">
+          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Why (optional)</span>
+          <textarea rows={2} value={reason} onChange={e => setReason(e.target.value)} maxLength={500} autoFocus
+            placeholder="Out of town that weekend"
+            className="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold" />
+        </label>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onClose} className="text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600">Cancel</button>
+          <button type="submit" disabled={busy} className="btn-primary text-sm disabled:opacity-50">{busy ? 'Asking…' : 'Ask to be replaced'}</button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
 // ─── The jobs each service needs ──────────────────────────────────────────────
 //
 // What building a month lays out for each service, what the Monthly Worship
@@ -422,10 +464,10 @@ export default function ServingSchedule() {
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
   const [notice, setNotice]   = useState('');
-  const [busyId, setBusyId]   = useState(null);
   const [building, setBuilding] = useState(false);
   const [addingSpecial, setAddingSpecial] = useState(false);
   const [editingJobs, setEditingJobs] = useState(false);
+  const [asking, setAsking] = useState(null);   // the slot somebody is asking to be replaced on
   const [editing, setEditing] = useState(null);   // a slot, or {} for a new one
   const [awayView, setAwayView] = useState('list');   // 'list' or 'calendar', for the keeper's view of who is away
   const [blockingOut, setBlockingOut] = useState(false);   // the member's own time-away dialog
@@ -474,24 +516,13 @@ export default function ServingSchedule() {
   const canManage = !!data?.canManage;
   const me        = data?.me ?? {};
 
-  // The one thing left that is a member's own to change: stepping down from a
-  // slot they are down for. Nobody can put their own name against one — that
-  // is the Monthly Worship Schedule workflow's to generate, or the schedule
-  // keeper's to fill by hand.
+  // A member who cannot do a job they are down for asks to be replaced; their
+  // name stays on until whoever keeps the schedule has sorted it out, so a
+  // gap is never left that nobody knows about. Nobody can put their own name
+  // against a slot either — that is the Monthly Worship Schedule workflow's to
+  // generate, or the schedule keeper's to fill by hand.
   function mineAlready(row) {
     return !!me.name && row.name.trim().toLowerCase() === me.name.trim().toLowerCase();
-  }
-
-  async function stepDown(row) {
-    setBusyId(row.id); setNotice('');
-    try {
-      await send(`${API}/assignments/${row.id}/signup`, { method: 'DELETE' });
-      await load(month);
-    } catch (err) {
-      setNotice(err.message);
-    } finally {
-      setBusyId(null);
-    }
   }
 
   // Blocking out days, and taking a block back off. Both reload the month,
@@ -522,8 +553,7 @@ export default function ServingSchedule() {
     <div className="space-y-4">
       <div className="flex items-end justify-between flex-wrap gap-3">
         <div>
-          <h2 className="section-heading mb-1">Serving Schedule</h2>
-          {month && <p className="text-sm text-gray-500">{month}</p>}
+          <p className="font-semibold text-church-navy">{month || 'Serving Schedule'}</p>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -603,8 +633,9 @@ export default function ServingSchedule() {
       {!canManage && (
         <p className="text-xs text-gray-500">
           Slots here are filled by the Monthly Worship Schedule workflow or by whoever looks after
-          the serving schedule. If you are down for one and cannot make it, you can take yourself
-          off below.
+          the serving schedule. If you are down for one and cannot make it, choose Ask to be
+          replaced — they are told straight away, and your name stays on until they have found
+          someone.
         </p>
       )}
 
@@ -645,16 +676,23 @@ export default function ServingSchedule() {
                       away
                     </span>
                   )}
+                  {r.replacement && (
+                    <span
+                      title={`${r.replacement.askedBy ? `Asked by ${r.replacement.askedBy}` : 'Asked'}${r.replacement.reason ? ` · ${r.replacement.reason}` : ''}`}
+                      className="ml-2 text-xs px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 align-middle"
+                    >
+                      {canManage ? 'needs replacing — in My Inbox' : 'replacement asked for'}
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-2 text-right">
                   <div className="flex items-center gap-1.5 justify-end flex-wrap">
-                    {mineAlready(r) && (
+                    {mineAlready(r) && !r.replacement && (
                       <button
-                        onClick={() => stepDown(r)}
-                        disabled={busyId === r.id}
-                        className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold transition-colors disabled:opacity-50"
+                        onClick={() => setAsking(r)}
+                        className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold transition-colors"
                       >
-                        Take me off
+                        Ask to be replaced
                       </button>
                     )}
                     {canManage && (
@@ -736,6 +774,14 @@ export default function ServingSchedule() {
           services={data?.services ?? []}
           onClose={() => setBuilding(false)}
           onBuilt={json => { setBuilding(false); setWeek(''); load(json.month); }}
+        />
+      )}
+
+      {asking && (
+        <ReplacementDialog
+          slot={asking}
+          onClose={() => setAsking(null)}
+          onAsked={() => { setAsking(null); setNotice('Asked. Whoever keeps the schedule has been told, and you will hear when someone is found.'); load(month); }}
         />
       )}
 

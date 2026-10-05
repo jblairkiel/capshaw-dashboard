@@ -34,6 +34,9 @@ router.get('/definitions', (req, res) => {
   const definitions = listDefinitions()
     .filter(d => !page || d.page === page)
     .filter(d => holds(req.user, d.startRole || 'approved'))
+    // One started from the thing it is about (a slot) is not offered on the
+    // page's general start form.
+    .filter(d => !d.startedFrom)
     .map(d => ({
       id: d.id,
       page: d.page,

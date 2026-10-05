@@ -106,7 +106,7 @@ const SECTIONS = [
   {
     id: 'serving-schedule', title: 'The Serving Schedule', audience: 'everyone',
     blocks: [
-      { p: '**Our Church Family → Serving Schedule** shows who leads singing, prays, reads scripture and serves the Lord\'s Supper at each service. Nobody types names into next month\'s roster by hand. It is built from what everyone has said on **My Household & Preferences** — glad to, willing, or would rather not — and the days people are away.' },
+      { p: '**Our Church Family → Service Roster**, on its **Scheduled** tab, shows who leads singing, prays, reads scripture and serves the Lord\'s Supper at each service. Nobody types names into next month\'s roster by hand. It is built from what everyone has said on **My Household & Preferences** — glad to, willing, or would rather not — and the days people are away.' },
       { chart: { title: 'What feeds the roster', start: 'prefs', nodes: [
         { id: 'prefs', kind: 'step', label: 'Everyone sets their preferences' },
         { id: 'away', kind: 'step', label: 'Everyone marks their time away' },
@@ -114,7 +114,7 @@ const SECTIONS = [
         { id: 'draft', kind: 'outcome', tone: 'neutral', label: 'A draft to review and publish' },
       ], edges: [{ from: 'prefs', to: 'generate' }, { from: 'away', to: 'generate' }, { from: 'generate', to: 'draft' }] } },
       { p: '**Time away.** The **Time away** button on the Serving Schedule blocks out days you will not be here — a holiday, a hospital stay. Nobody will be scheduled on those days.' },
-      { p: 'If you cannot do a job you are down for, you can take your own name off it; the schedule keeper will fill it.' },
+      { p: '**Asking to be replaced.** If you cannot do a job you are down for, choose **Ask to be replaced** beside it and say why if you like. Whoever keeps the schedule is emailed, told on their bell, and finds it in **My Inbox**; your name stays on until they have sorted it out, so a gap is never left that nobody knows about. They put someone else in, leave the slot open, or — if you have talked — keep you on, and you are told which.' },
       { p: '**The jobs each service needs.** The schedule keeper chooses them with **Jobs for each service** on the Serving Schedule — Sunday morning, Sunday evening, Wednesday, and each special service. Building a month and the Monthly Worship Schedule lay out those jobs; a month already built keeps its slots.' },
       { p: '**Special services.** A gospel meeting, a singing — anything that is not every week — is added by the schedule keeper with **Add a special service**: which service, the first and last night, and the jobs it needs each night. It then shows on **Upcoming Service** like any other, its song leader is reminded, and its parts are filled from the names put against it. The services to choose from are the church\'s own list of services, which an admin keeps.' },
       { workflow: 'worship-schedule', intro: 'Each month the schedule keeper runs the **Monthly Worship Schedule**. Regenerating tries a different, equally fair draft without touching the live roster; only publishing it changes the roster, and publishing emails everyone who is serving their jobs for the month.' },
@@ -123,7 +123,7 @@ const SECTIONS = [
   {
     id: 'worship-participation', title: 'The Service Roster', audience: 'everyone',
     blocks: [
-      { p: '**Church Office → Service Roster** is for whoever keeps the serving schedule (and admins); nobody else sees it. It has three tabs. **Roster** is where the schedule keeper writes down what each man will do and the days he is away, when he says so in the foyer rather than on **My Household & Preferences**. **Analysis** and **Preferences** show worship participation. Nothing has to be entered for those: the serving schedule, as it was last left, is taken to be what happened. When somebody swaps or drops out, change the schedule and the record follows.' },
+      { p: 'Whoever keeps the serving schedule (and admins) sees three more tabs on the **Service Roster**; nobody else does. **Roster** is where the schedule keeper writes down what each man will do and the days he is away, when he says so in the foyer rather than on **My Household & Preferences**. **Analysis** and **Preferences** show worship participation. Nothing has to be entered for those: the serving schedule, as it was last left, is taken to be what happened. When somebody swaps or drops out, change the schedule and the record follows.' },
       { p: 'The **Analysis** tab shows, for the last few months: who is carrying the load and in which jobs, how many different men have done each job, the jobs never filled, and the men who said they would do a job and have not been used for it. Choose a man to see his own record, what he is down for next, and what he said beside what he has done.' },
       { p: 'The **Preferences** tab lists every man against every job, with what he has said (glad to, willing, rather not, or nothing yet) and how often he has served it. Above it, how each job is covered; a job with fewer than three men glad or willing is marked thin. Men set their own on **My Household & Preferences**; the schedule keeper can record them on the **Roster** tab.' },
     ],

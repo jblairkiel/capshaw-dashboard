@@ -466,15 +466,30 @@ describe('ServingSchedule', () => {
     expect(screen.queryByRole('columnheader', { name: /sign up/i })).not.toBeInTheDocument();
   });
 
-  test('you can take your own name back off', async () => {
+  test('you ask to be replaced rather than taking your own name off', async () => {
     const fetchMock = mockSchedule({ me: { directoryId: 3, name: 'Tom Nelson', gender: 'male' } });
     render(<ServingSchedule />);
-    fireEvent.click(await screen.findByRole('button', { name: /take me off/i }));
-
+    expect(screen.queryByRole('button', { name: /take me off/i })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask to be replaced' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText(/Why/), { target: { value: 'Out of town' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Ask to be replaced' }));
     await waitFor(() => {
-      const call = fetchMock.mock.calls.find(([url]) => String(url).includes('/assignments/1/signup'));
-      expect(call[1].method).toBe('DELETE');
+      const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/assignments/1/replacement'));
+      expect(call[1].method).toBe('POST');
+      expect(JSON.parse(call[1].body)).toEqual({ reason: 'Out of town' });
     });
+    expect(await screen.findByText(/Whoever keeps the schedule has been told/)).toBeInTheDocument();
+  });
+
+  test('a slot already asked about says so, and is not asked about twice', async () => {
+    mockSchedule({
+      me: { directoryId: 3, name: 'Tom Nelson', gender: 'male' },
+      assignments: ASSIGNMENTS.map(a => (a.id === 1 ? { ...a, replacement: { id: 4, askedBy: 'Tom', reason: 'Away' } } : a)),
+    });
+    render(<ServingSchedule />);
+    expect(await screen.findByText('replacement asked for')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Ask to be replaced' })).not.toBeInTheDocument();
   });
 
   test('only the schedule keeper gets the build and edit buttons', async () => {

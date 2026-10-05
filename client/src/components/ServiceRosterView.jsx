@@ -5,6 +5,8 @@ import TimeAway from './TimeAway';
 import { describeRange } from '../lib/timeAway';
 import { WORSHIP_ROLES, levelInfo } from '../lib/worship';
 import { AnalysisTab, PreferencesTab } from './WorshipParticipationView';
+import ServingSchedule from './ServingSchedule';
+import WorkflowDialogButton from './WorkflowDialogButton';
 
 // ─── Service Roster ───────────────────────────────────────────────────────────
 //
@@ -393,19 +395,23 @@ function RosterTab() {
 
 // ─── The page ─────────────────────────────────────────────────────────────────
 //
-// Three tabs: the Roster (what each man will do, and his time away — recorded
-// here), and the Analysis and Preferences of worship participation (read only:
-// who has served, and how each job is covered).
+// Scheduled — the Serving Schedule itself — is for everyone: who is down for
+// what, and asking to be replaced. The other three are for whoever keeps the
+// schedule: the Roster (what each man will do, and his time away — recorded
+// here), and the Analysis and Preferences of worship participation.
 
 const ROSTER_TABS = [
-  { id: 'roster',      label: 'Roster' },
-  { id: 'analysis',    label: 'Analysis' },
-  { id: 'preferences', label: 'Preferences' },
+  { id: 'scheduled',   label: 'Scheduled' },
+  { id: 'roster',      label: 'Roster',      keeper: true },
+  { id: 'analysis',    label: 'Analysis',    keeper: true },
+  { id: 'preferences', label: 'Preferences', keeper: true },
 ];
 
-export default function ServiceRosterView({ tab = 'roster', onTabChange }) {
+export default function ServiceRosterView({ user = null, canManage = true, tab = 'scheduled', onTabChange }) {
+  const tabs = ROSTER_TABS.filter(t => canManage || !t.keeper);
   const [own, setOwn] = useState(tab);
-  const active = ROSTER_TABS.some(t => t.id === (onTabChange ? tab : own)) ? (onTabChange ? tab : own) : 'roster';
+  const wanted = onTabChange ? tab : own;
+  const active = tabs.some(t => t.id === wanted) ? wanted : 'scheduled';
   const choose = id => (onTabChange ? onTabChange(id) : setOwn(id));
   const [who, setWho] = useState('');
   // A name picked on the Preferences tab opens that man's record.
@@ -415,16 +421,32 @@ export default function ServiceRosterView({ tab = 'roster', onTabChange }) {
     <div className="space-y-4">
       <div>
         <h2 className="section-heading mb-1">Service Roster</h2>
-        <p className="text-sm text-gray-500">What each man will serve in, who has served, and how each worship job is covered.</p>
+        <p className="text-sm text-gray-500">
+          {canManage
+            ? 'Who is down for each worship job, what each man will serve in, who has served, and how each job is covered.'
+            : 'Who is down for each worship job. If you cannot do one you are down for, ask to be replaced.'}
+        </p>
       </div>
-      <div role="tablist" aria-label="Service roster" className="flex gap-1 border-b border-gray-200">
-        {ROSTER_TABS.map(t => (
-          <button key={t.id} type="button" role="tab" aria-selected={active === t.id} onClick={() => choose(t.id)}
-            className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${active === t.id ? 'border-church-gold text-church-navy' : 'border-transparent text-gray-500 hover:text-church-navy'}`}>
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {tabs.length > 1 && (
+        <div role="tablist" aria-label="Service roster" className="flex gap-1 border-b border-gray-200 overflow-x-auto">
+          {tabs.map(t => (
+            <button key={t.id} type="button" role="tab" aria-selected={active === t.id} onClick={() => choose(t.id)}
+              className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 whitespace-nowrap ${active === t.id ? 'border-church-gold text-church-navy' : 'border-transparent text-gray-500 hover:text-church-navy'}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {active === 'scheduled' && (
+        <div className="space-y-4">
+          {canManage && user && (
+            <div className="flex justify-end">
+              <WorkflowDialogButton page="assignments" user={user} label="Generate" title="Monthly Worship Schedule" />
+            </div>
+          )}
+          <ServingSchedule />
+        </div>
+      )}
       {active === 'roster' && <RosterTab />}
       {active === 'analysis' && <AnalysisTab who={who} setWho={setWho} />}
       {active === 'preferences' && <PreferencesTab onPick={openPerson} />}

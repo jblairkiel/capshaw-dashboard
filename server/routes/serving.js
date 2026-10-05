@@ -24,6 +24,8 @@ const { WORSHIP_ROLES, PREFERENCE_LEVELS } = require('../lib/people');
 const worship = require('../lib/worship');
 const { SERVICES, MONTHS, parseMonth, servicesIn } = require('../workflows/scheduling');
 const serviceJobs = require('../lib/serviceJobs');
+const engine = require('../workflows/engine');
+const notifications = require('../lib/notifications');
 const plans = require('../lib/worshipPlans');
 const actionLog = require('../lib/actionLog');
 const blackouts = require('../lib/blackouts');
@@ -67,7 +69,10 @@ function dayOf(slot) {
 // blocked that day out. Worked out here rather than on the page, because the
 // page has names and the ranges have directory entries.
 function assignmentsWithConflicts(month) {
-  return assignmentsIn(month).map(slot => {
+  const asked = openReplacements();
+  return assignmentsIn(month).map(raw => {
+    // A replacement somebody has asked for and that is not settled yet.
+    const slot = asked.has(raw.id) ? { ...raw, replacement: asked.get(raw.id) } : raw;
     const away = slot.name.trim() ? blackouts.nameAwayOn(slot.name, dayOf(slot)) : null;
     if (!away) return slot;
 
@@ -340,6 +345,7 @@ router.patch('/assignments/:id', requireApproved, manageOnly, (req, res) => {
     before,
     after,
   });
+  if (after.name !== before.name) settleReplacement(after.id, after.name, req.user);
   res.json({ success: true, assignment: after, warning: awayWarning(after) });
 });
 
@@ -356,39 +362,79 @@ router.delete('/assignments/:id', requireApproved, manageOnly, (req, res) => {
     summary:  `Removed ${before.job} on ${before.date || before.month}${before.name ? ` (was ${before.name})` : ''}`,
     before,
   });
+  settleReplacement(before.id, '', req.user);
   res.json({ success: true });
 });
 
-// ─── Taking your own name off ──────────────────────────────────────────────────
-// The one thing left that is a member's own to change: stepping down from a
-// slot they are down for, however it got their name — generated, put there by
-// the schedule keeper, or (from before this changed) signed up for
-// themselves. The schedule keeper may clear anybody's; everyone else may only
-// clear their own, so nobody can quietly drop someone else.
-router.delete('/assignments/:id/signup', requireApproved, (req, res) => {
-  const slot = db.prepare('SELECT * FROM job_assignments WHERE id = ?').get(req.params.id);
-  if (!slot) return res.status(404).json({ success: false, error: 'No such slot' });
+// ─── Asking to be replaced ────────────────────────────────────────────────────
+// Somebody who cannot do a job they are down for asks; they do not take their
+// own name off, so a gap is never left that nobody knows about. Whoever keeps
+// the schedule is emailed, told on their bell, and finds it in My Inbox
+// (server/workflows/definitions/servingReplacement.js).
 
-  const person  = personFor(req.user);
-  const isMine  = person && slot.name.trim().toLowerCase() === person.name.trim().toLowerCase();
-  if (!isMine && !holdsArea(req.user, AREA)) {
-    return res.status(403).json({ success: false, error: 'You can only take your own name off the roster.' });
+const REPLACEMENT = 'serving-replacement';
+
+// slot id → { id, askedBy, askedAt } for every request still open.
+function openReplacements() {
+  const rows = db.prepare(`
+    SELECT i.id, i.data, i.created_at, u.name AS asked_by
+      FROM workflow_instances i LEFT JOIN users u ON u.id = i.created_by
+     WHERE i.definition_id = ? AND i.status = 'active'
+  `).all(REPLACEMENT);
+  const out = new Map();
+  for (const r of rows) {
+    const data = engine.parseData(r.data);
+    const slotId = Number(data.slotId);
+    if (slotId) out.set(slotId, { id: r.id, askedBy: r.asked_by || '', askedAt: r.created_at, reason: data.reason || '' });
   }
+  return out;
+}
 
-  db.prepare("UPDATE job_assignments SET name = '' WHERE id = ?").run(slot.id);
-  actionLog.record(req.user, {
-    area:     AREA,
-    action:   'update',
-    entity:   'serving assignment',
-    entityId: slot.id,
-    summary:  isMine
-      ? `${person.name} stepped down from ${slot.job} on ${slot.date || slot.month}`
-      : `Cleared ${slot.name || 'an empty slot'} from ${slot.job} on ${slot.date || slot.month}`,
-    before:   slot,
-    after:    { ...slot, name: '' },
+function keepers() {
+  const holders = db.prepare(`
+    SELECT u.id FROM users u JOIN user_areas a ON a.user_id = u.id
+     WHERE a.area = ? AND u.role = 'approved'
+  `).all(AREA);
+  return holders.length ? holders : db.prepare("SELECT id FROM users WHERE role = 'admin'").all();
+}
+
+router.post('/assignments/:id/replacement', requireApproved, (req, res) => {
+  const started = engine.start({
+    definitionId: REPLACEMENT,
+    data: { slotId: String(req.params.id), reason: String(req.body?.reason || '') },
+    user: req.user,
   });
-  res.json({ success: true });
+  if (started.error) return res.status(started.status || 400).json({ success: false, error: started.error });
+
+  const slot = db.prepare('SELECT * FROM job_assignments WHERE id = ?').get(req.params.id);
+  const when = [slot.date || slot.month, slot.service].filter(Boolean).join(', ');
+  notifications.notify({
+    users: keepers(), actor: req.user, kind: 'serving-replacement-asked',
+    title: `${slot.name} needs replacing: ${slot.job}, ${when}`,
+    body: req.body?.reason ? String(req.body.reason).slice(0, 300) : '',
+    subjectType: 'serving-slot', subjectId: slot.id,
+  });
+  actionLog.record(req.user, {
+    area: AREA, action: 'create', entity: 'serving replacement', entityId: slot.id,
+    summary: `${req.user.name} asked for ${slot.name} to be replaced on ${slot.job}, ${when}`,
+    details: { slot, reason: req.body?.reason || '', workflow: started.id },
+  });
+  res.json({ success: true, workflowId: started.id, assignments: assignmentsWithConflicts(slot.month) });
 });
+
+// When the keeper settles a slot by hand — a new name, or the slot cleared or
+// removed — an open request on it is closed to match, so it never sits in
+// somebody's inbox after the fact.
+function settleReplacement(slotId, newName, user) {
+  const open = openReplacements().get(Number(slotId));
+  if (!open) return;
+  const task = db.prepare("SELECT id FROM workflow_tasks WHERE instance_id = ? AND status = 'pending'").get(open.id);
+  if (!task) return;
+  const result = newName
+    ? engine.act({ taskId: task.id, actionId: 'replaced', note: newName, user })
+    : engine.act({ taskId: task.id, actionId: 'leave-open', user });
+  if (result?.error) console.error('[serving] could not close the replacement request:', result.error);
+}
 
 // ─── Time away ────────────────────────────────────────────────────────────────
 // A member blocks out their own days; the schedule keeper may block out

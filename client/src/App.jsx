@@ -18,11 +18,9 @@ import DirectoryView from './components/DirectoryView';
 import MyProfileView from './components/MyProfileView';
 import MobileNav from './components/MobileNav';
 import InboxView from './components/InboxView';
-import WorkflowDialogButton from './components/WorkflowDialogButton';
 import MailGroupsView from './components/MailGroupsView';
 import EmailsView from './components/EmailsView';
 import RecordKeepingView from './components/RecordKeepingView';
-import ServingSchedule from './components/ServingSchedule';
 import ServiceRosterView from './components/ServiceRosterView';
 import ActionHistoryView from './components/ActionHistoryView';
 import WeeklyBulletinView from './components/WeeklyBulletinView';
@@ -55,7 +53,7 @@ const BASE_GROUPS = [
     id: 'congregation',
     label: 'Our Church Family',
     items: [
-      { id: 'assignments',   label: 'Serving Schedule' },
+      { id: 'service-roster', label: 'Service Roster' },
       { id: 'attendance',    label: 'Attendance' },
       { id: 'contributions', label: 'Contributions' },
       { id: 'visitors',      label: 'Guests' },
@@ -95,7 +93,6 @@ const PROFILE_GROUP = {
 const OFFICE_ITEMS = [
   { id: 'record-keeping',    label: 'Record Keeping',    when: user => hasArea(user, 'records') },
   { id: 'member-attendance', label: 'Member Attendance', when: user => hasArea(user, 'member-attendance') },
-  { id: 'service-roster',    label: 'Service Roster',    when: user => hasArea(user, 'serving-schedule') },
   { id: 'directory',         label: 'Member Directory',  when: user => hasArea(user, 'directory') },
   { id: 'bulletin',          label: 'Weekly Newsletter', when: user => hasArea(user, 'bulletin') },
   { id: 'mail-groups',       label: 'Email Groups',      when: user => hasArea(user, 'mail-groups') },
@@ -133,6 +130,9 @@ const PAGE_ALIASES = {
   songs: { page: 'upcoming', tab: 'tracker' },
   // Worship Participation is now two tabs of the Service Roster.
   participation: { page: 'service-roster', tab: 'analysis' },
+  // The Serving Schedule is the Service Roster's Scheduled tab; emails and
+  // the inbox still link to it by its old name.
+  assignments:   { page: 'service-roster', tab: 'scheduled' },
 };
 
 const ALL_TAB_IDS = new Set([
@@ -181,7 +181,7 @@ function deepLinkFromUrl() {
 const STANDALONE_TABS = new Set([
   'bible-class', 'announcements', 'upcoming', 'calendar', 'users', 'database',
   'directory', 'profile', 'inbox', 'mail-groups', 'emails', 'record-keeping', 'livestreams',
-  'assignments', 'visitors', 'leadership', 'action-history','service-roster', 'bulletin',
+  'visitors', 'leadership', 'action-history','service-roster', 'bulletin',
   'groups', 'bug-reports', 'how-it-works', 'member-match', 'contributions', 'member-attendance', 'mail-delivery',
 ]);
 
@@ -251,7 +251,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
   const [deepLink] = useState(deepLinkFromUrl);
   const [activeTab,   setActiveTab]   = useState(deepLink?.page || 'upcoming');
   const [upcomingTab, setUpcomingTab] = useState(deepLink?.page === 'upcoming' && deepLink.tab || 'order');
-  const [rosterTab,   setRosterTab]   = useState(deepLink?.page === 'service-roster' && deepLink.tab || 'roster');
+  const [rosterTab,   setRosterTab]   = useState(deepLink?.page === 'service-roster' && deepLink.tab || 'scheduled');
   // Every way of moving between pages goes through here, so a page that became
   // a tab ("songs", "order") still arrives where it should.
   const goTo = useCallback(id => {
@@ -473,16 +473,6 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
           <LivestreamsView />
         </main>
       )}
-      {!updating && activeTab === 'assignments' && (
-        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
-          <div className="space-y-4">
-            <div className="flex justify-end">
-              <WorkflowDialogButton page="assignments" user={user} label="Generate" title="Monthly Worship Schedule" />
-            </div>
-            <ServingSchedule />
-          </div>
-        </main>
-      )}
       {!updating && activeTab === 'visitors' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           <VisitorTracker user={user} />
@@ -498,9 +488,9 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
           <ContributionsView user={user} />
         </main>
       )}
-      {!updating && activeTab === 'service-roster' && hasArea(user, 'serving-schedule') && (
-        <main className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
-          <ServiceRosterView tab={rosterTab} onTabChange={setRosterTab} />
+      {!updating && activeTab === 'service-roster' && (
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
+          <ServiceRosterView user={user} canManage={hasArea(user, 'serving-schedule')} tab={rosterTab} onTabChange={setRosterTab} />
         </main>
       )}
       {!updating && activeTab === 'action-history' && admin && (

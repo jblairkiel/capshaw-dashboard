@@ -7,6 +7,7 @@ const { isPage } = require('../pages');
 const definitions = [
   require('./visitorFollowUp'),
   require('./worshipSchedule'),
+  require('./servingReplacement'),
 ];
 
 const byId = new Map(definitions.map(d => [d.id, d]));
