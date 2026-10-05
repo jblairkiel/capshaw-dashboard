@@ -115,16 +115,17 @@ const SECTIONS = [
       ], edges: [{ from: 'prefs', to: 'generate' }, { from: 'away', to: 'generate' }, { from: 'generate', to: 'draft' }] } },
       { p: '**Time away.** The **Time away** button on the Serving Schedule blocks out days you will not be here — a holiday, a hospital stay. Nobody will be scheduled on those days.' },
       { p: 'If you cannot do a job you are down for, you can take your own name off it; the schedule keeper will fill it.' },
+      { p: '**The jobs each service needs.** The schedule keeper chooses them with **Jobs for each service** on the Serving Schedule — Sunday morning, Sunday evening, Wednesday, and each special service. Building a month and the Monthly Worship Schedule lay out those jobs; a month already built keeps its slots.' },
       { p: '**Special services.** A gospel meeting, a singing — anything that is not every week — is added by the schedule keeper with **Add a special service**: which service, the first and last night, and the jobs it needs each night. It then shows on **Upcoming Service** like any other, its song leader is reminded, and its parts are filled from the names put against it. The services to choose from are the church\'s own list of services, which an admin keeps.' },
       { workflow: 'worship-schedule', intro: 'Each month the schedule keeper runs the **Monthly Worship Schedule**. Regenerating tries a different, equally fair draft without touching the live roster; only publishing it changes the roster, and publishing emails everyone who is serving their jobs for the month.' },
     ],
   },
   {
-    id: 'worship-participation', title: 'Worship participation', audience: 'everyone',
+    id: 'worship-participation', title: 'The Service Roster', audience: 'everyone',
     blocks: [
-      { p: '**Church Office → Worship Participation** is for whoever keeps the serving schedule (and admins); nobody else sees it. Nothing has to be entered on it: the serving schedule, as it was last left, is taken to be what happened. When somebody swaps or drops out, change the schedule and the record follows.' },
+      { p: '**Church Office → Service Roster** is for whoever keeps the serving schedule (and admins); nobody else sees it. It has three tabs. **Roster** is where the schedule keeper writes down what each man will do and the days he is away, when he says so in the foyer rather than on **My Household & Preferences**. **Analysis** and **Preferences** show worship participation. Nothing has to be entered for those: the serving schedule, as it was last left, is taken to be what happened. When somebody swaps or drops out, change the schedule and the record follows.' },
       { p: 'The **Analysis** tab shows, for the last few months: who is carrying the load and in which jobs, how many different men have done each job, the jobs never filled, and the men who said they would do a job and have not been used for it. Choose a man to see his own record, what he is down for next, and what he said beside what he has done.' },
-      { p: 'The **Preferences** tab lists every man against every job, with what he has said (glad to, willing, rather not, or nothing yet) and how often he has served it. Above it, how each job is covered; a job with fewer than three men glad or willing is marked thin. Men set their own on **My Household & Preferences**; the schedule keeper can record them on the **Service Roster**.' },
+      { p: 'The **Preferences** tab lists every man against every job, with what he has said (glad to, willing, rather not, or nothing yet) and how often he has served it. Above it, how each job is covered; a job with fewer than three men glad or willing is marked thin. Men set their own on **My Household & Preferences**; the schedule keeper can record them on the **Roster** tab.' },
     ],
   },
   {
@@ -257,7 +258,7 @@ const SECTIONS = [
       { p: 'Whoever holds **Worship Organizer** is emailed when a service is submitted, and confirms it from the email\'s link or from Order of Worship. The **Service Parts** tab keeps:' },
       { list: [
         '**The parts** — what each collects (a song, a person, a detail such as the passage) and which Serving Schedule job already names the person',
-        '**The usual order** — one for every service, and any service that runs differently (Wednesday) can have its own',
+        '**The usual order** — the default order every service starts from, and any service that runs differently (Wednesday) can have its own. **Use this order for every service** puts them all back on the default',
         '**Service times** — when each service starts; the song leader\'s 96- and 24-hour reminders count back from these',
       ] },
       { p: 'Whoever holds **Song Tracker** tidies the song list from **Song Tracker → Library**: correct a title or number, or merge a duplicate into the song it repeats. Old history can still be brought in from capshawchurch.org with **Import**; nothing is sent back to that site.' },

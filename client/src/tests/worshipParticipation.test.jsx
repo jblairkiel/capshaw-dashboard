@@ -1,6 +1,6 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { describe, test, expect, vi, afterEach } from 'vitest';
-import WorshipParticipationView from '../components/WorshipParticipationView';
+import ServiceRosterView from '../components/ServiceRosterView';
 
 const SERVERS = [{ name: 'Al Adams', personId: 1 }, { name: 'Ben Brown', personId: 2 }, { name: 'Cal Cole', personId: 3 }];
 const ANALYSIS = {
@@ -57,10 +57,20 @@ function mockApi() {
 
 afterEach(() => vi.unstubAllGlobals());
 
+describe('the Service Roster page', () => {
+  test('has the roster, the analysis and the preferences as its three tabs', async () => {
+    mockApi();
+    render(<ServiceRosterView tab="analysis" />);
+    await screen.findByText('Who is carrying it');
+    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['Roster', 'Analysis', 'Preferences']);
+    expect(screen.getByRole('heading', { name: 'Service Roster' })).toBeInTheDocument();
+  });
+});
+
 describe('analysis', () => {
   test('opens on the analysis, read straight from the schedule — there is nothing to confirm', async () => {
     mockApi();
-    render(<WorshipParticipationView />);
+    render(<ServiceRosterView tab="analysis" />);
     expect(await screen.findByText('Who is carrying it')).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Record' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /went as scheduled/i })).not.toBeInTheDocument();
@@ -71,7 +81,7 @@ describe('analysis', () => {
 
   test('a man picked from the chart opens his record, with what he said beside what he did', async () => {
     const calls = mockApi();
-    render(<WorshipParticipationView />);
+    render(<ServiceRosterView tab="analysis" />);
     await screen.findByText('Who is carrying it');
     fireEvent.click(screen.getAllByRole('button', { name: 'Ben Brown' })[0]);
     expect(await screen.findByText('What he said, and what he has done')).toBeInTheDocument();
@@ -84,7 +94,7 @@ describe('analysis', () => {
 
   test('filters go to the server', async () => {
     const calls = mockApi();
-    render(<WorshipParticipationView />);
+    render(<ServiceRosterView tab="analysis" />);
     await screen.findByText('Who is carrying it');
     fireEvent.change(screen.getByLabelText('Weeks'), { target: { value: '13' } });
     fireEvent.change(screen.getByLabelText('Job'), { target: { value: 'Song Leader' } });
@@ -94,7 +104,7 @@ describe('analysis', () => {
 
 describe('preferences', () => {
   const open = async () => {
-    render(<WorshipParticipationView />);
+    render(<ServiceRosterView tab="analysis" />);
     await screen.findByText('Who is carrying it');
     fireEvent.click(screen.getByRole('tab', { name: 'Preferences' }));
     await screen.findByText('How each job is covered');

@@ -221,6 +221,14 @@ function setOutline(serviceTypeId, partIds) {
   return { outline: outlineFor(serviceTypeId) };
 }
 
+// Every service back on the default order: the ones with an order of their
+// own lose it. Returns which they were, for the action history.
+function useDefaultEverywhere() {
+  const had = outlines().services.filter(s => s.own).map(s => s.name);
+  db.prepare('DELETE FROM worship_outlines WHERE service_type_id IS NOT NULL').run();
+  return { services: had };
+}
+
 // ─── Plans ────────────────────────────────────────────────────────────────────
 
 function toPlan(row, { items = true } = {}) {
@@ -562,7 +570,7 @@ module.exports = {
   STATUSES, REQUEST_STATUSES,
   canOrganize, keepsSongs, canSubmit, canEdit, isScheduledLeader, nameKey, serviceType,
   servingFor, servingServiceFor, specialServices, activeServices, trackerName,
-  listParts, addPart, updatePart, outlines, outlineFor, setOutline, setStartTime,
+  listParts, addPart, updatePart, outlines, outlineFor, setOutline, useDefaultEverywhere, setStartTime,
   getPlan, planFor, plansBetween, template, submit, confirm, remove,
   getRequest, listRequests, addRequest, setRequestStatus,
   upcoming, holdersOfOrganizer,

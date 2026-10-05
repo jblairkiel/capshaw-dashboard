@@ -85,7 +85,7 @@ describe('Serving Schedule: picking a day', () => {
   test('saves "June 7" and sets the month to match', async () => {
     const body = {
       success: true, months: [{ month: 'April 2025', slots: 0 }], month: 'April 2025', assignments: [],
-      jobs: ['Song Leader'], services: ['Sunday Worship'], serviceJobs: {}, canManage: true, blackouts: [],
+      jobs: ['Song Leader'], services: ['Sunday Worship'], serviceJobs: [], canManage: true, blackouts: [],
       me: { directoryId: null, name: '', gender: '', blackouts: [] }, assignment: { month: 'June 2026' },
     };
     const fetchMock = vi.fn(() => Promise.resolve({ json: () => Promise.resolve(body) }));

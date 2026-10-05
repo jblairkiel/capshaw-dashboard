@@ -50,9 +50,11 @@ let COORDINATOR, ADMIN, MEMBER, people;
 beforeEach(() => {
   for (const t of ['mail_outbox', 'mail_group_members', 'workflow_participants', 'workflow_events',
                    'workflow_tasks', 'workflow_instances', 'worship_preferences', 'job_assignments',
-                   'visitors', 'user_areas', 'users', 'directory']) {
+                   'visitors', 'user_areas', 'users', 'directory', 'service_jobs']) {
     db.prepare(`DELETE FROM ${t}`).run();
   }
+  // The draft follows the jobs the schedule keeper has set for each service.
+  require('../lib/serviceJobs').setJobs('Sunday Worship', WORSHIP_JOBS, { name: 'Cora' });
 
   people = Object.fromEntries(VOLUNTEERS.map(([name, email]) => [name, addPerson(name, email)]));
 

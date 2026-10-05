@@ -4,6 +4,7 @@ import WorshipPreferences from './WorshipPreferences';
 import TimeAway from './TimeAway';
 import { describeRange } from '../lib/timeAway';
 import { WORSHIP_ROLES, levelInfo } from '../lib/worship';
+import { AnalysisTab, PreferencesTab } from './WorshipParticipationView';
 
 // ─── Service Roster ───────────────────────────────────────────────────────────
 //
@@ -254,7 +255,7 @@ const SHOWING = [
   { id: 'quiet',  label: 'Has not said yet' },
 ];
 
-export default function ServiceRosterView() {
+function RosterTab() {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
@@ -316,13 +317,10 @@ export default function ServiceRosterView() {
   return (
     <div className="space-y-4">
       <div className="flex items-end justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="section-heading mb-1">Service Roster</h2>
-          <p className="text-sm text-gray-500 max-w-2xl">
-            What each man of the congregation will volunteer for, so a month can be built from
-            what people have actually agreed to. {spoken} of {pool.length} have said something.
-          </p>
-        </div>
+        <p className="text-sm text-gray-500 max-w-2xl">
+          What each man of the congregation will volunteer for, so a month can be built from
+          what people have actually agreed to. {spoken} of {pool.length} have said something.
+        </p>
         <button onClick={load} className="text-sm text-church-gold hover:text-church-navy transition-colors px-2">Refresh</button>
       </div>
 
@@ -389,6 +387,47 @@ export default function ServiceRosterView() {
           onTimeAwayChanged={refresh}
         />
       )}
+    </div>
+  );
+}
+
+// ─── The page ─────────────────────────────────────────────────────────────────
+//
+// Three tabs: the Roster (what each man will do, and his time away — recorded
+// here), and the Analysis and Preferences of worship participation (read only:
+// who has served, and how each job is covered).
+
+const ROSTER_TABS = [
+  { id: 'roster',      label: 'Roster' },
+  { id: 'analysis',    label: 'Analysis' },
+  { id: 'preferences', label: 'Preferences' },
+];
+
+export default function ServiceRosterView({ tab = 'roster', onTabChange }) {
+  const [own, setOwn] = useState(tab);
+  const active = ROSTER_TABS.some(t => t.id === (onTabChange ? tab : own)) ? (onTabChange ? tab : own) : 'roster';
+  const choose = id => (onTabChange ? onTabChange(id) : setOwn(id));
+  const [who, setWho] = useState('');
+  // A name picked on the Preferences tab opens that man's record.
+  const openPerson = name => { setWho(name); choose('analysis'); };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="section-heading mb-1">Service Roster</h2>
+        <p className="text-sm text-gray-500">What each man will serve in, who has served, and how each worship job is covered.</p>
+      </div>
+      <div role="tablist" aria-label="Service roster" className="flex gap-1 border-b border-gray-200">
+        {ROSTER_TABS.map(t => (
+          <button key={t.id} type="button" role="tab" aria-selected={active === t.id} onClick={() => choose(t.id)}
+            className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${active === t.id ? 'border-church-gold text-church-navy' : 'border-transparent text-gray-500 hover:text-church-navy'}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {active === 'roster' && <RosterTab />}
+      {active === 'analysis' && <AnalysisTab who={who} setWho={setWho} />}
+      {active === 'preferences' && <PreferencesTab onPick={openPerson} />}
     </div>
   );
 }

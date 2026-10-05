@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { call } from './api';
+import { WORSHIP_ROLES } from '../../lib/worship';
 
 // ─── Service Parts ────────────────────────────────────────────────────────────
 //
@@ -9,8 +10,8 @@ import { call } from './api';
 // from that order.
 
 // The Serving Schedule's jobs, so a part can say which one already names who
-// does it.
-const SERVING_JOBS = ['Song Leader', 'Opening Prayer', 'Scripture Reading', 'Communion', 'Closing Prayer', 'Usher'];
+// does it — the same list the schedule and the men's preferences use.
+const SERVING_JOBS = WORSHIP_ROLES;
 
 const BLANK = { name: '', takesSong: false, takesPerson: true, detailLabel: '', servingJob: '' };
 
@@ -78,6 +79,18 @@ function OrderEditor({ parts, outlines, onSaved }) {
     finally { setBusy(false); }
   }
 
+  // The default for every service: any with an order of its own goes back to it.
+  const ownOrders = outlines.services.filter(s => s.own);
+  async function useEverywhere() {
+    if (!window.confirm(`Use the default order for every service? ${ownOrders.map(s => s.name).join(', ')} will lose ${ownOrders.length === 1 ? 'its' : 'their'} own order.`)) return;
+    setBusy(true); setError('');
+    try {
+      await call('/api/worship/outlines/default/everywhere', { method: 'POST' });
+      onSaved();
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  }
+
   const changed = JSON.stringify(order) !== JSON.stringify(current);
   return (
     <section className="card space-y-3 max-w-2xl" aria-label="Usual order">
@@ -87,11 +100,18 @@ function OrderEditor({ parts, outlines, onSaved }) {
       </div>
       <select value={target} onChange={e => setTarget(e.target.value)} aria-label="Which service's order"
         className="border border-gray-300 rounded-lg px-3 py-2 text-sm w-full sm:w-auto">
-        <option value="default">Every service (unless it has its own)</option>
+        <option value="default">The default — every service (unless it has its own)</option>
         {outlines.services.map(s => <option key={s.id} value={s.id}>{s.name}{s.own ? ' — its own order' : ''}</option>)}
       </select>
       {service && !service.own && (
-        <p className="text-xs text-gray-500">{service.name} uses the order for every service. Change it below to give it its own.</p>
+        <p className="text-xs text-gray-500">{service.name} uses the default order. Change it below to give it its own.</p>
+      )}
+      {target === 'default' && (
+        <p className="text-xs text-gray-500">
+          {ownOrders.length
+            ? <>Every service starts from this order except {ownOrders.map(s => s.name).join(', ')}, which {ownOrders.length === 1 ? 'has its' : 'have their'} own.</>
+            : 'Every service starts from this order.'}
+        </p>
       )}
       <ol className="space-y-1">
         {order.map((id, i) => (
@@ -112,7 +132,13 @@ function OrderEditor({ parts, outlines, onSaved }) {
         </select>
         <button onClick={() => save(order)} disabled={busy || !changed || !order.length} className="btn-primary text-sm py-1.5 disabled:opacity-40">Save order</button>
         {service?.own && (
-          <button onClick={() => save(null)} disabled={busy} className="text-xs text-gray-500 underline">Use the order for every service instead</button>
+          <button onClick={() => save(null)} disabled={busy} className="text-xs text-gray-500 underline">Use the default order instead</button>
+        )}
+        {target === 'default' && ownOrders.length > 0 && (
+          <button onClick={useEverywhere} disabled={busy || changed} title={changed ? 'Save the default order first' : undefined}
+            className="text-xs px-3 py-1.5 rounded-lg border border-church-navy text-church-navy hover:bg-church-cream disabled:opacity-40">
+            Use this order for every service
+          </button>
         )}
       </div>
       {error && <p className="text-sm text-red-600">{error}</p>}

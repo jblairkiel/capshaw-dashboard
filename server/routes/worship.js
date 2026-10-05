@@ -173,9 +173,26 @@ router.put('/outlines/:serviceTypeId', requireOrganizer, (req, res) => {
   if (id !== null && !Number.isInteger(id)) return res.status(400).json({ success: false, error: 'No such service' });
   const result = plans.setOutline(id, req.body?.partIds ?? null);
   if (result.error) return fail(res, result);
+  const name = id === null ? '' : plans.outlines().services.find(sv => sv.id === id)?.name || 'a service';
   actionLog.record(req.user, {
     area: 'worship-order', action: 'update', entity: 'order of worship', entityId: id ?? 'default',
-    summary: `Changed the usual order of ${id === null ? 'a service' : 'a service type'}`, details: { serviceTypeId: id, partIds: req.body?.partIds ?? null },
+    summary: id === null ? 'Changed the default order of worship'
+      : req.body?.partIds == null ? `Put ${name} back on the default order of worship` : `Gave ${name} an order of worship of its own`,
+    details: { serviceTypeId: id, partIds: req.body?.partIds ?? null },
+  });
+  res.json({ success: true, outlines: plans.outlines() });
+});
+
+// POST /api/worship/outlines/default/everywhere — every service on the default
+// order, dropping any order a service had of its own.
+router.post('/outlines/default/everywhere', requireOrganizer, (req, res) => {
+  const result = plans.useDefaultEverywhere();
+  actionLog.record(req.user, {
+    area: 'worship-order', action: 'update', entity: 'order of worship', entityId: 'default',
+    summary: result.services.length
+      ? `Put every service on the default order of worship (${result.services.join(', ')} had their own)`
+      : 'Put every service on the default order of worship',
+    details: result,
   });
   res.json({ success: true, outlines: plans.outlines() });
 });
