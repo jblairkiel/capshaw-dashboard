@@ -298,7 +298,21 @@ function rosterSlots(dates) {
     .filter(r => r.isoDate && wanted.has(r.isoDate));
 }
 
-function rosterSection(slots, dates, configured) {
+// The printed roster names some rows its own way; the Serving Schedule's job
+// lands on the printed row when the roster has that row and not the
+// schedule's own name for it.
+const PRINTED_AS = {
+  'Communion':        'Communion Leader',
+  'Communion Assist': 'Communion Assists',
+  'Speaker':          'Sermon',
+  'Usher':            'Ushers',
+};
+
+function rosterSection(rawSlots, dates, configured) {
+  const slots = rawSlots.map(s => {
+    const printed = PRINTED_AS[s.job];
+    return printed && configured.includes(printed) && !configured.includes(s.job) ? { ...s, job: printed } : s;
+  });
   // Configured order first, then anything else the schedule happens to carry.
   const extra = [...new Set(slots.map(s => s.job).filter(j => j && !configured.includes(j)))].sort();
   const jobs  = [...configured, ...extra];

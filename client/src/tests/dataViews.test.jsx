@@ -860,6 +860,60 @@ describe('ServingSchedule', () => {
     expect(within(within(dialog).getByLabelText('Service')).getAllByRole('option').map(o => o.textContent)).toEqual(['Gospel Meeting', 'Lectureship']);
   });
 
+  test('a job can be needed more than once at a service — two communion assists', async () => {
+    const fetchMock = mockSchedule({ canManage: true, jobs: ['Song Leader', 'Communion', 'Communion Assist'], serviceJobs: [
+      { service: 'Sunday Worship', special: false, jobs: ['Song Leader', 'Communion', 'Communion Assist', 'Communion Assist'], defaults: ['Song Leader', 'Communion', 'Communion Assist', 'Communion Assist'], custom: false, updatedBy: '' },
+    ] });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Jobs for each service' }));
+    const sunday = screen.getByRole('region', { name: 'Jobs for Sunday Worship' });
+    const howMany = within(sunday).getByLabelText('Sunday Worship: how many Communion Assist');
+    expect(howMany).toHaveValue('2');
+    fireEvent.change(howMany, { target: { value: '3' } });
+    fireEvent.click(within(sunday).getByRole('button', { name: 'Save' }));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, o]) => String(url).endsWith('/service-jobs') && o?.method === 'PUT');
+      expect(JSON.parse(call[1].body)).toEqual({ service: 'Sunday Worship', jobs: ['Song Leader', 'Communion', 'Communion Assist', 'Communion Assist', 'Communion Assist'] });
+    });
+  });
+
+  test('the keeper removes a service from the schedule, after saying who is down for it', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const fetchMock = mockSchedule({ canManage: true }, { '/occasions': { success: true, removed: 2, assignments: [] } });
+    render(<ServingSchedule />);
+    await card('Sunday Worship, Sunday, April 13');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Sunday Worship, Sunday, April 13' }));
+    expect(confirm.mock.calls[0][0]).toMatch(/Lee Park is down for it and will be told/);
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, o]) => String(url).endsWith('/occasions') && o?.method === 'DELETE');
+      expect(JSON.parse(call[1].body)).toEqual({ month: 'April 2025', date: 'April 13', service: 'Sunday Worship' });
+    });
+    expect(await screen.findByText(/Removed Sunday Worship, April 13 — 2 slots/)).toBeInTheDocument();
+    confirm.mockRestore();
+  });
+
+  test('members get no Remove button on a service', async () => {
+    mockSchedule();
+    render(<ServingSchedule />);
+    await card('Sunday Worship, Sunday, April 6');
+    expect(screen.queryByRole('button', { name: /^Remove / })).not.toBeInTheDocument();
+  });
+
+  test('a kind of special service can be taken off the list', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const fetchMock = mockSchedule({ canManage: true, specialServices: ['Gospel Meeting', 'Youth Rally'] }, {
+      '/service-kinds/': { success: true, specialServices: ['Gospel Meeting'], serviceJobs: [] },
+    });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a special service' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Service'), { target: { value: 'Youth Rally' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Take Youth Rally off the list' }));
+    await waitFor(() => expect(within(within(dialog).getByLabelText('Service')).getAllByRole('option').map(o => o.textContent)).toEqual(['Gospel Meeting']));
+    expect(fetchMock.mock.calls.some(([url, o]) => String(url).endsWith('/service-kinds/Youth%20Rally') && o?.method === 'DELETE')).toBe(true);
+    confirm.mockRestore();
+  });
+
   // ─── Your jobs ──────────────────────────────────────────────────────────────
 
   const MY_JOBS = {

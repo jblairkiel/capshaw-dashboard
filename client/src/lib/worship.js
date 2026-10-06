@@ -6,6 +6,7 @@ export const WORSHIP_ROLES = [
   'Opening Prayer',
   'Scripture Reading',
   'Communion',
+  'Communion Assist',
   'Speaker',
   'Closing Prayer',
   'Usher',

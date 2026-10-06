@@ -12,6 +12,7 @@ const { SERVICES, SERVICE_ROLES } = require('../workflows/scheduling');
 const { WORSHIP_ROLES } = require('./people');
 
 const SPECIAL_DEFAULT = ['Song Leader', 'Opening Prayer', 'Closing Prayer'];
+const MAX_OF_ONE_JOB = 8;
 
 function stored() {
   const out = {};
@@ -63,7 +64,14 @@ function setJobs(service, jobs, user) {
   if (!Array.isArray(jobs)) return { error: 'Say which jobs the service needs' };
   const unknown = jobs.find(j => !WORSHIP_ROLES.includes(j));
   if (unknown !== undefined) return { error: `"${unknown}" is not one of the worship jobs` };
-  const clean = [...new Set(jobs)];
+  // A job may be listed more than once — two communion assists are two
+  // slots — but not without limit.
+  const counts = {};
+  for (const j of jobs) counts[j] = (counts[j] || 0) + 1;
+  const tooMany = Object.entries(counts).find(([, n]) => n > MAX_OF_ONE_JOB);
+  if (tooMany) return { error: `No more than ${MAX_OF_ONE_JOB} of ${tooMany[0]} at one service` };
+  // Kept in the order of the worship jobs, repeats together.
+  const clean = WORSHIP_ROLES.flatMap(j => Array(counts[j] || 0).fill(j));
   if (!clean.length) return { error: 'A service needs at least one job' };
   db.prepare(`
     INSERT INTO service_jobs (service, jobs, updated_by, updated_at) VALUES (?, ?, ?, datetime('now'))
@@ -72,4 +80,18 @@ function setJobs(service, jobs, user) {
   return { service: name, before, jobs: clean };
 }
 
-module.exports = { SPECIAL_DEFAULT, jobsFor, rolesByService, list, setJobs };
+// How many slots of each job are already down for one service on one day,
+// and how many more the jobs list asks for: building again only adds the
+// difference.
+function missing(jobs, have) {
+  const left = new Map(have);
+  const out = [];
+  for (const job of jobs) {
+    const n = left.get(job) || 0;
+    if (n > 0) left.set(job, n - 1);
+    else out.push(job);
+  }
+  return out;
+}
+
+module.exports = { SPECIAL_DEFAULT, MAX_OF_ONE_JOB, missing, jobsFor, rolesByService, list, setJobs };
