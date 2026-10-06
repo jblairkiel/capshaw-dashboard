@@ -242,6 +242,11 @@ describe('a special service', () => {
     expect(res.body.specialServices).toEqual(expect.arrayContaining(['Gospel Meeting', 'Monthly Singing']));
     expect(res.body.specialServices).not.toEqual(expect.arrayContaining(['Sunday AM Worship']));
     expect(res.body.specialServices).not.toEqual(expect.arrayContaining(['Sunday PM Worship']));
+    // Bible classes are never offered, however they are set up.
+    db.prepare("UPDATE service_types SET tracking = '', weekday = NULL WHERE name LIKE '%Bible Study%'").run();
+    const again = await request(buildApp(KEEPER)).get('/api/serving');
+    expect(again.body.specialServices.filter(s => /bible/i.test(s))).toEqual([]);
+    expect((await add(KEEPER, { ...MEETING, service: 'Sunday Bible Study' })).status).toBe(400);
     expect((await add(KEEPER, { ...MEETING, service: 'Sunday AM Worship' })).status).toBe(400);
     expect((await add(KEEPER, { ...MEETING, service: 'Made Up' })).status).toBe(400);
   });
@@ -524,7 +529,115 @@ describe('GET /api/serving', () => {
     expect(member.body.me).toMatchObject({ name: 'Joe Carter' });
     // There is nothing left for a member to sign up for, so the page is not
     // told anything about eligibility any more.
-    expect(member.body.me.jobs).toBeUndefined();
     expect(member.body.me.canSignUp).toBeUndefined();
+    // Somebody not in the directory has no jobs to be told about.
+    expect((await request(buildApp(UNLINKED)).get('/api/serving')).body.me.jobs).toBeNull();
+  });
+});
+
+describe('your jobs this month', () => {
+  const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const now = new Date();
+  const thisMonth = `${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
+  const nextDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const nextMonth = `${MONTHS[nextDate.getMonth()]} ${nextDate.getFullYear()}`;
+  const put = (month, date, job, name, service = 'Sunday Worship') =>
+    db.prepare('INSERT INTO job_assignments (month, date, service, job, name) VALUES (?, ?, ?, ?, ?)').run(month, date, service, job, name).lastInsertRowid;
+
+  test('lists what he is down for this month and next, in date order, whatever month the page shows', async () => {
+    const monthWord = MONTHS[now.getMonth()];
+    put(thisMonth, `${monthWord} 28`, 'Usher', 'joe carter');
+    put(thisMonth, `${monthWord} 1`, 'Song Leader', 'Joe Carter');
+    put(thisMonth, `${monthWord} 1`, 'Opening Prayer', 'Ned Poole');
+    put(nextMonth, `${MONTHS[nextDate.getMonth()]} 3`, 'Closing Prayer', 'Joe Carter', 'Wednesday');
+    put('June 2020', 'June 7', 'Song Leader', 'Joe Carter');
+
+    const { jobs } = (await request(buildApp(MAN)).get('/api/serving?month=June%202020')).body.me;
+    expect(jobs.thisMonth.month).toBe(thisMonth);
+    expect(jobs.thisMonth.jobs.map(j => [j.date, j.job])).toEqual([[`${monthWord} 1`, 'Song Leader'], [`${monthWord} 28`, 'Usher']]);
+    expect(jobs.thisMonth.jobs[0].iso).toMatch(/^\d{4}-\d{2}-01$/);
+    expect(jobs.nextMonth).toMatchObject({ month: nextMonth, jobs: [expect.objectContaining({ job: 'Closing Prayer', service: 'Wednesday' })] });
+  });
+
+  test('says when he has already asked to be replaced on one', async () => {
+    const id = put(thisMonth, `${MONTHS[now.getMonth()]} 28`, 'Usher', 'Joe Carter');
+    await request(buildApp(MAN)).post(`/api/serving/assignments/${id}/replacement`).send({ reason: 'Away' });
+    const { jobs } = (await request(buildApp(MAN)).get('/api/serving')).body.me;
+    expect(jobs.thisMonth.jobs[0].replacement).toMatchObject({ askedBy: 'Joe', reason: 'Away' });
+  });
+});
+
+describe('replacement requests: who hears, and the history', () => {
+  let slot, ADMIN;
+  const engine = () => require('../workflows/engine');
+  beforeEach(async () => {
+    ADMIN = addUser('Ada', 'admin');
+    await request(buildApp(KEEPER)).post('/api/serving/months').send({ month: 'June 2026', services: ['Sunday Worship'] });
+    slot = slotsIn('June 2026').find(s => s.job === 'Song Leader');
+    db.prepare('UPDATE job_assignments SET name = ? WHERE id = ?').run('Joe Carter', slot.id);
+  });
+
+  test('an admin is not asked while somebody keeps the schedule, but is when nobody does', async () => {
+    await request(buildApp(MAN)).post(`/api/serving/assignments/${slot.id}/replacement`).send({ reason: 'Away' });
+    expect(engine().inbox(KEEPER)).toHaveLength(1);
+    expect(engine().inbox(ADMIN)).toHaveLength(0);
+    expect(db.prepare('SELECT user_id FROM notifications').all().map(r => r.user_id)).toEqual([KEEPER.id]);
+
+    db.prepare('DELETE FROM user_areas').run();
+    expect(engine().inbox(ADMIN)).toHaveLength(1);
+  });
+
+  test('the inbox carries the slot, so it can suggest who could take it', async () => {
+    await request(buildApp(MAN)).post(`/api/serving/assignments/${slot.id}/replacement`).send({ reason: 'Away' });
+    expect(engine().inbox(KEEPER)[0].context).toEqual({
+      slotId: slot.id, job: 'Song Leader', date: slot.date, month: 'June 2026', service: 'Sunday Worship', currentName: 'Joe Carter', reason: 'Away',
+    });
+  });
+
+  test('every request is kept: open ones first, then how each ended and who settled it', async () => {
+    const other = slotsIn('June 2026').find(s => s.job === 'Opening Prayer');
+    db.prepare('UPDATE job_assignments SET name = ? WHERE id = ?').run('Ned Poole', other.id);
+    await request(buildApp(MAN)).post(`/api/serving/assignments/${slot.id}/replacement`).send({ reason: 'Away' });
+    await request(buildApp(KEEPER)).patch(`/api/serving/assignments/${slot.id}`).send({ name: 'Ned Poole' });
+    await request(buildApp(OTHER_MAN)).post(`/api/serving/assignments/${other.id}/replacement`).send({});
+
+    const res = await request(buildApp(KEEPER)).get('/api/serving/replacements');
+    expect(res.body.replacements.map(r => [r.name, r.open, r.outcome])).toEqual([
+      ['Ned Poole', true, ''],
+      ['Joe Carter', false, 'replaced'],
+    ]);
+    expect(res.body.replacements[1]).toMatchObject({ askedBy: 'Joe', reason: 'Away', replacedBy: 'Ned Poole', settledBy: 'Cora', iso: '2026-06-07' });
+    expect((await request(buildApp(ADMIN)).get('/api/serving/replacements')).body.replacements).toHaveLength(2);
+    expect((await request(buildApp(MAN)).get('/api/serving/replacements')).status).toBe(403);
+  });
+});
+
+describe('new kinds of service', () => {
+  const addKind = (user, name) => request(buildApp(user)).post('/api/serving/service-kinds').send({ name });
+
+  test('the schedule keeper adds one, and it can then be put on the schedule', async () => {
+    const res = await addKind(KEEPER, '  Youth   Rally ');
+    expect(res.status).toBe(200);
+    expect(res.body.service).toBe('Youth Rally');
+    expect(res.body.specialServices).toContain('Youth Rally');
+    expect(db.prepare("SELECT tracking, weekday, active FROM service_types WHERE name = 'Youth Rally'").get())
+      .toEqual({ tracking: 'when-held', weekday: null, active: 1 });
+    expect(db.prepare("SELECT summary FROM action_log WHERE entity = 'service type'").get().summary).toBe('Added Youth Rally as a kind of special service');
+    const laid = await request(buildApp(KEEPER)).post('/api/serving/special').send({ service: 'Youth Rally', from: '2026-11-07', jobs: ['Song Leader'] });
+    expect(laid.body.created).toBe(1);
+  });
+
+  test('a retired one comes back rather than being added twice', async () => {
+    db.prepare("INSERT INTO service_types (name, active, tracking) VALUES ('Lectureship', 0, 'when-held')").run();
+    expect((await addKind(KEEPER, 'lectureship')).body.service).toBe('Lectureship');
+    expect(db.prepare("SELECT COUNT(*) n FROM service_types WHERE lower(name) = 'lectureship'").get().n).toBe(1);
+    expect(db.prepare("SELECT active FROM service_types WHERE name = 'Lectureship'").get().active).toBe(1);
+  });
+
+  test('never a Bible class, a regular service, a blank name, or by anyone but the keeper', async () => {
+    expect((await addKind(KEEPER, 'Ladies Bible Class')).body.error).toMatch(/Bible classes/);
+    expect((await addKind(KEEPER, 'Sunday Evening')).body.error).toMatch(/regular services/);
+    expect((await addKind(KEEPER, 'x')).body.error).toMatch(/3 to 60/);
+    expect((await addKind(MAN, 'Youth Rally')).status).toBe(403);
   });
 });

@@ -100,6 +100,14 @@ module.exports = {
     };
   },
 
+  // What My Inbox shows beside the task: the slot, so it can suggest who
+  // could take it.
+  inboxContext: data => ({
+    slotId: Number(data.slotId) || null,
+    job: data.slotJob || '', date: data.slotDate || '', month: data.slotMonth || '', service: data.slotService || '',
+    currentName: data.currentName || '', reason: data.reason || '',
+  }),
+
   titleFor: data => `Replace ${data.currentName}: ${data.slotJob}, ${when(data)}`,
 
   preview: data => ({
@@ -117,7 +125,9 @@ module.exports = {
         'They cannot do this one. Find someone else and put their name in, leave the slot open to fill later, ' +
         'or — if you have talked and they can do it after all — keep them on. Changing the name on the ' +
         'Service Roster\'s Scheduled tab closes this too.',
-      assign: { role: AREA },
+      // Whoever keeps the schedule. Admins hold that area too, but are only
+      // asked when nobody else does; every request stays in the history.
+      assign: { role: AREA, adminsOnlyWhenUnheld: true },
       assignLabel: 'Whoever keeps the serving schedule',
       actions: [
         {
