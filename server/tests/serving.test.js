@@ -641,3 +641,118 @@ describe('new kinds of service', () => {
     expect((await addKind(MAN, 'Youth Rally')).status).toBe(403);
   });
 });
+
+
+describe('communion assists', () => {
+  const build = (body = { month: 'June 2026', services: ['Sunday Worship'] }) => request(buildApp(KEEPER)).post('/api/serving/months').send(body);
+  const assistsOn = date => slotsIn('June 2026').filter(s => s.date === date && s.job === 'Communion Assist');
+
+  test('every Sunday morning gets two communion assist slots beside the communion', async () => {
+    await build();
+    for (const date of ['June 7', 'June 14', 'June 21', 'June 28']) {
+      expect(assistsOn(date)).toHaveLength(2);
+      expect(slotsIn('June 2026').filter(s => s.date === date && s.job === 'Communion')).toHaveLength(1);
+    }
+  });
+
+  test('a month built before communion assists were a job gets them when it is built again, and nothing else doubles', async () => {
+    await build();
+    db.prepare("DELETE FROM job_assignments WHERE job = 'Communion Assist' AND date = 'June 7'").run();
+    db.prepare("DELETE FROM job_assignments WHERE job = 'Communion Assist' AND date = 'June 14' AND id = (SELECT max(id) FROM job_assignments WHERE job = 'Communion Assist' AND date = 'June 14')").run();
+    const before = slotsIn('June 2026').length;
+    const res = await build();
+    expect(res.body.created).toBe(3);
+    expect(slotsIn('June 2026').length).toBe(before + 3);
+    expect(assistsOn('June 7')).toHaveLength(2);
+    expect(assistsOn('June 14')).toHaveLength(2);
+  });
+
+  test('filling never puts the same man on two jobs at one service', async () => {
+    for (const p of [man, otherMan]) {
+      for (const role of ['Communion', 'Communion Assist']) {
+        db.prepare('INSERT INTO worship_preferences (directory_id, role, level) VALUES (?, ?, ?)').run(p.id, role, 'preferred');
+      }
+    }
+    await build();
+    for (const date of ['June 7', 'June 14']) {
+      const names = slotsIn('June 2026').filter(s => s.date === date && /^Communion/.test(s.job) && s.name).map(s => s.name);
+      expect(new Set(names).size).toBe(names.length);
+    }
+  });
+
+  test('the schedule keeper sets how many a service needs, up to a limit', async () => {
+    const put = jobs => request(buildApp(KEEPER)).put('/api/serving/service-jobs').send({ service: 'Sunday Worship', jobs });
+    const res = await put(['Song Leader', 'Communion Assist', 'Communion', 'Communion Assist', 'Communion Assist']);
+    expect(res.status).toBe(200);
+    expect(res.body.serviceJobs.find(s => s.service === 'Sunday Worship').jobs)
+      .toEqual(['Song Leader', 'Communion', 'Communion Assist', 'Communion Assist', 'Communion Assist']);
+    expect((await put(Array(9).fill('Communion Assist'))).body.error).toMatch(/No more than 8 of Communion Assist/);
+    await build();
+    expect(assistsOn('June 7')).toHaveLength(3);
+  });
+
+  test('a special service can ask for more than one too', async () => {
+    db.prepare("UPDATE service_types SET active = 1 WHERE name = 'Gospel Meeting'").run();
+    const res = await request(buildApp(KEEPER)).post('/api/serving/special')
+      .send({ service: 'Gospel Meeting', from: '2026-11-15', jobs: ['Song Leader', 'Communion Assist', 'Communion Assist'] });
+    expect(res.body.created).toBe(3);
+  });
+});
+
+describe('taking a service off the schedule', () => {
+  const remove = (user, body) => request(buildApp(user)).delete('/api/serving/occasions').send(body);
+
+  beforeEach(async () => {
+    await request(buildApp(KEEPER)).post('/api/serving/months').send({ month: 'June 2026', services: ['Sunday Worship', 'Wednesday'], fill: false });
+  });
+
+  test('removes every slot it had, tells whoever was down for it, and closes a request on it', async () => {
+    const slot = slotsIn('June 2026').find(s => s.date === 'June 10' && s.job === 'Song Leader');
+    db.prepare('UPDATE job_assignments SET name = ? WHERE id = ?').run('Joe Carter', slot.id);
+    await request(buildApp(MAN)).post(`/api/serving/assignments/${slot.id}/replacement`).send({ reason: 'Away' });
+
+    const res = await remove(KEEPER, { month: 'June 2026', date: 'June 10', service: 'Wednesday' });
+    expect(res.status).toBe(200);
+    expect(res.body.removed).toBe(3);
+    expect(slotsIn('June 2026').filter(s => s.date === 'June 10')).toEqual([]);
+    expect(slotsIn('June 2026').filter(s => s.date === 'June 7').length).toBeGreaterThan(0);
+    expect(db.prepare("SELECT status FROM workflow_instances WHERE definition_id = 'serving-replacement'").get().status).toBe('completed');
+    expect(db.prepare("SELECT title FROM notifications WHERE user_id = ? AND kind = 'serving-service-removed'").get(MAN.id).title)
+      .toBe('Wednesday, June 10 is off the serving schedule — you are no longer down for it');
+    expect(db.prepare("SELECT summary FROM action_log WHERE action = 'delete' AND entity = 'serving schedule'").get().summary)
+      .toMatch(/^Removed Wednesday, June 10 from the schedule — 3 slots \(Joe Carter\)$/);
+  });
+
+  test('only the keeper, and only a service that is there', async () => {
+    expect((await remove(MAN, { month: 'June 2026', date: 'June 10', service: 'Wednesday' })).status).toBe(403);
+    expect((await remove(KEEPER, { month: 'June 2026', date: 'June 11', service: 'Wednesday' })).status).toBe(404);
+    expect((await remove(KEEPER, { month: 'June 2026' })).status).toBe(400);
+  });
+});
+
+describe('taking a kind of service off the list', () => {
+  const retire = (user, name) => request(buildApp(user)).delete(`/api/serving/service-kinds/${encodeURIComponent(name)}`);
+
+  test('retires it, so it is no longer offered but its name stays on the records', async () => {
+    await request(buildApp(KEEPER)).post('/api/serving/service-kinds').send({ name: 'Youth Rally' });
+    const res = await retire(KEEPER, 'Youth Rally');
+    expect(res.status).toBe(200);
+    expect(res.body.specialServices).not.toContain('Youth Rally');
+    expect(db.prepare("SELECT active FROM service_types WHERE name = 'Youth Rally'").get().active).toBe(0);
+    expect(db.prepare("SELECT summary FROM action_log WHERE entity = 'service type' AND action = 'update'").get().summary)
+      .toBe('Took Youth Rally off the list of special services');
+  });
+
+  test('not while it is still on the schedule ahead', async () => {
+    await request(buildApp(KEEPER)).post('/api/serving/service-kinds').send({ name: 'Youth Rally' });
+    const next = new Date(); next.setDate(next.getDate() + 10);
+    const iso = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}`;
+    await request(buildApp(KEEPER)).post('/api/serving/special').send({ service: 'Youth Rally', from: iso, jobs: ['Song Leader'] });
+    expect((await retire(KEEPER, 'Youth Rally')).body.error).toMatch(/still on the schedule for 1 day ahead/);
+  });
+
+  test('never a regular service, and only by the keeper', async () => {
+    expect((await retire(KEEPER, 'Sunday AM Worship')).status).toBe(400);
+    expect((await retire(MAN, 'Gospel Meeting')).status).toBe(403);
+  });
+});

@@ -29,6 +29,7 @@ const KINDS = {
   'bug-report-status':     'A bug report you filed has an update',
   'serving-replacement-asked': 'Somebody on the Serving Schedule needs replacing',
   'serving-replacement-done':  'Your request to be replaced was answered',
+  'serving-service-removed':   'A service you were down for was taken off the schedule',
   'worship-plan-submitted': 'A song leader submitted a service',
   'worship-plan-confirmed': 'A service you submitted was confirmed',
   'song-request-planned':   'A song you asked for is going to be sung',

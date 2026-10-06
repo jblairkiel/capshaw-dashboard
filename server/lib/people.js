@@ -27,6 +27,10 @@ const WORSHIP_ROLES = [
   'Opening Prayer',
   'Scripture Reading',
   'Communion',
+  // Serving the trays beside whoever leads the Lord's Supper. A service
+  // usually needs more than one, so it can be listed more than once among a
+  // service's jobs (lib/serviceJobs.js).
+  'Communion Assist',
   'Speaker',
   'Closing Prayer',
   'Usher',

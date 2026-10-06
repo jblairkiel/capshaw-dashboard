@@ -206,10 +206,31 @@ function SpecialServiceDialog({ choices: given, jobs, serviceJobs: givenJobs = [
     e.preventDefault();
     setBusy(true); setError('');
     try {
-      const json = await send(`${API}/special`, { method: 'POST', ...jsonBody({ service, from, through: through || from, jobs: jobs.filter(j => chosen.has(j)) }) });
+      // A job the service usually has more than one of keeps that many.
+      const usualCounts = countsOf(usual(service));
+      const picked = jobs.filter(j => chosen.has(j)).flatMap(j => Array(usualCounts[j] || 1).fill(j));
+      const json = await send(`${API}/special`, { method: 'POST', ...jsonBody({ service, from, through: through || from, jobs: picked }) });
       onAdded(json);
     } catch (err) {
       setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  async function removeKind() {
+    if (!window.confirm(`Take ${service} off the list of special services? It can be added back later.`)) return;
+    setBusy(true); setError('');
+    try {
+      const json = await send(`${API}/service-kinds/${encodeURIComponent(service)}`, { method: 'DELETE' });
+      setChoices(json.specialServices);
+      setServiceJobs(json.serviceJobs);
+      const next = json.specialServices[0] || '';
+      setService(next);
+      setChosen(new Set(usual(next).filter(j => jobs.includes(j))));
+      onKindAdded?.(json);
+    } catch (err) {
+      setError(err.message);
+    } finally {
       setBusy(false);
     }
   }
@@ -248,9 +269,16 @@ function SpecialServiceDialog({ choices: given, jobs, serviceJobs: givenJobs = [
               </select>
             </label>
             {!addingKind && (
-              <button type="button" onClick={() => setAddingKind(true)} className="mt-1 text-xs text-church-gold hover:text-church-navy">
-                + A kind of service not on the list
-              </button>
+              <div className="mt-1 flex items-center justify-between gap-2 flex-wrap">
+                <button type="button" onClick={() => setAddingKind(true)} className="text-xs text-church-gold hover:text-church-navy">
+                  + A kind of service not on the list
+                </button>
+                {service && (
+                  <button type="button" onClick={removeKind} disabled={busy} className="text-xs text-gray-500 hover:text-red-600 underline">
+                    Take {service} off the list
+                  </button>
+                )}
+              </div>
             )}
           </div>
           {addingKind && <NewKindOfService onAdded={kindAdded} onCancel={() => setAddingKind(false)} />}
@@ -345,19 +373,25 @@ function ReplacementDialog({ slot, onClose, onAsked }) {
 // special service starts with. A month already
 // built keeps its slots; Add a single job covers a one-off.
 
+const countsOf = list => list.reduce((m, j) => ({ ...m, [j]: (m[j] || 0) + 1 }), {});
+const MAX_OF_ONE_JOB = 8;
+
 function ServiceJobsRow({ entry, jobs, onSaved }) {
-  const [chosen, setChosen] = useState(() => new Set(entry.jobs));
+  // How many of each job — a job listed twice is two slots (two communion assists).
+  const [counts, setCounts] = useState(() => countsOf(entry.jobs));
   const [busy, setBusy]     = useState(false);
   const [error, setError]   = useState('');
-  const picked  = jobs.filter(j => chosen.has(j));
-  const changed = picked.join('|') !== jobs.filter(j => entry.jobs.includes(j)).join('|');
+  const expand  = c => jobs.flatMap(j => Array(c[j] || 0).fill(j));
+  const picked  = expand(counts);
+  const changed = picked.join('|') !== expand(countsOf(entry.jobs)).join('|');
+  const setCount = (job, n) => setCounts(prev => ({ ...prev, [job]: n }));
 
   async function save(list) {
     setBusy(true); setError('');
     try {
       const json = await send(`${API}/service-jobs`, { method: 'PUT', ...jsonBody({ service: entry.service, jobs: list }) });
       onSaved(json.serviceJobs);
-      if (list === null) setChosen(new Set(entry.defaults));
+      if (list === null) setCounts(countsOf(entry.defaults));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -376,12 +410,21 @@ function ServiceJobsRow({ entry, jobs, onSaved }) {
       </div>
       <div className="mt-1.5 grid grid-cols-2 sm:grid-cols-3 gap-1">
         {jobs.map(job => (
-          <label key={job} className="flex items-center gap-2 text-sm text-gray-700">
-            <input type="checkbox" checked={chosen.has(job)} className="accent-church-gold"
-              aria-label={`${entry.service}: ${job}`}
-              onChange={() => setChosen(prev => { const next = new Set(prev); if (next.has(job)) next.delete(job); else next.add(job); return next; })} />
-            {job}
-          </label>
+          <div key={job} className="flex items-center gap-2 text-sm text-gray-700">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={(counts[job] || 0) > 0} className="accent-church-gold"
+                aria-label={`${entry.service}: ${job}`}
+                onChange={e => setCount(job, e.target.checked ? 1 : 0)} />
+              {job}
+            </label>
+            {(counts[job] || 0) > 0 && (
+              <select value={counts[job]} onChange={e => setCount(job, Number(e.target.value))}
+                aria-label={`${entry.service}: how many ${job}`} title="How many"
+                className="border border-gray-200 rounded px-1 py-0.5 text-xs bg-white">
+                {Array.from({ length: MAX_OF_ONE_JOB }, (_, i) => i + 1).map(n => <option key={n} value={n}>×{n}</option>)}
+              </select>
+            )}
+          </div>
         ))}
       </div>
       <div className="mt-2 flex items-center gap-3">
@@ -507,7 +550,7 @@ const longDayOf = (iso, fallback = '') => (iso
   ? new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
   : fallback);
 
-function ServiceCard({ occasion, canManage, isMine, focused, onPick, onAsk }) {
+function ServiceCard({ occasion, canManage, isMine, focused, onPick, onAsk, onRemove }) {
   const longDay = longDayOf(occasion.iso, occasion.date);
   const open = occasion.slots.filter(s => !s.name.trim()).length;
   return (
@@ -518,7 +561,15 @@ function ServiceCard({ occasion, canManage, isMine, focused, onPick, onAsk }) {
           <h4 className="font-semibold text-church-navy text-sm">{occasion.service}</h4>
           <p className="text-xs text-gray-500">{longDay}{open > 0 && <span className="ml-2 text-amber-700 font-medium">{open} open</span>}</p>
         </div>
-        {occasion.iso && <CopyLinkButton url={rosterLink(occasion.iso, occasion.service)} service={occasion.service} date={occasion.iso} />}
+        <div className="flex items-center gap-2">
+          {occasion.iso && <CopyLinkButton url={rosterLink(occasion.iso, occasion.service)} service={occasion.service} date={occasion.iso} />}
+          {canManage && (
+            <button type="button" onClick={() => onRemove(occasion)} aria-label={`Remove ${occasion.service}, ${longDay}`}
+              className="px-2.5 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-500 hover:border-red-300 hover:text-red-600">
+              Remove
+            </button>
+          )}
+        </div>
       </header>
       <ul className="divide-y divide-gray-50">
         {occasion.slots.map(r => (
@@ -875,6 +926,21 @@ export default function ServingSchedule({ focus = null }) {
     await load(month);
   }
 
+  // Takes one service off the schedule — a cancelled Wednesday, one night of a
+  // meeting — with all its slots. Whoever was down for it is told.
+  async function removeOccasion(o) {
+    const named = o.slots.filter(s => s.name.trim()).map(s => s.name);
+    const who = named.length ? ` ${named.join(', ')} ${named.length === 1 ? 'is' : 'are'} down for it and will be told.` : '';
+    if (!window.confirm(`Remove ${o.service}, ${o.date} from the schedule, with all ${o.slots.length} of its slots?${who}`)) return;
+    try {
+      const json = await send(`${API}/occasions`, { method: 'DELETE', ...jsonBody({ month, date: o.date, service: o.service }) });
+      setNotice(`Removed ${o.service}, ${o.date} — ${json.removed} slot${json.removed === 1 ? '' : 's'}.`);
+      await load(month);
+    } catch (err) {
+      setNotice(err.message);
+    }
+  }
+
   async function emailEveryone() {
     if (!window.confirm(`Email everyone down for a job in ${month} their jobs, and send the whole month to the congregation?`)) return;
     setEmailing(true); setNotice('');
@@ -1007,7 +1073,7 @@ export default function ServingSchedule({ focus = null }) {
           {occasions.map(o => (
             <ServiceCard key={`${o.date}|${o.service}`} occasion={o} canManage={canManage} isMine={mineAlready}
               focused={!!focused && focused.date === o.iso && focused.service.toLowerCase() === o.service.toLowerCase()}
-              onPick={setPicking} onAsk={setAsking} />
+              onPick={setPicking} onAsk={setAsking} onRemove={removeOccasion} />
           ))}
         </div>
       )}
