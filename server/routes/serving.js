@@ -26,6 +26,9 @@ const { SERVICES, MONTHS, parseMonth, servicesIn } = require('../workflows/sched
 const serviceJobs = require('../lib/serviceJobs');
 const engine = require('../workflows/engine');
 const notifications = require('../lib/notifications');
+const rosterFill = require('../lib/rosterFill');
+const notify = require('../mail/notify');
+const mailer = require('../mail/mailer');
 const plans = require('../lib/worshipPlans');
 const actionLog = require('../lib/actionLog');
 const blackouts = require('../lib/blackouts');
@@ -157,10 +160,13 @@ router.get('/', (req, res) => {
   });
 });
 
-// ─── POST /api/serving/months ─────────────────────────────────────────────────
-// Lay out next month: every service in it, with the jobs that service needs and
-// nobody's name against them yet. Existing slots for that month are left alone,
-// so running it twice never doubles the roster up.
+// ─── POST /api/serving/months  { month, services, fill = true } ───────────────
+// Build a month: every service in it, with the jobs that service needs, and —
+// unless `fill` is false — a name in each open slot from what the men have said
+// they will do (server/lib/rosterFill.js). Existing slots are left alone and a
+// name already on the schedule is never moved, so building a month again only
+// lays out what is missing and fills what is still open. The schedule keeper
+// then changes any name by hand. Nobody is emailed until they choose to.
 
 router.post('/months', requireApproved, manageOnly, (req, res) => {
   const label  = String(req.body?.month || '').trim();
@@ -193,16 +199,51 @@ router.post('/months', requireApproved, manageOnly, (req, res) => {
     return n;
   })();
 
+  const { filled, open } = req.body?.fill === false
+    ? { filled: [], open: assignmentsIn(parsed.label).filter(a => !a.name.trim()).length }
+    : rosterFill.fillOpen(parsed.label);
+
   actionLog.record(req.user, {
     area:     AREA,
     action:   'create',
     entity:   'serving schedule',
     entityId: parsed.label,
-    summary:  `Laid out ${parsed.label} — ${created} empty slot${created === 1 ? '' : 's'} across ${wanted.join(', ')}`,
-    details:  { month: parsed.label, services: wanted, created },
+    summary:  `Built ${parsed.label} — ${created} new slot${created === 1 ? '' : 's'}, ${filled.length} filled from preferences, ${open} still open`,
+    details:  { month: parsed.label, services: wanted, created, filled: filled.map(f => ({ id: f.id, job: f.job, date: f.date, name: f.name })), open },
   });
 
-  res.json({ success: true, month: parsed.label, created, assignments: assignmentsIn(parsed.label) });
+  res.json({ success: true, month: parsed.label, created, filled: filled.length, open, assignments: assignmentsWithConflicts(parsed.label) });
+});
+
+// ─── GET /api/serving/assignments/:id/candidates ──────────────────────────────
+// Who could take a slot, best fit first, each saying why he is or is not one:
+// what he has said about the job, whether he is away that day or already
+// serving at that service, and how many turns he has this month.
+
+router.get('/assignments/:id/candidates', requireApproved, manageOnly, (req, res) => {
+  const found = rosterFill.candidatesFor(req.params.id);
+  if (!found) return res.status(404).json({ success: false, error: 'No such slot' });
+  res.json({ success: true, slot: found.slot, candidates: found.candidates });
+});
+
+// ─── POST /api/serving/months/notify  { month } ───────────────────────────────
+// Once the month is as the schedule keeper wants it: each man down for a job
+// is emailed his own, and everyone who has not opted out gets the whole month.
+
+router.post('/months/notify', requireApproved, manageOnly, (req, res) => {
+  const month = String(req.body?.month || '').trim();
+  const rows = assignmentsIn(month).filter(a => a.name.trim());
+  if (!rows.length) return res.status(400).json({ success: false, error: `Nobody is down for anything in ${month || 'that month'} yet` });
+  const draft = { month, rows: rows.map(({ date, service, job, name }) => ({ date, service, job, name })) };
+  const { queued, unreachable } = notify.schedulePublished({ draft, instanceId: 'roster' });
+  notify.monthlyReport({ draft, instanceId: 'roster' });
+  mailer.drainOutbox().catch(err => console.error('[mail] drain failed:', err.message));
+  actionLog.record(req.user, {
+    area: AREA, action: 'update', entity: 'serving schedule', entityId: month,
+    summary: `Emailed ${month}'s jobs to ${queued.length} ${queued.length === 1 ? 'man' : 'men'}${unreachable.length ? ` (no address for ${unreachable.join(', ')})` : ''}`,
+    details: { month, emailed: queued.length, unreachable },
+  });
+  res.json({ success: true, emailed: queued.length, unreachable });
 });
 
 // ─── POST /api/serving/special ────────────────────────────────────────────────

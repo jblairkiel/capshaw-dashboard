@@ -427,7 +427,7 @@ export function PreferencesTab({ onPick }) {
                 {rows.map(m => (
                   <tr key={m.personId} className="border-t border-gray-100 align-top">
                     <td className="py-1.5 pr-3 sticky left-0 bg-white">
-                      <button type="button" onClick={() => onPick(m.name)} className="text-church-navy hover:underline text-left whitespace-nowrap">{m.name}</button>
+                      <button type="button" onClick={() => onPick(m.name, m.personId)} className="text-church-navy hover:underline text-left whitespace-nowrap">{m.name}</button>
                       {m.notes && <span className="block text-[11px] text-gray-500 max-w-[14rem] truncate" title={m.notes}>&ldquo;{m.notes}&rdquo;</span>}
                     </td>
                     {data.roles.map(r => <td key={r} className="py-1.5 px-2"><Answer level={m.preferences[r]} served={m.served[r]} /></td>)}

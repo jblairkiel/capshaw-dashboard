@@ -42,6 +42,10 @@ const PREFERENCES = {
   summary: { men: 3, said: 2, unsaid: 1 },
 };
 
+const MEMBERS = [
+  { id: 2, name: 'Ben Brown', gender: 'male', assignments: 1, preferences: { 'Opening Prayer': 'willing' }, notes: '', blackouts: [] },
+];
+
 function mockApi() {
   const calls = [];
   vi.stubGlobal('fetch', vi.fn(url => {
@@ -50,6 +54,7 @@ function mockApi() {
     if (url.startsWith('/api/participation/analysis')) body = ANALYSIS;
     else if (url.startsWith('/api/participation/person')) body = PERSON;
     else if (url.startsWith('/api/participation/preferences')) body = PREFERENCES;
+    else if (url.startsWith('/api/serving/members')) body = { success: true, members: MEMBERS };
     return Promise.resolve({ json: () => Promise.resolve(body) });
   }));
   return calls;
@@ -58,11 +63,11 @@ function mockApi() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('the Service Roster page', () => {
-  test('has the schedule, the roster, the analysis and the preferences as its tabs', async () => {
+  test('has the schedule, the preferences and the analysis as its tabs', async () => {
     mockApi();
     render(<ServiceRosterView tab="analysis" />);
     await screen.findByText('Who is carrying it');
-    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['Scheduled', 'Roster', 'Analysis', 'Preferences']);
+    expect(screen.getAllByRole('tab').map(t => t.textContent)).toEqual(['Scheduled', 'Preferences', 'Analysis']);
     expect(screen.getByRole('heading', { name: 'Service Roster' })).toBeInTheDocument();
   });
 });
@@ -149,10 +154,12 @@ describe('preferences', () => {
     expect(screen.getByRole('button', { name: 'Ben Brown' })).toBeInTheDocument();
   });
 
-  test("a man's name opens his record on the analysis", async () => {
+  test("a man's name opens him, and from there his record on the analysis", async () => {
     const calls = mockApi();
     await open();
     fireEvent.click(screen.getByRole('button', { name: 'Ben Brown' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Ben Brown' });
+    fireEvent.click(within(dialog).getByRole('button', { name: /see what he has served/i }));
     expect(await screen.findByText('What he said, and what he has done')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Analysis' })).toHaveAttribute('aria-selected', 'true');
     expect(calls.some(c => c.startsWith('/api/participation/person?name=Ben%20Brown'))).toBe(true);

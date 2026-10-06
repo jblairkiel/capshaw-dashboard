@@ -2,9 +2,9 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import ServiceRosterView from '../components/ServiceRosterView';
 
-// The Service Roster: what each man will volunteer for, kept by whoever builds
-// the schedule. The page is a grid — a row per man, summarised — with a
-// Details button opening the same editor a row used to expand into.
+// The Service Roster's Preferences tab, as whoever keeps the schedule uses it:
+// opening a man to record what he will do, or his time away, for him — when
+// he said it in the foyer rather than on My Household & Preferences.
 
 const MEMBERS = [
   {
@@ -18,170 +18,80 @@ const MEMBERS = [
     preferences: {}, notes: '', blackouts: [],
   },
   {
-    id: 3, name: 'Ruth Poole', gender: 'female', email: 'ruth@example.com', assignments: 0,
-    preferences: { Visuals: 'preferred' }, notes: '',
+    id: 3, name: 'Sam Lee', gender: '', email: '', assignments: 0,
+    preferences: {}, notes: '', blackouts: [],
   },
 ];
 
-function mockRoster(members = MEMBERS) {
+const PREFERENCES = {
+  success: true, weeks: 26, roles: ['Song Leader', 'Usher', 'Communion'],
+  men: MEMBERS.map(m => ({
+    personId: m.id, name: m.name, preferences: m.preferences, said: Object.keys(m.preferences).length,
+    updatedAt: null, notes: m.notes, served: {}, servedTotal: 0,
+  })),
+  coverage: [],
+  summary: { men: 3, said: 1, unsaid: 2 },
+};
+
+function mockRoster() {
   const fetchMock = vi.fn((url, options = {}) => {
+    let body = { success: true };
     if (options.method === 'PUT') {
-      const body = JSON.parse(options.body);
+      const sent = JSON.parse(options.body);
       const id   = Number(url.match(/members\/(\d+)/)[1]);
-      const kept = Object.fromEntries(Object.entries(body.preferences).filter(([, level]) => level));
-      return Promise.resolve({
-        json: () => Promise.resolve({
-          success: true,
-          member: { id, name: 'Ned Poole', preferences: kept, notes: body.notes ?? '' },
-        }),
-      });
-    }
-    return Promise.resolve({
-      json: () => Promise.resolve({
-        success: true,
-        members,
-        jobs: ['Song Leader', 'Usher', 'Communion'],
-        levels: ['preferred', 'willing', 'unavailable'],
-      }),
-    });
+      const kept = Object.fromEntries(Object.entries(sent.preferences).filter(([, level]) => level));
+      body = { success: true, member: { ...MEMBERS.find(m => m.id === id), preferences: kept, notes: sent.notes ?? '' } };
+    } else if (String(url).startsWith('/api/participation/preferences')) body = PREFERENCES;
+    else if (String(url).startsWith('/api/serving/members')) body = { success: true, members: MEMBERS };
+    return Promise.resolve({ json: () => Promise.resolve(body) });
   });
   vi.stubGlobal('fetch', fetchMock);
   return fetchMock;
 }
 
-async function renderRoster(members) {
-  mockRoster(members);
-  render(<ServiceRosterView tab="roster" />);
-  await screen.findByRole('button', { name: 'Details for Joe Carter' });
-}
-
-function rowNames() {
-  return screen.getAllByRole('button', { name: /^Details for / })
-    .map(b => b.getAttribute('aria-label').replace('Details for ', ''));
-}
-
-function openDetails(name) {
-  fireEvent.click(screen.getByRole('button', { name: `Details for ${name}` }));
+async function openMan(name) {
+  render(<ServiceRosterView tab="preferences" />);
+  fireEvent.click(await screen.findByRole('button', { name }));
   return screen.findByRole('dialog', { name });
 }
 
-describe('ServiceRosterView — the grid', () => {
+describe('ServiceRosterView — opening a man from Preferences', () => {
   beforeEach(() => { vi.unstubAllGlobals(); });
 
-  test('shows the men and, by default, leaves the women out', async () => {
-    await renderRoster();
-    expect(rowNames()).toEqual(['Joe Carter', 'Ned Poole']);
-
-    fireEvent.click(screen.getByRole('checkbox', { name: /only show the men/i }));
-    expect(rowNames()).toEqual(['Joe Carter', 'Ned Poole', 'Ruth Poole']);
-  });
-
-  test('summarises what somebody has said on the row, and says so when they have not', async () => {
-    await renderRoster();
-
-    const joeRow = screen.getByRole('button', { name: 'Details for Joe Carter' }).closest('tr');
-    expect(within(joeRow).getByText('1 glad')).toBeInTheDocument();
-    expect(within(joeRow).getByText('1 willing')).toBeInTheDocument();
-    expect(within(joeRow).getByText(/rather not: Communion/)).toBeInTheDocument();
-
-    const nedRow = screen.getByRole('button', { name: 'Details for Ned Poole' }).closest('tr');
-    expect(within(nedRow).getByText('Nothing said yet')).toBeInTheDocument();
-  });
-
-  test('shows turns on the roster, and a dash for nobody with any', async () => {
-    await renderRoster();
-    const joeRow = screen.getByRole('button', { name: 'Details for Joe Carter' }).closest('tr');
-    const nedRow = screen.getByRole('button', { name: 'Details for Ned Poole' }).closest('tr');
-
-    expect(within(joeRow).getByText('3')).toBeInTheDocument();
-    expect(within(nedRow).getAllByText('—').length).toBeGreaterThan(0);
-  });
-
-  test('counts how many have said anything at all', async () => {
-    await renderRoster();
-    expect(screen.getByText(/1 of 2 have said something/)).toBeInTheDocument();
-  });
-
-  test('narrows to the men who have not said yet', async () => {
-    await renderRoster();
-    fireEvent.change(screen.getByRole('combobox', { name: /who to show/i }), { target: { value: 'quiet' } });
-    expect(rowNames()).toEqual(['Ned Poole']);
-
-    fireEvent.change(screen.getByRole('combobox', { name: /who to show/i }), { target: { value: 'spoken' } });
-    expect(rowNames()).toEqual(['Joe Carter']);
-  });
-
-  test('searching narrows by name', async () => {
-    await renderRoster();
-    fireEvent.change(screen.getByPlaceholderText('Search members…'), { target: { value: 'ned' } });
-    expect(rowNames()).toEqual(['Ned Poole']);
-  });
-
-  test('a man away shows the range on his row, without opening him', async () => {
-    await renderRoster();
-    const joeRow = screen.getByRole('button', { name: 'Details for Joe Carter' }).closest('tr');
-    expect(within(joeRow).getByText('June 7 – June 21, 2026')).toBeInTheDocument();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  });
-});
-
-describe('ServiceRosterView — where the roster is thin', () => {
-  beforeEach(() => { vi.unstubAllGlobals(); });
-
-  test('names the jobs nobody has volunteered for', async () => {
-    await renderRoster();
-    // Joe is glad to lead singing and willing to usher; nothing else is covered.
-    expect(screen.getByText(/Nobody has volunteered for/)).toHaveTextContent('Opening Prayer');
-    expect(screen.getByText(/Nobody has volunteered for/)).not.toHaveTextContent('Song Leader');
-  });
-
-  test('a job somebody said "rather not" to still counts as uncovered', async () => {
-    await renderRoster();
-    expect(screen.getByText(/Nobody has volunteered for/)).toHaveTextContent('Communion');
-  });
-});
-
-describe('ServiceRosterView — the Details dialog', () => {
-  beforeEach(() => { vi.unstubAllGlobals(); });
-
-  test('opens a man who has said nothing and records a preference', async () => {
-    const fetchMock = mockRoster();
+  test('there is no separate Roster tab — an old link to it lands on Preferences', async () => {
+    mockRoster();
     render(<ServiceRosterView tab="roster" />);
-    await screen.findByRole('button', { name: 'Details for Joe Carter' });
-    await openDetails('Ned Poole');
+    await screen.findByText('How each job is covered');
+    expect(screen.queryByRole('tab', { name: 'Roster' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Preferences' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('records a preference for a man who has said nothing', async () => {
+    const fetchMock = mockRoster();
+    await openMan('Ned Poole');
 
     const group = screen.getByRole('group', { name: 'Usher preference' });
     fireEvent.click(within(group).getByRole('button', { name: /willing/i }));
     fireEvent.click(screen.getByRole('button', { name: /save preferences/i }));
 
     await waitFor(() => expect(fetchMock.mock.calls.some(([, o]) => o?.method === 'PUT')).toBe(true));
-
     const [url, options] = fetchMock.mock.calls.find(([, o]) => o?.method === 'PUT');
     expect(url).toBe('/api/serving/members/2/preferences');
     const body = JSON.parse(options.body);
     expect(body.preferences.Usher).toBe('willing');
     // Everything he did not choose is sent as null, so the server drops it.
     expect(body.preferences['Song Leader']).toBeNull();
-
-    // The grid row shows what was saved without another trip to the server,
-    // even with the dialog still open over it.
-    await waitFor(() => {
-      const nedRow = screen.getByRole('button', { name: 'Details for Ned Poole' }).closest('tr');
-      expect(within(nedRow).getByText('1 willing')).toBeInTheDocument();
-    });
   });
 
-  test('opening a man shows the reason for his time away, not just the dates', async () => {
-    await renderRoster();
-    await openDetails('Joe Carter');
+  test('shows the reason for his time away, not just the dates', async () => {
+    mockRoster();
+    await openMan('Joe Carter');
     expect(screen.getByText(/Away with family/)).toBeInTheDocument();
   });
 
   test('blocking out days for a man posts them against him', async () => {
     const fetchMock = mockRoster();
-    render(<ServiceRosterView tab="roster" />);
-    await screen.findByRole('button', { name: 'Details for Joe Carter' });
-    await openDetails('Ned Poole');
+    await openMan('Ned Poole');
 
     fireEvent.change(screen.getByLabelText('First day away'), { target: { value: '2026-07-05' } });
     fireEvent.change(screen.getByLabelText('Last day away'),  { target: { value: '2026-07-12' } });
@@ -194,37 +104,34 @@ describe('ServiceRosterView — the Details dialog', () => {
   });
 
   test('a man with nothing blocked out is said to be available', async () => {
-    await renderRoster();
-    await openDetails('Ned Poole');
+    mockRoster();
+    await openMan('Ned Poole');
     expect(screen.getByText(/available for every service on the roster/)).toBeInTheDocument();
   });
 
-  test('warns that a woman cannot be rostered whatever is recorded', async () => {
-    await renderRoster();
-    fireEvent.click(screen.getByRole('checkbox', { name: /only show the men/i }));
-    await openDetails('Ruth Poole');
-
+  test('warns when his directory entry does not say he is a man', async () => {
+    mockRoster();
+    await openMan('Sam Lee');
     expect(screen.getByText(/rosters the worship jobs among its men/)).toBeInTheDocument();
   });
 
-  test('closes without disturbing the grid underneath', async () => {
-    await renderRoster();
-    const dialog = await openDetails('Joe Carter');
-
+  test('closes without leaving the tab', async () => {
+    mockRoster();
+    const dialog = await openMan('Joe Carter');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'Details for Joe Carter' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Preferences' })).toHaveAttribute('aria-selected', 'true');
   });
 });
 
 describe('ServiceRosterView — when the server says no', () => {
   beforeEach(() => { vi.unstubAllGlobals(); });
 
-  test('shows the error rather than an empty roster', async () => {
+  test('shows the error rather than an empty list', async () => {
     vi.stubGlobal('fetch', vi.fn(() =>
       Promise.resolve({ json: () => Promise.resolve({ success: false, error: 'Not your area' }) })
     ));
-    render(<ServiceRosterView tab="roster" />);
+    render(<ServiceRosterView tab="preferences" />);
     expect(await screen.findByText('Not your area')).toBeInTheDocument();
   });
 });

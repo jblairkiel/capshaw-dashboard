@@ -2,8 +2,7 @@ import { render, screen, within, fireEvent, waitFor } from '@testing-library/rea
 import { describe, test, expect, vi, afterEach } from 'vitest';
 
 // Typing into a controlled input, the way the rest of these tests do it.
-const type   = (input, value) => fireEvent.change(input, { target: { value } });
-const choose = (select, value) => fireEvent.change(select, { target: { value } });
+const type = (input, value) => fireEvent.change(input, { target: { value } });
 
 import LivestreamsView from '../components/LivestreamsView';
 import VisitorTracker  from '../components/VisitorTracker';
@@ -377,7 +376,7 @@ describe('ServingSchedule', () => {
     { id: 5, month: 'April 2025', date: '',         service: '',               job: 'Visual Preparation', name: 'Sam Ford' },
   ];
 
-  function mockSchedule(overrides = {}) {
+  function mockSchedule(overrides = {}, routes = {}) {
     const body = {
       success: true,
       months: [{ month: 'April 2025', slots: 5 }],
@@ -391,10 +390,16 @@ describe('ServingSchedule', () => {
       me: { directoryId: null, name: '', gender: '', blackouts: [] },
       ...overrides,
     };
-    const fetchMock = vi.fn(() => Promise.resolve({ json: () => Promise.resolve(body) }));
+    const fetchMock = vi.fn((url, options = {}) => {
+      const route = Object.keys(routes).find(k => String(url).includes(k));
+      const answer = route ? routes[route] : body;
+      return Promise.resolve({ json: () => Promise.resolve(typeof answer === 'function' ? answer(url, options) : answer) });
+    });
     vi.stubGlobal('fetch', fetchMock);
     return fetchMock;
   }
+
+  const card = name => screen.findByRole('region', { name: new RegExp(`^${name}`) });
 
   afterEach(() => { vi.unstubAllGlobals(); });
 
@@ -404,32 +409,48 @@ describe('ServingSchedule', () => {
     expect(await screen.findByText('April 2025')).toBeInTheDocument();
   });
 
-  test('offers every week of the roster, and opens on the first', async () => {
+  test('shows the whole month, a card for each service in the order they happen', async () => {
     mockSchedule();
     render(<ServingSchedule />);
-    const weeks = await screen.findByRole('combobox', { name: 'Week' });
-
-    expect(within(weeks).getAllByRole('option').map(o => o.textContent)).toEqual(['April 6', 'April 13']);
-    expect(weeks).toHaveValue('April 6');
+    const first = await card('Sunday Worship, Sunday, April 6');
+    expect(within(first).getByText('Tom Nelson')).toBeInTheDocument();
+    expect(within(first).getByText('Opening Prayer')).toBeInTheDocument();
+    const second = screen.getByRole('region', { name: /^Sunday Worship, Sunday, April 13/ });
+    expect(within(second).getByText('Lee Park')).toBeInTheDocument();
+    expect(screen.getAllByRole('region').map(r => r.getAttribute('aria-label'))).toEqual([
+      'Sunday Worship, Sunday, April 6', 'Sunday Worship, Sunday, April 13',
+    ]);
+    expect(screen.queryByRole('combobox', { name: 'Week' })).not.toBeInTheDocument();
   });
 
-  test('shows one week at a time, in a single table', async () => {
+  test('open slots are counted for the month and on each card', async () => {
     mockSchedule();
     render(<ServingSchedule />);
-    await screen.findByRole('combobox', { name: 'Week' });
-
-    expect(screen.getAllByRole('table')).toHaveLength(1);
-    expect(screen.getByText('Opening Prayer')).toBeInTheDocument();
-    expect(screen.queryByText('Lee Park')).not.toBeInTheDocument();
+    expect(await screen.findByText('1 slot still open')).toBeInTheDocument();
+    expect(within(await card('Sunday Worship, Sunday, April 6')).getByText('1 open')).toBeInTheDocument();
   });
 
-  test('choosing another week swaps the table over', async () => {
+  test('each service has its own link, straight to it on the Scheduled tab', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     mockSchedule();
     render(<ServingSchedule />);
-    choose(await screen.findByRole('combobox', { name: 'Week' }), 'April 13');
+    const first = await card('Sunday Worship, Sunday, April 6');
+    fireEvent.click(within(first).getByRole('button', { name: /copy the link/i }));
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+    const link = new URL(writeText.mock.calls[0][0]);
+    expect(Object.fromEntries(link.searchParams)).toEqual({
+      page: 'service-roster', tab: 'scheduled', date: '2025-04-06', service: 'Sunday Worship',
+    });
+  });
 
-    expect(screen.getByText('Lee Park')).toBeInTheDocument();
-    expect(screen.queryByText('Opening Prayer')).not.toBeInTheDocument();
+  test('a link to one service opens its month and marks the service', async () => {
+    const fetchMock = mockSchedule();
+    render(<ServingSchedule focus={{ date: '2025-04-13', service: 'Sunday Worship' }} />);
+    const second = await card('Sunday Worship, Sunday, April 13');
+    expect(second.className).toMatch(/ring-2/);
+    expect((await card('Sunday Worship, Sunday, April 6')).className).not.toMatch(/ring-2/);
+    expect(String(fetchMock.mock.calls[0][0])).toContain(encodeURIComponent('April 2025'));
   });
 
   test('an empty slot says nobody has it yet', async () => {
@@ -438,32 +459,25 @@ describe('ServingSchedule', () => {
     expect(await screen.findByText('Nobody yet')).toBeInTheDocument();
   });
 
-  test('the monthly visual preparation is called out above the table, not as a week', async () => {
+  test('the monthly visual preparation is called out above the cards, not as a service', async () => {
     mockSchedule();
     render(<ServingSchedule />);
     expect(await screen.findByText(/Visual Preparation: Sam Ford/)).toBeInTheDocument();
-    expect(within(screen.getByRole('combobox', { name: 'Week' })).getAllByRole('option')).toHaveLength(2);
+    expect(screen.getAllByRole('region')).toHaveLength(2);
   });
 
   test('a roster with nothing in it renders empty rather than breaking', async () => {
     mockSchedule({ months: [], month: '', assignments: [] });
     render(<ServingSchedule />);
     expect(await screen.findByText(/Nobody is rostered yet/i)).toBeInTheDocument();
-    expect(screen.queryByRole('combobox', { name: 'Week' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region')).not.toBeInTheDocument();
   });
 
   test('a member is told how a slot gets filled, and there is no sign-up button anywhere', async () => {
     mockSchedule();
     render(<ServingSchedule />);
-    expect(await screen.findByText(/Monthly Worship Schedule workflow or by whoever looks after/i)).toBeInTheDocument();
+    expect(await screen.findByText(/filled by whoever looks after the serving schedule/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /sign me up/i })).not.toBeInTheDocument();
-  });
-
-  test('the sign-up column header is blank for a member — there is nothing there to do', async () => {
-    mockSchedule();
-    render(<ServingSchedule />);
-    await screen.findByRole('combobox', { name: 'Week' });
-    expect(screen.queryByRole('columnheader', { name: /sign up/i })).not.toBeInTheDocument();
   });
 
   test('you ask to be replaced rather than taking your own name off', async () => {
@@ -492,18 +506,105 @@ describe('ServingSchedule', () => {
     expect(screen.queryByRole('button', { name: 'Ask to be replaced' })).not.toBeInTheDocument();
   });
 
-  test('only the schedule keeper gets the build and edit buttons', async () => {
+  test('only the schedule keeper gets the build button and can change a name', async () => {
     mockSchedule();
     const { unmount } = render(<ServingSchedule />);
-    await screen.findByRole('combobox', { name: 'Week' });
-    expect(screen.queryByRole('button', { name: /build next month/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /edit song leader/i })).not.toBeInTheDocument();
+    await card('Sunday Worship, Sunday, April 6');
+    expect(screen.queryByRole('button', { name: 'Build a month' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Setup ▾')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /— change$/ })).not.toBeInTheDocument();
     unmount();
 
     mockSchedule({ canManage: true });
     render(<ServingSchedule />);
-    expect(await screen.findByRole('button', { name: /build next month/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /edit song leader/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Build a month' })).toBeInTheDocument();
+    expect(screen.getByText('Setup ▾')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Email everyone their jobs' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Song Leader: Tom Nelson — change' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Opening Prayer: open — change' })).toHaveTextContent('Open — choose someone');
+  });
+
+  // ─── Changing a name ────────────────────────────────────────────────────────
+
+  const CANDIDATES = {
+    success: true,
+    candidates: [
+      { id: 11, name: 'Ray Harris', level: 'preferred', away: null, busy: false, turns: 0, current: false, free: true },
+      { id: 12, name: 'Bill Shaw', level: 'willing', away: null, busy: false, turns: 2, current: false, free: true },
+      { id: 13, name: 'Ned Poole', level: 'preferred', away: { startsOn: '2025-04-05', endsOn: '2025-04-07', reason: '' }, busy: false, turns: 0, current: false, free: false },
+      { id: 14, name: 'Al Adams', level: '', away: null, busy: false, turns: 0, current: false, free: true },
+    ],
+  };
+
+  test('clicking a name lists the best fits first, and the rest on asking', async () => {
+    const fetchMock = mockSchedule({ canManage: true }, { '/candidates': CANDIDATES });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Opening Prayer: open — change' }));
+    const list = await screen.findByRole('list', { name: 'Who could take it' });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/assignments/2/candidates'))).toBe(true);
+    expect(within(list).getAllByRole('button').map(b => b.textContent)).toEqual([
+      expect.stringContaining('Ray Harris'), expect.stringContaining('Bill Shaw'),
+    ]);
+    expect(within(list).getByText('2 turns this month')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show everyone (4)' }));
+    expect(within(list).getByText('Ned Poole')).toBeInTheDocument();
+    expect(within(list).getByText(/^Away /)).toBeInTheDocument();
+    expect(within(list).getByText('Al Adams')).toBeInTheDocument();
+  });
+
+  test('picking a man puts him in the slot', async () => {
+    const fetchMock = mockSchedule({ canManage: true }, {
+      '/candidates': CANDIDATES,
+      '/assignments/2': { success: true, assignment: { ...ASSIGNMENTS[1], name: 'Bill Shaw' } },
+    });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Opening Prayer: open — change' }));
+    const list = await screen.findByRole('list', { name: 'Who could take it' });
+    fireEvent.click(within(list).getByText('Bill Shaw'));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, o]) => String(url).endsWith('/assignments/2') && o?.method === 'PATCH');
+      expect(JSON.parse(call[1].body)).toEqual({ name: 'Bill Shaw' });
+    });
+  });
+
+  test('a name not on the list can be typed in, and a slot can be left open', async () => {
+    const fetchMock = mockSchedule({ canManage: true }, {
+      '/candidates': CANDIDATES,
+      '/assignments/': (url, o) => ({ success: true, assignment: { ...ASSIGNMENTS[0], name: JSON.parse(o.body).name } }),
+    });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Song Leader: Tom Nelson — change' }));
+    await screen.findByRole('list', { name: 'Who could take it' });
+    fireEvent.change(screen.getByLabelText('Or type a name'), { target: { value: 'Visiting Brother' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Put in' }));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, o]) => String(url).endsWith('/assignments/1') && o?.method === 'PATCH');
+      expect(JSON.parse(call[1].body)).toEqual({ name: 'Visiting Brother' });
+    });
+
+    const first = await card('Sunday Worship, Sunday, April 6');
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    fireEvent.click(within(first).getByRole('button', { name: /^Song Leader: .* — change$/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Leave it open' }));
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter(([url, o]) => String(url).endsWith('/assignments/1') && o?.method === 'PATCH');
+      expect(calls.map(([, o]) => JSON.parse(o.body))).toContainEqual({ name: '' });
+    });
+  });
+
+  test('emailing everyone asks first, then says who was emailed', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const fetchMock = mockSchedule({ canManage: true }, {
+      '/months/notify': { success: true, emailed: 3, unreachable: ['Lee Park'] },
+    });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Email everyone their jobs' }));
+    expect(confirm).toHaveBeenCalled();
+    expect(await screen.findByText(/Emailed 3 men their jobs for April 2025\. No email address on file for Lee Park\./)).toBeInTheDocument();
+    const call = fetchMock.mock.calls.find(([url, o]) => String(url).endsWith('/months/notify') && o?.method === 'POST');
+    expect(JSON.parse(call[1].body)).toEqual({ month: 'April 2025' });
+    confirm.mockRestore();
   });
 
   // ─── Time away ──────────────────────────────────────────────────────────────
@@ -511,8 +612,8 @@ describe('ServingSchedule', () => {
   test('somebody not in the directory yet is not offered time away', async () => {
     mockSchedule();
     render(<ServingSchedule />);
-    await screen.findByRole('combobox', { name: 'Week' });
-    expect(screen.queryByText('Time away')).not.toBeInTheDocument();
+    await card('Sunday Worship, Sunday, April 6');
+    expect(screen.queryByRole('button', { name: /time away/i })).not.toBeInTheDocument();
   });
 
   test('time away is nested behind its own button, not shown on the page itself', async () => {
@@ -523,19 +624,19 @@ describe('ServingSchedule', () => {
       },
     });
     render(<ServingSchedule />);
-    await screen.findByRole('combobox', { name: 'Week' });
+    await card('Sunday Worship, Sunday, April 6');
 
     // Not open on load, and the button says how many days are already blocked out.
     expect(screen.queryByText(/June 7 – June 21, 2025/)).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Time away (1)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'My time away (1)' })).toBeInTheDocument();
   });
 
   test('somebody not linked to the directory is not offered a time-away button', async () => {
     mockSchedule();   // default me.directoryId is null
     render(<ServingSchedule />);
-    await screen.findByRole('combobox', { name: 'Week' });
-    expect(screen.queryByRole('button', { name: /^time away/i })).not.toBeInTheDocument();
+    await card('Sunday Worship, Sunday, April 6');
+    expect(screen.queryByRole('button', { name: /^my time away/i })).not.toBeInTheDocument();
   });
 
   test('the time-away dialog opens on the button and closes again', async () => {
@@ -543,7 +644,7 @@ describe('ServingSchedule', () => {
       me: { directoryId: 3, name: 'Ray Harris', gender: 'male', blackouts: [] },
     });
     render(<ServingSchedule />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Time away' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'My time away' }));
 
     const dialog = await screen.findByRole('dialog', { name: 'Time away' });
     expect(dialog).toBeInTheDocument();
@@ -560,7 +661,7 @@ describe('ServingSchedule', () => {
       },
     });
     render(<ServingSchedule />);
-    fireEvent.click(await screen.findByRole('button', { name: /^time away/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^my time away/i }));
 
     expect(await screen.findByText(/June 7 – June 21, 2025/)).toBeInTheDocument();
     expect(screen.getByText(/Away with family/)).toBeInTheDocument();
@@ -571,7 +672,7 @@ describe('ServingSchedule', () => {
       me: { directoryId: 3, name: 'Ray Harris', gender: 'male', blackouts: [] },
     });
     render(<ServingSchedule />);
-    fireEvent.click(await screen.findByRole('button', { name: /^time away/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^my time away/i }));
 
     type(await screen.findByLabelText('First day away'), '2025-06-07');
     fireEvent.click(screen.getByRole('button', { name: /block out these days/i }));
@@ -590,7 +691,7 @@ describe('ServingSchedule', () => {
       },
     });
     render(<ServingSchedule />);
-    fireEvent.click(await screen.findByRole('button', { name: /^time away/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /^my time away/i }));
     fireEvent.click(await screen.findByRole('button', { name: /clear time away/i }));
 
     await waitFor(() => {
@@ -738,37 +839,60 @@ describe('ServingSchedule', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent('Church Records → Service Types');
   });
 
-  test('a day with a special service keeps each service\'s jobs under its own name', async () => {
+  test('a day with a special service keeps each service\'s jobs on its own card', async () => {
     mockSchedule({ assignments: [
       ...ASSIGNMENTS,
       { id: 9, month: 'April 2025', date: 'April 6', service: 'Gospel Meeting', job: 'Song Leader', name: 'Visiting Leader' },
     ] });
     render(<ServingSchedule />);
-    const meeting = await screen.findByRole('columnheader', { name: 'Gospel Meeting' });
-    expect(screen.getByRole('columnheader', { name: 'Sunday Worship' })).toBeInTheDocument();
-    // Gospel Meeting's rows come after Sunday Worship's.
-    const rows = screen.getAllByRole('row').map(r => r.textContent);
-    expect(rows.findIndex(t => t.includes('Visiting Leader'))).toBeGreaterThan(rows.findIndex(t => t === meeting.textContent));
-    expect(rows.findIndex(t => t.includes('Tom Nelson'))).toBeLessThan(rows.findIndex(t => t === meeting.textContent));
+    const meeting = await card('Gospel Meeting, Sunday, April 6');
+    expect(within(meeting).getByText('Visiting Leader')).toBeInTheDocument();
+    expect(within(meeting).queryByText('Tom Nelson')).not.toBeInTheDocument();
+    // Gospel Meeting comes after that day's Sunday Worship.
+    expect(screen.getAllByRole('region').map(r => r.getAttribute('aria-label'))).toEqual([
+      'Sunday Worship, Sunday, April 6', 'Gospel Meeting, Sunday, April 6', 'Sunday Worship, Sunday, April 13',
+    ]);
   });
 
-  test('building a month posts the month and the services chosen', async () => {
+  test('building a month posts the month, the services chosen, and to fill in names', async () => {
     const fetchMock = mockSchedule({ canManage: true });
     render(<ServingSchedule />);
-    fireEvent.click(await screen.findByRole('button', { name: /build next month/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Build a month' }));
 
     const dialog = screen.getByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('Month: month'), { target: { value: '5' } });
     fireEvent.change(within(dialog).getByLabelText('Month: year'), { target: { value: '2026' } });
     fireEvent.click(within(dialog).getByLabelText('Wednesday'));    // leave the Sundays on
-    fireEvent.click(within(dialog).getByRole('button', { name: /build the month/i }));
+    expect(within(dialog).getByRole('checkbox', { name: /fill in names/i })).toBeChecked();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Build June 2026' }));
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find(([url, opts]) => String(url).endsWith('/months') && opts?.method === 'POST');
-      const body = JSON.parse(call[1].body);
-      expect(body.month).toBe('June 2026');
-      expect(body.services).toEqual(['Sunday Worship', 'Sunday Evening']);
+      expect(JSON.parse(call[1].body)).toEqual({ month: 'June 2026', services: ['Sunday Worship', 'Sunday Evening'], fill: true });
     });
+  });
+
+  test('the keeper can build a month laid out but left empty', async () => {
+    const fetchMock = mockSchedule({ canManage: true });
+    render(<ServingSchedule />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Build a month' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /fill in names/i }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /^Build / }));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, opts]) => String(url).endsWith('/months') && opts?.method === 'POST');
+      expect(JSON.parse(call[1].body).fill).toBe(false);
+    });
+  });
+
+  test('the setup actions sit in one menu', async () => {
+    mockSchedule({ canManage: true });
+    render(<ServingSchedule />);
+    const summary = await screen.findByText('Setup ▾');
+    const menu = summary.closest('details');
+    expect(within(menu).getAllByRole('button').map(b => b.textContent)).toEqual([
+      'Jobs for each service', 'Add a special service', 'Add a single job',
+    ]);
   });
 });
 

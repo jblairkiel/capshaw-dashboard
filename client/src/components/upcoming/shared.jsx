@@ -19,9 +19,9 @@ export function StatusBadge({ status }) {
 // clipboard (an older phone, a page not served over https), the link is shown
 // instead, ready to be selected and copied by hand.
 
-export function CopyLinkButton({ date, service, className = '' }) {
+export function CopyLinkButton({ date, service, url: given = '', className = '' }) {
   const [state, setState] = useState('');   // '' | 'copied' | 'shown'
-  const url = serviceLink(date, service);
+  const url = given || serviceLink(date, service);
 
   useEffect(() => {
     if (state !== 'copied') return undefined;

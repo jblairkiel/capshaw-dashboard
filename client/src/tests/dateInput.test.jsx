@@ -91,7 +91,7 @@ describe('Serving Schedule: picking a day', () => {
     const fetchMock = vi.fn(() => Promise.resolve({ json: () => Promise.resolve(body) }));
     vi.stubGlobal('fetch', fetchMock);
     render(<ServingSchedule />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Add a job' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a single job' }));
     const dialog = screen.getByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('Date'), { target: { value: '2026-06-07' } });
     expect(within(dialog).getByLabelText('Month: month')).toHaveValue('5');
