@@ -312,8 +312,19 @@ function act({ taskId, actionId, note = '', user }) {
 
 // ─── Reading ──────────────────────────────────────────────────────────────────
 
+// Whether anybody besides an admin looks after an area. Admins hold every
+// area by their role, but a step can ask to reach them only as a last resort.
+function areaHasKeeper(area) {
+  return !!db.prepare(`
+    SELECT 1 FROM user_areas a JOIN users u ON u.id = a.user_id
+     WHERE a.area = ? AND u.role = 'approved' LIMIT 1
+  `).get(area);
+}
+
 // Everything waiting on this user: tasks aimed at them by name, plus tasks
-// aimed at a role they hold.
+// aimed at a role they hold. A step assigned with `adminsOnlyWhenUnheld` is
+// left out of an admin's inbox while somebody else looks after its area —
+// the admin can still act on it from its page.
 function inbox(user) {
   if (!user) return [];
   // Both vocabularies: the rungs this account outranks, and the areas it
@@ -330,7 +341,17 @@ function inbox(user) {
     ORDER BY t.created_at ASC
   `).all(user.id, ...roles);
 
-  return rows.map(row => {
+  const held = new Map();
+  const keeperFor = area => {
+    if (!held.has(area)) held.set(area, areaHasKeeper(area));
+    return held.get(area);
+  };
+
+  return rows.filter(row => {
+    if (user.role !== 'admin' || row.assignee_user_id) return true;
+    const step = getDefinition(row.definition_id)?.steps?.[row.step_id];
+    return !(step?.assign?.adminsOnlyWhenUnheld && keeperFor(row.assignee_role));
+  }).map(row => {
     const definition = getDefinition(row.definition_id);
     const step = definition?.steps?.[row.step_id];
     return {
@@ -346,6 +367,8 @@ function inbox(user) {
       actions:      (step?.actions || []).map(a => ({ id: a.id, label: a.label, tone: a.tone || 'neutral', requiresNote: !!a.requiresNote, notePrompt: a.notePrompt || '' })),
       assignedRole: row.assignee_role,
       createdAt:    row.created_at,
+      // What the inbox needs to help with this task, if the definition says.
+      context:      definition?.inboxContext ? definition.inboxContext(parseData(row.instance_data)) : null,
     };
   });
 }

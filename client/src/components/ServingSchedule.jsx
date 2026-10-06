@@ -145,9 +145,49 @@ function BuildMonthDialog({ services, initialMonth, onClose, onBuilt }) {
 
 // What a special service needs each night starts from the jobs set for it
 // under Jobs for each service, and can be changed for this one meeting.
-function SpecialServiceDialog({ choices, jobs, serviceJobs = [], onClose, onAdded }) {
+// A kind of service not on the list yet — a youth rally, a lectureship — added
+// by the schedule keeper right here; it joins the church's list of services.
+function NewKindOfService({ onAdded, onCancel }) {
+  const [name, setName]   = useState('');
+  const [busy, setBusy]   = useState(false);
+  const [error, setError] = useState('');
+
+  async function add() {
+    setBusy(true); setError('');
+    try {
+      onAdded(await send(`${API}/service-kinds`, { method: 'POST', ...jsonBody({ name }) }));
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
+      <label className="block">
+        <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">New kind of service</span>
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Youth Rally"
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); if (name.trim()) add(); } }}
+          className="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white" />
+      </label>
+      <p className="text-xs text-gray-500">It goes on the church&apos;s list of services, held when it is held. Bible classes are not rostered, so they are not offered.</p>
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      <div className="flex justify-end gap-2">
+        {onCancel && <button type="button" onClick={onCancel} className="text-sm px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600">Cancel</button>}
+        <button type="button" onClick={add} disabled={busy || !name.trim()} className="btn-primary text-sm disabled:opacity-50">
+          {busy ? 'Adding…' : 'Add to the list'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SpecialServiceDialog({ choices: given, jobs, serviceJobs: givenJobs = [], onClose, onAdded, onKindAdded }) {
+  const [choices, setChoices] = useState(given);
+  const [serviceJobs, setServiceJobs] = useState(givenJobs);
+  const [addingKind, setAddingKind] = useState(false);
   const usual = name => serviceJobs.find(s => s.service === name)?.jobs || ['Song Leader', 'Opening Prayer', 'Closing Prayer'];
-  const [service, setService] = useState(choices[0] || '');
+  const [service, setService] = useState(given[0] || '');
   const [from, setFrom]       = useState('');
   const [through, setThrough] = useState('');
   const [chosen, setChosen]   = useState(() => new Set(usual(choices[0] || '').filter(j => jobs.includes(j))));
@@ -174,6 +214,16 @@ function SpecialServiceDialog({ choices, jobs, serviceJobs = [], onClose, onAdde
     }
   }
 
+  function kindAdded(json) {
+    setChoices(json.specialServices);
+    setServiceJobs(json.serviceJobs);
+    setService(json.service);
+    const jobsFor = json.serviceJobs.find(s => s.service === json.service)?.jobs || ['Song Leader', 'Opening Prayer', 'Closing Prayer'];
+    setChosen(new Set(jobsFor.filter(j => jobs.includes(j))));
+    setAddingKind(false);
+    onKindAdded?.(json);
+  }
+
   const label = 'text-xs font-medium text-gray-500 uppercase tracking-wide';
 
   return (
@@ -181,21 +231,29 @@ function SpecialServiceDialog({ choices, jobs, serviceJobs = [], onClose, onAdde
       {choices.length === 0 ? (
         <div className="space-y-3">
           <p className="text-sm text-gray-600">
-            There are no special services on the church&apos;s list yet. An admin adds them (a Gospel Meeting, say)
-            under <strong>Church Records → Service Types</strong>.
+            There are no special services on the church&apos;s list yet. Add the first kind — a Gospel Meeting, say.
           </p>
+          <NewKindOfService onAdded={kindAdded} />
           <div className="flex justify-end">
             <button type="button" onClick={onClose} className="text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600">Close</button>
           </div>
         </div>
       ) : (
         <form onSubmit={submit} className="space-y-4">
-          <label className="block">
-            <span className={label}>Service</span>
-            <select value={service} onChange={e => { setService(e.target.value); setChosen(new Set(usual(e.target.value))); }} className="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
-              {choices.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </label>
+          <div>
+            <label className="block">
+              <span className={label}>Service</span>
+              <select value={service} onChange={e => { setService(e.target.value); setChosen(new Set(usual(e.target.value))); }} className="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+                {choices.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+            {!addingKind && (
+              <button type="button" onClick={() => setAddingKind(true)} className="mt-1 text-xs text-church-gold hover:text-church-navy">
+                + A kind of service not on the list
+              </button>
+            )}
+          </div>
+          {addingKind && <NewKindOfService onAdded={kindAdded} onCancel={() => setAddingKind(false)} />}
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
               <span className={label}>First night</span>
@@ -445,10 +503,12 @@ function rosterLink(iso, service, origin = window.location.origin) {
   return `${origin}/?${new URLSearchParams({ page: 'service-roster', tab: 'scheduled', date: iso, service })}`;
 }
 
+const longDayOf = (iso, fallback = '') => (iso
+  ? new Date(`${iso}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+  : fallback);
+
 function ServiceCard({ occasion, canManage, isMine, focused, onPick, onAsk }) {
-  const longDay = occasion.iso
-    ? new Date(`${occasion.iso}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
-    : occasion.date;
+  const longDay = longDayOf(occasion.iso, occasion.date);
   const open = occasion.slots.filter(s => !s.name.trim()).length;
   return (
     <section id={serviceId(occasion.iso, occasion.service)} aria-label={`${occasion.service}, ${longDay}`}
@@ -493,6 +553,114 @@ function ServiceCard({ occasion, canManage, isMine, focused, onPick, onAsk }) {
           </li>
         ))}
       </ul>
+    </section>
+  );
+}
+
+// ─── Your jobs ────────────────────────────────────────────────────────────────
+//
+// What the signed-in member is down for this month — and next month, once it
+// is built — whichever month the schedule below is showing.
+
+function YourJobs({ jobs, onAsk, onGo }) {
+  const groups = [
+    { key: 'this', heading: 'Your jobs this month', ...jobs.thisMonth },
+    { key: 'next', heading: 'Next month', ...jobs.nextMonth },
+  ].filter(g => g.key === 'this' || g.jobs.length);
+
+  return (
+    <section aria-label="Your jobs" className="card p-4 space-y-3">
+      {groups.map(g => (
+        <div key={g.key}>
+          <h4 className="text-sm font-semibold text-church-navy">{g.heading} <span className="font-normal text-gray-400">· {g.month}</span></h4>
+          {g.jobs.length === 0 ? (
+            <p className="text-sm text-gray-500 mt-1">You are not down for anything in {g.month}.</p>
+          ) : (
+            <ul className="mt-1 divide-y divide-gray-50" aria-label={g.heading}>
+              {g.jobs.map(j => (
+                <li key={j.id} className={`py-1.5 flex items-center gap-2 flex-wrap text-sm ${j.past ? 'text-gray-400' : ''}`}>
+                  <span className="font-medium text-church-navy w-36 shrink-0">{j.job}</span>
+                  <span className="flex-1 min-w-0">{longDayOf(j.iso, j.date || j.month)}{j.service ? ` · ${j.service}` : ''}</span>
+                  {j.past ? <span className="text-xs">done</span>
+                    : j.replacement ? <span className="text-xs px-2 py-0.5 rounded-full bg-rose-100 text-rose-800">replacement asked for</span>
+                    : <button type="button" onClick={() => onAsk(j)} className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold">Ask to be replaced</button>}
+                  {j.iso && j.service && (
+                    <button type="button" onClick={() => onGo(j)} aria-label={`Show ${j.service}, ${longDayOf(j.iso)}`}
+                      className="text-xs text-church-gold hover:text-church-navy">Show →</button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ))}
+    </section>
+  );
+}
+
+// ─── Replacement requests ─────────────────────────────────────────────────────
+//
+// For whoever keeps the schedule: the requests still waiting, each one a click
+// from choosing someone, and every request there has been and how it ended.
+
+const OUTCOME = {
+  replaced:  r => `Replaced by ${r.replacedBy || 'someone else'}`,
+  opened:    () => 'Left open',
+  kept:      r => `Kept on${r.note ? ` — ${r.note}` : ''}`,
+  cancelled: () => 'Withdrawn',
+};
+
+const shortDate = ts => (ts ? new Date(`${ts.replace(' ', 'T')}Z`).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '');
+
+function ReplacementRequests({ requests, onChoose, onGo }) {
+  const [showHistory, setShowHistory] = useState(false);
+  const open = requests.filter(r => r.open);
+  const past = requests.filter(r => !r.open);
+  if (!requests.length) return null;
+  const what = r => `${r.job}, ${longDayOf(r.iso, r.date || r.month)}${r.service ? ` · ${r.service}` : ''}`;
+
+  return (
+    <section aria-label="Replacement requests" className={`card p-4 space-y-3 ${open.length ? 'border border-rose-200' : ''}`}>
+      {open.length > 0 && (
+        <div>
+          <h4 className="text-sm font-semibold text-church-navy">Waiting on a replacement ({open.length})</h4>
+          <ul className="mt-1 divide-y divide-gray-50">
+            {open.map(r => (
+              <li key={r.id} className="py-2 flex items-start gap-2 flex-wrap text-sm">
+                <div className="flex-1 min-w-0">
+                  <p><span className="font-medium text-church-navy">{r.name}</span> <span className="text-gray-600">— {what(r)}</span></p>
+                  <p className="text-xs text-gray-500">
+                    {r.reason ? <>&ldquo;{r.reason}&rdquo; · </> : null}asked by {r.askedBy || 'someone'} {shortDate(r.askedAt)}
+                  </p>
+                </div>
+                {r.slotId && <button type="button" onClick={() => onChoose(r)} className="btn-primary text-xs">Choose someone</button>}
+                {r.iso && r.service && <button type="button" onClick={() => onGo(r)} className="text-xs text-church-gold hover:text-church-navy self-center">Show →</button>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {past.length > 0 && (
+        <div>
+          <button type="button" onClick={() => setShowHistory(v => !v)} aria-expanded={showHistory} className="text-xs text-church-gold hover:text-church-navy">
+            {showHistory ? 'Hide' : 'Show'} replacement history ({past.length})
+          </button>
+          {showHistory && (
+            <ul className="mt-2 divide-y divide-gray-50" aria-label="Replacement history">
+              {past.map(r => (
+                <li key={r.id} className="py-1.5 text-sm">
+                  <p><span className="text-church-navy">{r.name}</span> <span className="text-gray-600">— {what(r)}</span></p>
+                  <p className="text-xs text-gray-500">
+                    {(OUTCOME[r.outcome] || (() => r.outcome))(r)}
+                    {r.settledBy ? ` by ${r.settledBy}` : ''}{r.settledAt ? `, ${shortDate(r.settledAt)}` : ''}
+                    {' · '}asked by {r.askedBy || 'someone'} {shortDate(r.askedAt)}{r.reason ? ` — “${r.reason}”` : ''}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -629,6 +797,7 @@ export default function ServingSchedule({ focus = null }) {
   const [editing, setEditing] = useState(null);   // a slot, or {} for a new one
   const [awayView, setAwayView] = useState('list');   // 'list' or 'calendar', for the keeper's view of who is away
   const [blockingOut, setBlockingOut] = useState(false);   // the member's own time-away dialog
+  const [requests, setRequests] = useState([]);   // replacement requests, for the keeper
   // A link to one service (?date=&service=) opens its month and brings it into view.
   const [focused, setFocused] = useState(focus);
 
@@ -639,6 +808,7 @@ export default function ServingSchedule({ focus = null }) {
       setData(json);
       setMonth(json.month);
       setError('');
+      if (json.canManage) send(`${API}/replacements`).then(r => setRequests(r.replacements || [])).catch(() => {});
     } catch (err) {
       setError(err.message);
     } finally {
@@ -666,6 +836,13 @@ export default function ServingSchedule({ focus = null }) {
   }, [all, month, regular]);
   const monthly  = all.filter(a => MONTHLY_JOBS.has(a.job));
   const openCount = all.filter(a => !a.name.trim()).length;
+  const askedCount = all.filter(a => a.replacement).length;
+
+  // Brings one service into view, loading its month first if need be.
+  function goTo(item) {
+    setFocused({ date: item.iso, service: item.service });
+    if (item.month && item.month !== month) load(item.month);
+  }
 
   // Once the linked service is on screen, bring it into view.
   useEffect(() => {
@@ -746,6 +923,11 @@ export default function ServingSchedule({ focus = null }) {
               {openCount ? `${openCount} slot${openCount === 1 ? '' : 's'} still open` : 'Every slot is filled'}
             </span>
           )}
+          {askedCount > 0 && (
+            <span className="text-sm text-rose-700 font-medium">
+              {askedCount} waiting on a replacement
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -798,6 +980,16 @@ export default function ServingSchedule({ focus = null }) {
           make it, choose Ask to be replaced — they are told straight away, and your name stays on until they
           have found someone.
         </p>
+      )}
+
+      {me.jobs && <YourJobs jobs={me.jobs} onAsk={setAsking} onGo={goTo} />}
+
+      {canManage && (
+        <ReplacementRequests
+          requests={requests}
+          onGo={goTo}
+          onChoose={r => setPicking({ id: r.slotId, job: r.job, date: r.date, month: r.month, service: r.service, name: r.name })}
+        />
       )}
 
       {monthly.length > 0 && (
@@ -903,6 +1095,7 @@ export default function ServingSchedule({ focus = null }) {
           serviceJobs={Array.isArray(data?.serviceJobs) ? data.serviceJobs : []}
           onClose={() => setAddingSpecial(false)}
           onAdded={json => { setAddingSpecial(false); load(json.month); }}
+          onKindAdded={json => setData(d => ({ ...d, specialServices: json.specialServices, serviceJobs: json.serviceJobs }))}
         />
       )}
 

@@ -1,16 +1,15 @@
 // ─── The serving schedule ─────────────────────────────────────────────────────
 //
-// A slot gets a name in it two ways, and two ways only: the Monthly Worship
-// Schedule workflow publishing a generated draft, or whoever holds
-// `serving-schedule` filling or changing one by hand. There is no self
+// A slot gets a name in it two ways, and two ways only: building a month,
+// which fills it from what the men have said (lib/rosterFill.js), or whoever
+// holds `serving-schedule` filling or changing one by hand. There is no self
 // sign-up — a member cannot put their own name against an empty slot.
 //
-//   · Whoever looks after the Serving Schedule builds next month's worship
-//     jobs, fills or clears any slot, and records what each man will
-//     volunteer for.
-//   · Every other member sees the roster, and may take their own name back
-//     off a slot they are down for — the one thing left that is theirs to
-//     change — but cannot put it there in the first place.
+//   · Whoever looks after the Serving Schedule builds a month, changes any
+//     slot, adds special services (and new kinds of service), and settles
+//     replacement requests.
+//   · Every other member sees the roster and their own jobs, and asks to be
+//     replaced on one they cannot do.
 //   · Anybody linked to the directory can block out the days they will be
 //     away, and the schedule keeper can do it for them. The month builder
 //     skips those days for that person.
@@ -121,6 +120,34 @@ function personWhoseTimeOff(req, wantedId) {
   return { person };
 }
 
+// ─── Your jobs ────────────────────────────────────────────────────────────────
+// What one person is down for this calendar month, and next month once it is
+// built — whatever month the page happens to be showing.
+
+function monthLabel(d) {
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+function jobsOf(name, today = new Date()) {
+  const key = String(name || '').trim().toLowerCase();
+  if (!key) return null;
+  const now  = new Date(Date.UTC(today.getFullYear(), today.getMonth(), 1));
+  const next = new Date(Date.UTC(today.getFullYear(), today.getMonth() + 1, 1));
+  const asked = openReplacements();
+  const pick = db.prepare('SELECT id, month, date, service, job, name FROM job_assignments WHERE month = ? AND lower(trim(name)) = ?');
+  const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const shape = month => pick.all(month, key)
+    .map(s => {
+      const iso = blackouts.dateOf(s.month, s.date) || '';
+      return { id: s.id, month: s.month, date: s.date, iso, service: s.service, job: s.job, past: !!iso && iso < todayIso, replacement: asked.get(s.id) || null };
+    })
+    .sort((a, b) => (a.iso || '9999').localeCompare(b.iso || '9999') || a.id - b.id);
+  return {
+    thisMonth: { month: monthLabel(now), jobs: shape(monthLabel(now)) },
+    nextMonth: { month: monthLabel(next), jobs: shape(monthLabel(next)) },
+  };
+}
+
 // ─── GET /api/serving ─────────────────────────────────────────────────────────
 // Everything one page render needs: the months on record, the chosen month's
 // slots, and what this particular person may do with them.
@@ -156,6 +183,7 @@ router.get('/', (req, res) => {
       name:        person?.name ?? '',
       gender:      person?.gender ?? '',
       blackouts:   person ? blackouts.forPerson(person.id) : [],
+      jobs:        person ? jobsOf(person.name) : null,
     },
   });
 });
@@ -256,17 +284,55 @@ router.post('/months/notify', requireApproved, manageOnly, (req, res) => {
 const isIsoDate = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) && !Number.isNaN(Date.parse(`${s}T12:00:00Z`));
 const MAX_NIGHTS = 14;
 
+// A Bible class is not a service anybody is rostered for, so it is never
+// offered — whatever its tracking says.
+const BIBLE_CLASS = /\bbible\b|\bclass(es)?\b|\bstudy\b/i;
+
 function specialChoices() {
   const regular = new Set(SERVICES.map(s => s.toLowerCase()));
   return plans.activeServices()
-    .filter(s => !regular.has(s.name.toLowerCase()) && !plans.servingServiceFor(s.name) && !(s.tracking === 'weekly' && s.weekday !== null))
+    .filter(s => !regular.has(s.name.toLowerCase()) && !plans.servingServiceFor(s.name)
+      && !(s.tracking === 'weekly' && s.weekday !== null) && !BIBLE_CLASS.test(s.name))
     .map(s => s.name);
 }
+
+// ─── POST /api/serving/service-kinds  { name } ────────────────────────────────
+// A new kind of service — a youth rally, a lectureship — added by whoever
+// keeps the schedule rather than waiting on an admin. It goes on the church's
+// list of services as one held when it is held, so attendance and Upcoming
+// Service know it too; a retired one of the same name is brought back.
+
+router.post('/service-kinds', requireApproved, manageOnly, (req, res) => {
+  const name = String(req.body?.name || '').trim().replace(/\s+/g, ' ');
+  if (name.length < 3 || name.length > 60) return res.status(400).json({ success: false, error: 'Give it a name of 3 to 60 characters' });
+  if (BIBLE_CLASS.test(name)) return res.status(400).json({ success: false, error: 'Bible classes are not on the serving schedule' });
+  const regular = SERVICES.some(s => s.toLowerCase() === name.toLowerCase()) || plans.servingServiceFor(name);
+  if (regular) return res.status(400).json({ success: false, error: `${name} is one of the regular services already — it is built with every month` });
+
+  const existing = plans.serviceType(name);
+  if (existing?.active) {
+    if (specialChoices().includes(existing.name)) return res.json({ success: true, service: existing.name, specialServices: specialChoices(), serviceJobs: serviceJobs.list(specialChoices()) });
+    return res.status(400).json({ success: false, error: `${existing.name} is a weekly service, not a special one` });
+  }
+  if (existing) {
+    db.prepare('UPDATE service_types SET active = 1 WHERE id = ?').run(existing.id);
+  } else {
+    const order = db.prepare('SELECT coalesce(max(sort_order), 0) + 1 AS n FROM service_types').get().n;
+    db.prepare("INSERT INTO service_types (name, sort_order, tracking, weekday) VALUES (?, ?, 'when-held', NULL)").run(name, order);
+  }
+  const saved = plans.serviceType(name);
+  actionLog.record(req.user, {
+    area: AREA, action: existing ? 'update' : 'create', entity: 'service type', entityId: saved.id,
+    summary: existing ? `Brought back ${saved.name} as a special service` : `Added ${saved.name} as a kind of special service`,
+    after: saved,
+  });
+  res.json({ success: true, service: saved.name, specialServices: specialChoices(), serviceJobs: serviceJobs.list(specialChoices()) });
+});
 
 router.post('/special', requireApproved, manageOnly, (req, res) => {
   const type = plans.serviceType(req.body?.service);
   if (!type || !type.active || !specialChoices().includes(type.name)) {
-    return res.status(400).json({ success: false, error: 'Choose which service it is. An admin adds services to the list under Church Records → Service Types.' });
+    return res.status(400).json({ success: false, error: 'Choose which service it is, or add a new kind of service first.' });
   }
   const from = String(req.body?.from || '');
   const through = String(req.body?.through || '') || from;
@@ -431,6 +497,50 @@ function openReplacements() {
   return out;
 }
 
+// Every replacement request, open ones first, then the rest newest first —
+// who asked, why, and how it ended. Kept for the schedule keeper and admins
+// whether or not anybody's inbox still shows it.
+function replacementHistory(limit = 200) {
+  const rows = db.prepare(`
+    SELECT i.id, i.status, i.outcome, i.data, i.created_at, i.completed_at,
+           asker.name AS asked_by,
+           (SELECT u.name FROM workflow_tasks t JOIN users u ON u.id = t.completed_by
+             WHERE t.instance_id = i.id AND t.status = 'done' ORDER BY t.id DESC LIMIT 1) AS settled_by,
+           (SELECT t.note FROM workflow_tasks t
+             WHERE t.instance_id = i.id AND t.status = 'done' ORDER BY t.id DESC LIMIT 1) AS note
+      FROM workflow_instances i LEFT JOIN users asker ON asker.id = i.created_by
+     WHERE i.definition_id = ?
+     ORDER BY (i.status = 'active') DESC, i.created_at DESC, i.id DESC
+     LIMIT ?
+  `).all(REPLACEMENT, limit);
+  return rows.map(r => {
+    const d = engine.parseData(r.data);
+    return {
+      id: r.id,
+      open: r.status === 'active',
+      outcome: r.status === 'active' ? '' : r.outcome || r.status,
+      slotId: Number(d.slotId) || null,
+      job: d.slotJob || '', date: d.slotDate || '', month: d.slotMonth || '', service: d.slotService || '',
+      iso: blackouts.dateOf(d.slotMonth, d.slotDate) || '',
+      name: d.currentName || '',
+      reason: d.reason || '',
+      replacedBy: d.replacedBy || '',
+      note: r.outcome === 'kept' ? r.note || '' : '',
+      askedBy: r.asked_by || '',
+      askedAt: r.created_at,
+      settledBy: r.settled_by || '',
+      settledAt: r.completed_at || '',
+    };
+  });
+}
+
+router.get('/replacements', requireApproved, manageOnly, (req, res) => {
+  res.json({ success: true, replacements: replacementHistory() });
+});
+
+// Who the request goes to: whoever keeps the schedule. Admins hold that area
+// too, but are only told when nobody else does — the request is never lost,
+// and the history keeps every one.
 function keepers() {
   const holders = db.prepare(`
     SELECT u.id FROM users u JOIN user_areas a ON a.user_id = u.id

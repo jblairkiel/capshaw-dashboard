@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { API, call } from './workflow/api';
 import { ActionBar, Detail } from './workflow/parts';
+import ReplacementSuggestions from './ReplacementSuggestions';
 
 // Workflows live on the pages they are about, so this is the one place that
 // gathers them: everything waiting on you, wherever it came from.
@@ -44,8 +45,18 @@ function Inbox({ tasks, onAct, onOpen, busyTask, pageLabel, onGoToPage }) {
               </button>
               <p className="text-sm text-gray-600 mt-0.5">{task.stepTitle}</p>
               {task.instruction && <p className="text-xs text-gray-500 mt-1">{task.instruction}</p>}
+              {task.context?.reason && <p className="text-sm text-gray-700 mt-1">&ldquo;{task.context.reason}&rdquo;</p>}
             </div>
           </div>
+          {task.definitionId === 'serving-replacement' && task.context?.slotId && (
+            <div className="mt-3">
+              <ReplacementSuggestions
+                context={task.context}
+                busy={busyTask === task.taskId}
+                onChoose={name => onAct(task.taskId, 'replaced', name)}
+              />
+            </div>
+          )}
           <div className="mt-3">
             <ActionBar
               actions={task.actions}
