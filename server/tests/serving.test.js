@@ -40,7 +40,7 @@ function slotsIn(month) {
 let KEEPER, MAN, OTHER_MAN, WOMAN, UNLINKED, man, otherMan, woman;
 
 beforeEach(() => {
-  for (const t of ['notifications', 'mail_outbox', 'workflow_events', 'workflow_tasks', 'workflow_participants', 'workflow_instances', 'action_log', 'job_assignments', 'service_jobs', 'worship_preferences', 'worship_profile', 'user_areas', 'users', 'directory']) {
+  for (const t of ['notifications', 'mail_outbox', 'workflow_events', 'workflow_tasks', 'workflow_participants', 'workflow_instances', 'job_blackouts', 'action_log', 'job_assignments', 'service_jobs', 'worship_preferences', 'worship_profile', 'user_areas', 'users', 'directory']) {
     db.prepare(`DELETE FROM ${t}`).run();
   }
 
@@ -98,6 +98,80 @@ describe('laying out next month', () => {
 });
 
 // ─── Filling a slot — the roster role's to do ──────────────────────────────────
+
+describe('building a month fills it from what the men have said', () => {
+  const prefer = (person, role, level) => db.prepare('INSERT OR REPLACE INTO worship_preferences (directory_id, role, level) VALUES (?, ?, ?)').run(person.id, role, level);
+  const build = (body = {}) => request(buildApp(KEEPER)).post('/api/serving/months').send({ month: 'June 2026', services: ['Wednesday'], ...body });
+  const wednesday = date => slotsIn('June 2026').filter(s => s.date === date);
+  const JOBS = ['Song Leader', 'Opening Prayer', 'Closing Prayer'];
+
+  beforeEach(() => {
+    for (const job of JOBS) { prefer(man, job, 'willing'); prefer(otherMan, job, 'willing'); }
+  });
+
+  test('every open slot gets a name, nobody twice at one service, and the load is spread', async () => {
+    const res = await build();
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ created: 12, filled: 8, open: 4 });   // two men, three jobs a night: one left open each night
+    for (const date of ['June 3', 'June 10', 'June 17', 'June 24']) {
+      const names = wednesday(date).map(s => s.name).filter(Boolean);
+      expect(new Set(names).size).toBe(names.length);
+      expect(names).toHaveLength(2);
+    }
+    const turns = name => slotsIn('June 2026').filter(s => s.name === name).length;
+    expect(turns('Joe Carter')).toBe(4);
+    expect(turns('Ned Poole')).toBe(4);
+    expect(db.prepare("SELECT summary FROM action_log WHERE entity = 'serving schedule'").get().summary)
+      .toBe('Built June 2026 — 12 new slots, 8 filled from preferences, 4 still open');
+  });
+
+  test('never a woman, never someone who said rather not, never someone away that day', async () => {
+    for (const job of JOBS) prefer(woman, job, 'preferred');
+    prefer(man, 'Song Leader', 'unavailable');
+    db.prepare("INSERT INTO job_blackouts (directory_id, starts_on, ends_on) VALUES (?, '2026-06-10', '2026-06-10')").run(otherMan.id);
+    await build();
+    const all = slotsIn('June 2026');
+    expect(all.some(s => s.name === 'Ruth Poole')).toBe(false);
+    expect(all.some(s => s.job === 'Song Leader' && s.name === 'Joe Carter')).toBe(false);
+    expect(wednesday('June 10').some(s => s.name === 'Ned Poole')).toBe(false);
+  });
+
+  test('building again only fills what is still open, and never moves a name put there by hand', async () => {
+    await build({ fill: false });
+    expect(slotsIn('June 2026').every(s => !s.name)).toBe(true);
+    const slot = wednesday('June 3').find(s => s.job === 'Song Leader');
+    db.prepare("UPDATE job_assignments SET name = 'Sam Visitor' WHERE id = ?").run(slot.id);
+
+    const res = await build();
+    expect(res.body).toMatchObject({ created: 0, filled: 8 });
+    expect(db.prepare('SELECT name FROM job_assignments WHERE id = ?').get(slot.id).name).toBe('Sam Visitor');
+    const again = await build();
+    expect(again.body).toMatchObject({ created: 0, filled: 0 });
+  });
+
+  test('the picker ranks who could take a slot, saying why', async () => {
+    prefer(man, 'Song Leader', 'preferred');
+    db.prepare("INSERT INTO job_blackouts (directory_id, starts_on, ends_on, reason) VALUES (?, '2026-06-03', '2026-06-03', 'Away')").run(otherMan.id);
+    await build({ fill: false });
+    const slot = wednesday('June 3').find(s => s.job === 'Song Leader');
+    const res = await request(buildApp(KEEPER)).get(`/api/serving/assignments/${slot.id}/candidates`);
+    expect(res.body.candidates.map(c => [c.name, c.level, c.free, !!c.away])).toEqual([
+      ['Joe Carter', 'preferred', true, false],
+      ['Ned Poole', 'willing', false, true],
+    ]);
+    expect((await request(buildApp(MAN)).get(`/api/serving/assignments/${slot.id}/candidates`)).status).toBe(403);
+  });
+
+  test('once it is right, everyone serving is emailed their jobs', async () => {
+    db.prepare("UPDATE directory SET email = 'joe@example.com' WHERE id = ?").run(man.id);
+    await build();
+    const res = await request(buildApp(KEEPER)).post('/api/serving/months/notify').send({ month: 'June 2026' });
+    expect(res.body).toMatchObject({ emailed: 1, unreachable: ['Ned Poole'] });
+    expect(db.prepare("SELECT COUNT(*) n FROM mail_outbox WHERE context = 'workflow:roster:schedule'").get().n).toBe(1);
+    expect((await request(buildApp(KEEPER)).post('/api/serving/months/notify').send({ month: 'July 2026' })).status).toBe(400);
+    expect((await request(buildApp(MAN)).post('/api/serving/months/notify').send({ month: 'June 2026' })).status).toBe(403);
+  });
+});
 
 describe('the jobs each service needs', () => {
   const setJobs = (user, body) => request(buildApp(user)).put('/api/serving/service-jobs').send(body);
@@ -307,7 +381,7 @@ describe('asking to be replaced', () => {
     app.use((req, _res, next) => { req.user = KEEPER; next(); });
     app.use('/api/workflows', require('../routes/workflows'));
     const res = await request(app).get('/api/workflows/definitions?page=assignments');
-    expect(res.body.definitions.map(d => d.id)).toEqual(['worship-schedule']);
+    expect(res.body.definitions.map(d => d.id)).toEqual([]);
   });
 });
 

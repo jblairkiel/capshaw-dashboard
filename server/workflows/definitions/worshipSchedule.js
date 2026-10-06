@@ -40,6 +40,11 @@ module.exports = {
   // Building the roster is the Serving Schedule area's job — and an admin's,
   // since admins look after every area.
   startRole: 'serving-schedule',
+  // Building a month is now one button on the Service Roster (POST
+  // /api/serving/months), which fills the slots straight onto the schedule
+  // for the keeper to change by hand. Kept so drafts already started can be
+  // finished, but no longer offered on the page's start form.
+  retired: true,
   fallbackRole: 'serving-schedule',
 
   fields: [

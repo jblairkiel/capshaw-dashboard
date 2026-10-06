@@ -1,21 +1,23 @@
-import { Fragment, useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import Dialog from './Dialog';
 import TimeAway from './TimeAway';
 import BlackoutCalendar from './BlackoutCalendar';
 import { describeRange, parseMonthLabel } from '../lib/timeAway';
 import DateInput, { MonthInput } from './DateInput';
 import { isoFromMonthDay, monthDayOf, monthLabelOf } from '../lib/dates';
+import { CopyLinkButton } from './upcoming/shared';
 
 // The serving schedule, from both sides of it:
 //
-//   · Everybody sees the month, week by week. Nobody can put their own name
-//     against an empty slot — a slot is only ever filled by the Monthly
-//     Worship Schedule workflow or by whoever looks after the schedule — but
-//     a member may still take their own name back off one they are down for.
-//   · Whoever looks after the schedule can lay out next month in one go, fill
-//     or clear any slot by hand, and add a one-off job.
-//   · Anybody linked to the directory blocks out the days they will be away,
-//     and the schedule leaves those days alone.
+//   · Everybody sees the month, a card per service, each with its own link.
+//     Nobody can put their own name against a slot; a member down for one
+//     who cannot make it asks to be replaced.
+//   · Whoever looks after the schedule builds a month in one go — laid out and
+//     filled from what the men have said they will do — then clicks any name
+//     to change it, the best fits listed first. Setup holds the rest: the jobs
+//     each service needs, special services, and a one-off job.
+//   · Each man blocks out the days he will be away (or the keeper does it for
+//     him from the Preferences tab), and filling leaves those days alone.
 //
 // The server decides all of that; `canManage` and `me` come back from it and
 // only say which buttons to draw.
@@ -52,9 +54,10 @@ function jsonBody(body) {
 
 // ─── Laying out a month ───────────────────────────────────────────────────────
 
-function BuildMonthDialog({ services, onClose, onBuilt }) {
-  const [month, setMonth]       = useState(nextMonthLabel);
+function BuildMonthDialog({ services, initialMonth, onClose, onBuilt }) {
+  const [month, setMonth]       = useState(initialMonth || nextMonthLabel);
   const [chosen, setChosen]     = useState(() => new Set(services));
+  const [fill, setFill]         = useState(true);
   const [busy, setBusy]         = useState(false);
   const [error, setError]       = useState('');
 
@@ -70,7 +73,7 @@ function BuildMonthDialog({ services, onClose, onBuilt }) {
     e.preventDefault();
     setBusy(true); setError('');
     try {
-      const json = await send(`${API}/months`, { method: 'POST', ...jsonBody({ month, services: [...chosen] }) });
+      const json = await send(`${API}/months`, { method: 'POST', ...jsonBody({ month, services: [...chosen], fill }) });
       onBuilt(json);
     } catch (err) {
       setError(err.message);
@@ -79,7 +82,7 @@ function BuildMonthDialog({ services, onClose, onBuilt }) {
   }
 
   return (
-    <Dialog title="Build a month of serving jobs" subtitle="Empty slots, ready for people to be put against them" onClose={onClose} width="max-w-md">
+    <Dialog title="Build a month" subtitle="Every service's jobs, filled from what the men have said they will do" onClose={onClose} width="max-w-md">
       <form onSubmit={submit} className="space-y-4">
         <div>
           <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Month</span>
@@ -103,9 +106,21 @@ function BuildMonthDialog({ services, onClose, onBuilt }) {
           </div>
         </fieldset>
 
+        <label className="flex items-start gap-2 text-sm text-gray-700">
+          <input type="checkbox" checked={fill} onChange={e => setFill(e.target.checked)} className="accent-church-gold mt-0.5" />
+          <span>
+            Fill in names
+            <span className="block text-xs text-gray-500">
+              From the men who said they are glad or willing to do each job — never one who is away that day,
+              and the turns spread out. Change any name afterwards by clicking it.
+            </span>
+          </span>
+        </label>
+
         <p className="text-xs text-gray-500">
-          Every service in the month gets a slot for each job it needs, with nobody against it yet.
-          Running this twice never doubles a month up.
+          Every service in the month gets a slot for each job it needs. Building again only adds what is
+          missing and fills what is still open; a name already there is never moved. Nobody is emailed
+          until you choose Email everyone their jobs.
         </p>
 
         {error && <p className="text-sm text-red-600">{error}</p>}
@@ -113,7 +128,7 @@ function BuildMonthDialog({ services, onClose, onBuilt }) {
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} className="text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600">Cancel</button>
           <button type="submit" disabled={busy || !chosen.size} className="btn-primary text-sm disabled:opacity-50">
-            {busy ? 'Building…' : 'Build the month'}
+            {busy ? 'Building…' : `Build ${month || 'the month'}`}
           </button>
         </div>
       </form>
@@ -268,9 +283,9 @@ function ReplacementDialog({ slot, onClose, onAsked }) {
 
 // ─── The jobs each service needs ──────────────────────────────────────────────
 //
-// What building a month lays out for each service, what the Monthly Worship
-// Schedule fills, and what a special service starts with. A month already
-// built keeps its slots; Add a job covers a one-off.
+// What building a month lays out and fills for each service, and what a
+// special service starts with. A month already
+// built keeps its slots; Add a single job covers a one-off.
 
 function ServiceJobsRow({ entry, jobs, onSaved }) {
   const [chosen, setChosen] = useState(() => new Set(entry.jobs));
@@ -327,8 +342,8 @@ function ServiceJobsDialog({ serviceJobs, jobs, onClose, onSaved }) {
   return (
     <Dialog title="Jobs for each service" subtitle="What a month is built with, for each service" onClose={onClose} width="max-w-2xl">
       <p className="text-xs text-gray-500 mb-1">
-        Building a month, and the Monthly Worship Schedule, lay out these jobs for every service. A month already
-        built keeps the slots it has — use Add a job for a one-off.
+        Building a month lays out these jobs for every service. A month already built keeps the slots it
+        has — use Add a single job for a one-off.
       </p>
       {serviceJobs.map(entry => (
         <ServiceJobsRow key={`${entry.service}:${entry.jobs.join('|')}`} entry={entry} jobs={jobs} onSaved={onSaved} />
@@ -337,6 +352,148 @@ function ServiceJobsDialog({ serviceJobs, jobs, onClose, onSaved }) {
         <button type="button" onClick={onClose} className="text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600">Done</button>
       </div>
     </Dialog>
+  );
+}
+
+// ─── Who takes a slot ─────────────────────────────────────────────────────────
+//
+// Clicking a name on the schedule: the men who could take it, best fit first —
+// free that day and glad to, then willing, then the rest — each saying why he
+// is or is not a fit, and how many turns he already has this month.
+
+const LEVEL_LABEL = { preferred: 'Glad to', willing: 'Willing', unavailable: 'Rather not', '': 'Not said' };
+
+function SlotPicker({ slot, onClose, onSaved, onMore }) {
+  const [list, setList]   = useState(null);
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy]   = useState(false);
+  const [error, setError] = useState('');
+  const [all, setAll]     = useState(false);
+
+  useEffect(() => {
+    send(`${API}/assignments/${slot.id}/candidates`).then(j => setList(j.candidates)).catch(e => setError(e.message));
+  }, [slot.id]);
+
+  async function put(name) {
+    setBusy(true); setError('');
+    try {
+      const json = await send(`${API}/assignments/${slot.id}`, { method: 'PATCH', ...jsonBody({ name }) });
+      onSaved(json.assignment, json.warning);
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  const why = c => (c.away ? `Away ${describeRange(c.away)}` : c.busy ? 'Already serving at this service' : c.level === 'unavailable' ? 'Would rather not' : '');
+  const fits = (list || []).filter(c => c.free && (c.level === 'preferred' || c.level === 'willing'));
+  const shown = all ? (list || []) : fits;
+
+  return (
+    <Dialog title={`${slot.job}`} subtitle={[slot.date || slot.month, slot.service].filter(Boolean).join(' · ')} onClose={onClose} width="max-w-md">
+      <div className="space-y-3">
+        <p className="text-sm text-gray-600">
+          Now: <span className="font-medium text-church-navy">{slot.name || 'nobody'}</span>
+        </p>
+        {!list && !error && <p className="text-sm text-gray-400">Finding who could take it…</p>}
+        {list && (
+          <>
+            <ul className="divide-y divide-gray-100 max-h-80 overflow-y-auto -mx-1" aria-label="Who could take it">
+              {shown.length === 0 && <li className="px-1 py-2 text-sm text-gray-500">Nobody free has said they will do this. Show everyone, or type a name.</li>}
+              {shown.map(c => (
+                <li key={c.id}>
+                  <button type="button" disabled={busy || c.current} onClick={() => put(c.name)}
+                    className="w-full text-left px-2 py-2 rounded-lg hover:bg-church-cream disabled:opacity-60 flex items-baseline gap-2 flex-wrap">
+                    <span className={`font-medium ${c.free ? 'text-church-navy' : 'text-gray-400'}`}>{c.name}</span>
+                    <span className={`text-xs px-1.5 py-0.5 rounded ${c.level === 'preferred' ? 'bg-emerald-50 text-emerald-700' : c.level === 'willing' ? 'bg-blue-50 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>{LEVEL_LABEL[c.level]}</span>
+                    <span className="text-xs text-gray-400">{c.turns} turn{c.turns === 1 ? '' : 's'} this month</span>
+                    {c.current && <span className="text-xs text-gray-400">· down for it now</span>}
+                    {why(c) && <span className="text-xs text-amber-700 w-full">{why(c)}</span>}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <button type="button" onClick={() => setAll(v => !v)} className="text-xs text-church-gold hover:text-church-navy">
+              {all ? 'Only the best fits' : `Show everyone (${list.length})`}
+            </button>
+          </>
+        )}
+        <form onSubmit={e => { e.preventDefault(); if (typed.trim()) put(typed.trim()); }} className="flex gap-2">
+          <input value={typed} onChange={e => setTyped(e.target.value)} placeholder="Or type a name" aria-label="Or type a name"
+            className="flex-1 min-w-0 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold" />
+          <button type="submit" disabled={busy || !typed.trim()} className="btn-primary text-sm disabled:opacity-50">Put in</button>
+        </form>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <div className="flex items-center justify-between gap-2 pt-1 border-t border-gray-100">
+          <button type="button" onClick={onMore} className="text-xs text-gray-500 underline">Change the date or job, or remove the slot</button>
+          {slot.name && <button type="button" disabled={busy} onClick={() => put('')} className="text-sm px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600">Leave it open</button>}
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
+// ─── One service on the schedule ──────────────────────────────────────────────
+//
+// Its jobs, who is down for each, and its own link — the same idea as a
+// service's link on Submit a Service — so a keeper can send somebody straight
+// to it.
+
+const serviceId = (iso, service) => `service-${iso}-${String(service).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+
+function rosterLink(iso, service, origin = window.location.origin) {
+  return `${origin}/?${new URLSearchParams({ page: 'service-roster', tab: 'scheduled', date: iso, service })}`;
+}
+
+function ServiceCard({ occasion, canManage, isMine, focused, onPick, onAsk }) {
+  const longDay = occasion.iso
+    ? new Date(`${occasion.iso}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })
+    : occasion.date;
+  const open = occasion.slots.filter(s => !s.name.trim()).length;
+  return (
+    <section id={serviceId(occasion.iso, occasion.service)} aria-label={`${occasion.service}, ${longDay}`}
+      className={`card p-0 overflow-hidden scroll-mt-24 ${focused ? 'ring-2 ring-church-gold' : ''}`}>
+      <header className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 flex items-start justify-between gap-2 flex-wrap">
+        <div className="min-w-0">
+          <h4 className="font-semibold text-church-navy text-sm">{occasion.service}</h4>
+          <p className="text-xs text-gray-500">{longDay}{open > 0 && <span className="ml-2 text-amber-700 font-medium">{open} open</span>}</p>
+        </div>
+        {occasion.iso && <CopyLinkButton url={rosterLink(occasion.iso, occasion.service)} service={occasion.service} date={occasion.iso} />}
+      </header>
+      <ul className="divide-y divide-gray-50">
+        {occasion.slots.map(r => (
+          <li key={r.id} className={`px-4 py-2 flex items-center gap-2 text-sm ${r.name ? '' : 'bg-amber-50/60'}`}>
+            <span className="w-32 shrink-0 text-gray-500">{r.job}</span>
+            <span className="flex-1 min-w-0 flex items-center gap-1.5 flex-wrap">
+              {canManage ? (
+                <button type="button" onClick={() => onPick(r)} aria-label={`${r.job}: ${r.name || 'open'} — change`}
+                  className={`text-left hover:underline ${r.name ? 'text-church-navy' : 'text-amber-700 font-medium'}`}>
+                  {r.name || 'Open — choose someone'}
+                </button>
+              ) : (
+                <span className={r.name ? 'text-church-navy' : 'text-gray-400'}>{r.name || 'Nobody yet'}</span>
+              )}
+              {r.away && (
+                <span title={`Away ${describeRange(r.away)}${r.away.reason ? ` · ${r.away.reason}` : ''}`}
+                  className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">away</span>
+              )}
+              {r.replacement && (
+                <span title={`${r.replacement.askedBy ? `Asked by ${r.replacement.askedBy}` : 'Asked'}${r.replacement.reason ? ` · ${r.replacement.reason}` : ''}`}
+                  className="text-xs px-2 py-0.5 rounded-full bg-rose-100 text-rose-800">
+                  {canManage ? 'needs replacing — in My Inbox' : 'replacement asked for'}
+                </span>
+              )}
+            </span>
+            {isMine(r) && !r.replacement && (
+              <button onClick={() => onAsk(r)}
+                className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold transition-colors shrink-0">
+                Ask to be replaced
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -457,20 +614,23 @@ function SlotDialog({ slot, month, jobs, services, onClose, onSaved, onDeleted }
 
 // ─── The page ─────────────────────────────────────────────────────────────────
 
-export default function ServingSchedule() {
+export default function ServingSchedule({ focus = null }) {
   const [data, setData]       = useState(null);
   const [month, setMonth]     = useState('');
-  const [week, setWeek]       = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
   const [notice, setNotice]   = useState('');
   const [building, setBuilding] = useState(false);
+  const [emailing, setEmailing] = useState(false);
   const [addingSpecial, setAddingSpecial] = useState(false);
   const [editingJobs, setEditingJobs] = useState(false);
   const [asking, setAsking] = useState(null);   // the slot somebody is asking to be replaced on
+  const [picking, setPicking] = useState(null); // the slot the keeper is choosing someone for
   const [editing, setEditing] = useState(null);   // a slot, or {} for a new one
   const [awayView, setAwayView] = useState('list');   // 'list' or 'calendar', for the keeper's view of who is away
   const [blockingOut, setBlockingOut] = useState(false);   // the member's own time-away dialog
+  // A link to one service (?date=&service=) opens its month and brings it into view.
+  const [focused, setFocused] = useState(focus);
 
   const load = useCallback(async (wanted = '') => {
     setLoading(true);
@@ -486,32 +646,33 @@ export default function ServingSchedule() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(focus?.date ? monthLabelOf(focus.date) : ''); }, [load]); // eslint-disable-line react-hooks/exhaustive-deps -- once; a link's month first
 
   const all = useMemo(() => data?.assignments ?? [], [data]);
+  const regular = useMemo(() => data?.services ?? [], [data]);
 
-  const weeks = useMemo(() => {
-    const seen = [];
+  // Every service in the month, in the order they happen, each with its jobs.
+  const occasions = useMemo(() => {
+    const rank = svc => (regular.includes(svc) ? regular.indexOf(svc) : regular.length);
+    const byKey = new Map();
     for (const a of all) {
-      if (a.date && !MONTHLY_JOBS.has(a.job) && !seen.includes(a.date)) seen.push(a.date);
+      if (!a.date || MONTHLY_JOBS.has(a.job)) continue;
+      const key = `${a.date}|${a.service}`;
+      if (!byKey.has(key)) byKey.set(key, { date: a.date, service: a.service, iso: isoFromMonthDay(month, a.date), slots: [] });
+      byKey.get(key).slots.push(a);
     }
-    // In the order they happen: a special service added later still falls
-    // between the Sundays either side of it.
-    const when = d => isoFromMonthDay(month, d) || d;
-    return seen.sort((a, b) => when(a).localeCompare(when(b)));
-  }, [all, month]);
-
-  const selected = weeks.includes(week) ? week : (weeks[0] || '');
-  // A day can have more than one service — Sunday morning and evening, or a
-  // gospel meeting — so its rows are kept together under each service's name.
-  const regular  = data?.services ?? [];
-  const rank     = svc => (regular.includes(svc) ? regular.indexOf(svc) : regular.length);
-  const rows     = all.filter(a => a.date === selected && !MONTHLY_JOBS.has(a.job))
-    .map((a, i) => ({ a, i }))
-    .sort((x, y) => rank(x.a.service) - rank(y.a.service) || String(x.a.service).localeCompare(String(y.a.service)) || x.i - y.i)
-    .map(({ a }) => a);
-  const headed   = new Set(rows.map(r => r.service)).size > 1 || rows.some(r => r.service && !regular.includes(r.service));
+    return [...byKey.values()].sort((x, y) =>
+      String(x.iso || x.date).localeCompare(String(y.iso || y.date)) || rank(x.service) - rank(y.service) || x.service.localeCompare(y.service));
+  }, [all, month, regular]);
   const monthly  = all.filter(a => MONTHLY_JOBS.has(a.job));
+  const openCount = all.filter(a => !a.name.trim()).length;
+
+  // Once the linked service is on screen, bring it into view.
+  useEffect(() => {
+    if (!focused?.date || loading) return;
+    const el = document.getElementById(serviceId(focused.date, focused.service));
+    el?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  }, [focused, loading, occasions]);
 
   const canManage = !!data?.canManage;
   const me        = data?.me ?? {};
@@ -519,8 +680,8 @@ export default function ServingSchedule() {
   // A member who cannot do a job they are down for asks to be replaced; their
   // name stays on until whoever keeps the schedule has sorted it out, so a
   // gap is never left that nobody knows about. Nobody can put their own name
-  // against a slot either — that is the Monthly Worship Schedule workflow's to
-  // generate, or the schedule keeper's to fill by hand.
+  // against a slot either — that is the month builder's, or the schedule
+  // keeper's to change by hand.
   function mineAlready(row) {
     return !!me.name && row.name.trim().toLowerCase() === me.name.trim().toLowerCase();
   }
@@ -537,6 +698,19 @@ export default function ServingSchedule() {
     await load(month);
   }
 
+  async function emailEveryone() {
+    if (!window.confirm(`Email everyone down for a job in ${month} their jobs, and send the whole month to the congregation?`)) return;
+    setEmailing(true); setNotice('');
+    try {
+      const json = await send(`${API}/months/notify`, { method: 'POST', ...jsonBody({ month }) });
+      setNotice(`Emailed ${json.emailed} ${json.emailed === 1 ? 'man' : 'men'} their jobs for ${month}.${json.unreachable.length ? ` No email address on file for ${json.unreachable.join(', ')}.` : ''}`);
+    } catch (err) {
+      setNotice(err.message);
+    } finally {
+      setEmailing(false);
+    }
+  }
+
   if (loading && !data) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -549,74 +723,60 @@ export default function ServingSchedule() {
     return <div className="card text-center py-10 text-red-600 text-sm">{error}</div>;
   }
 
+  const setupItem = 'block w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-church-cream';
+
   return (
     <div className="space-y-4">
       <div className="flex items-end justify-between flex-wrap gap-3">
-        <div>
-          <p className="font-semibold text-church-navy">{month || 'Serving Schedule'}</p>
+        <div className="flex items-center gap-3 flex-wrap">
+          {(data?.months?.length ?? 0) > 1 ? (
+            <select
+              value={month}
+              aria-label="Month"
+              onChange={e => { setMonth(e.target.value); setFocused(null); load(e.target.value); }}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-church-navy font-semibold focus:outline-none focus:ring-2 focus:ring-church-navy"
+            >
+              {data.months.map(m => <option key={m.month} value={m.month}>{m.month}</option>)}
+            </select>
+          ) : (
+            <p className="font-semibold text-church-navy">{month || 'Serving Schedule'}</p>
+          )}
+          {all.length > 0 && (
+            <span className={`text-sm ${openCount ? 'text-amber-700 font-medium' : 'text-emerald-700'}`}>
+              {openCount ? `${openCount} slot${openCount === 1 ? '' : 's'} still open` : 'Every slot is filled'}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {(data?.months?.length ?? 0) > 1 && (
-            <label className="text-sm text-gray-500 flex items-center gap-2">
-              <span className="whitespace-nowrap">Month</span>
-              <select
-                value={month}
-                aria-label="Month"
-                onChange={e => { setMonth(e.target.value); setWeek(''); load(e.target.value); }}
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-church-navy font-medium focus:outline-none focus:ring-2 focus:ring-church-navy"
-              >
-                {data.months.map(m => <option key={m.month} value={m.month}>{m.month}</option>)}
-              </select>
-            </label>
-          )}
-
-          {weeks.length > 0 && (
-            <label className="text-sm text-gray-500 flex items-center gap-2">
-              <span className="whitespace-nowrap">Week of</span>
-              <select
-                value={selected}
-                onChange={e => setWeek(e.target.value)}
-                aria-label="Week"
-                className="border border-gray-300 rounded-lg px-3 py-2 text-sm text-church-navy font-medium focus:outline-none focus:ring-2 focus:ring-church-navy"
-              >
-                {weeks.map(d => <option key={d} value={d}>{d}</option>)}
-              </select>
-            </label>
-          )}
-
           {me.directoryId && (
             <button
               onClick={() => setBlockingOut(true)}
               className="text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold hover:text-church-navy transition-colors"
             >
-              Time away{(me.blackouts?.length ?? 0) > 0 ? ` (${me.blackouts.length})` : ''}
+              My time away{(me.blackouts?.length ?? 0) > 0 ? ` (${me.blackouts.length})` : ''}
             </button>
           )}
 
           {canManage && (
             <>
-              <button onClick={() => setBuilding(true)} className="btn-primary text-sm">
-                Build next month
-              </button>
-              <button
-                onClick={() => setEditing({})}
-                className="text-sm px-3 py-2 rounded-lg border border-church-navy text-church-navy hover:bg-church-navy hover:text-white transition-colors"
-              >
-                Add a job
-              </button>
-              <button
-                onClick={() => setAddingSpecial(true)}
-                className="text-sm px-3 py-2 rounded-lg border border-church-navy text-church-navy hover:bg-church-navy hover:text-white transition-colors"
-              >
-                Add a special service
-              </button>
-              <button
-                onClick={() => setEditingJobs(true)}
-                className="text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold hover:text-church-navy transition-colors"
-              >
-                Jobs for each service
-              </button>
+              <button onClick={() => setBuilding(true)} className="btn-primary text-sm">Build a month</button>
+              {all.some(a => a.name.trim()) && (
+                <button onClick={emailEveryone} disabled={emailing}
+                  className="text-sm px-3 py-2 rounded-lg border border-church-navy text-church-navy hover:bg-church-navy hover:text-white transition-colors disabled:opacity-50">
+                  {emailing ? 'Emailing…' : 'Email everyone their jobs'}
+                </button>
+              )}
+              <details className="relative">
+                <summary className="list-none cursor-pointer text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold hover:text-church-navy select-none">
+                  Setup ▾
+                </summary>
+                <div className="absolute right-0 z-20 mt-1 w-56 rounded-lg border border-gray-200 bg-white shadow-lg py-1">
+                  <button type="button" className={setupItem} onClick={e => { e.currentTarget.closest('details').open = false; setEditingJobs(true); }}>Jobs for each service</button>
+                  <button type="button" className={setupItem} onClick={e => { e.currentTarget.closest('details').open = false; setAddingSpecial(true); }}>Add a special service</button>
+                  <button type="button" className={setupItem} onClick={e => { e.currentTarget.closest('details').open = false; setEditing({}); }}>Add a single job</button>
+                </div>
+              </details>
             </>
           )}
         </div>
@@ -630,12 +790,13 @@ export default function ServingSchedule() {
       )}
 
       {/* What this person can do about it, said once rather than on every row. */}
-      {!canManage && (
+      {canManage ? (
+        all.length > 0 && <p className="text-xs text-gray-500">Click any name to change it — the best fits for that slot are listed first. Each service has its own link to send to anyone.</p>
+      ) : (
         <p className="text-xs text-gray-500">
-          Slots here are filled by the Monthly Worship Schedule workflow or by whoever looks after
-          the serving schedule. If you are down for one and cannot make it, choose Ask to be
-          replaced — they are told straight away, and your name stays on until they have found
-          someone.
+          Slots here are filled by whoever looks after the serving schedule. If you are down for one and cannot
+          make it, choose Ask to be replaced — they are told straight away, and your name stays on until they
+          have found someone.
         </p>
       )}
 
@@ -645,82 +806,19 @@ export default function ServingSchedule() {
         </p>
       )}
 
-      <div className="card p-0 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-church-navy text-left text-xs text-gray-300 uppercase tracking-wide">
-              <th className="px-4 py-3 w-1/3">Job</th>
-              <th className="px-4 py-3">Name</th>
-              <th className="px-4 py-3 text-right">{canManage ? 'Manage' : ''}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <Fragment key={r.id}>
-              {headed && r.service !== rows[i - 1]?.service && (
-                <tr className="bg-gray-50">
-                  <th colSpan={3} scope="colgroup" className="px-4 py-1.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                    {r.service || 'Any service'}
-                  </th>
-                </tr>
-              )}
-              <tr className={r.name ? 'bg-white' : 'bg-amber-50/40'}>
-                <td className="px-4 py-2 font-medium text-church-navy">{r.job}</td>
-                <td className="px-4 py-2">
-                  {r.name || <span className="text-gray-400">Nobody yet</span>}
-                  {r.away && (
-                    <span
-                      title={`Away ${describeRange(r.away)}${r.away.reason ? ` · ${r.away.reason}` : ''}`}
-                      className="ml-2 text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 align-middle"
-                    >
-                      away
-                    </span>
-                  )}
-                  {r.replacement && (
-                    <span
-                      title={`${r.replacement.askedBy ? `Asked by ${r.replacement.askedBy}` : 'Asked'}${r.replacement.reason ? ` · ${r.replacement.reason}` : ''}`}
-                      className="ml-2 text-xs px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 align-middle"
-                    >
-                      {canManage ? 'needs replacing — in My Inbox' : 'replacement asked for'}
-                    </span>
-                  )}
-                </td>
-                <td className="px-4 py-2 text-right">
-                  <div className="flex items-center gap-1.5 justify-end flex-wrap">
-                    {mineAlready(r) && !r.replacement && (
-                      <button
-                        onClick={() => setAsking(r)}
-                        className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold transition-colors"
-                      >
-                        Ask to be replaced
-                      </button>
-                    )}
-                    {canManage && (
-                      <button
-                        onClick={() => setEditing(r)}
-                        aria-label={`Edit ${r.job}`}
-                        className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold hover:text-church-navy transition-colors"
-                      >
-                        Edit
-                      </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-              </Fragment>
-            ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={3} className="px-4 py-12 text-center text-gray-400">
-                  {canManage
-                    ? 'Nothing here yet — choose Build next month to lay one out.'
-                    : 'Nobody is rostered yet.'}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {occasions.length === 0 ? (
+        <div className="card text-center py-12 text-sm text-gray-400">
+          {canManage ? 'Nothing here yet — choose Build a month to lay one out and fill it.' : 'Nobody is rostered yet.'}
+        </div>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 items-start">
+          {occasions.map(o => (
+            <ServiceCard key={`${o.date}|${o.service}`} occasion={o} canManage={canManage} isMine={mineAlready}
+              focused={!!focused && focused.date === o.iso && focused.service.toLowerCase() === o.service.toLowerCase()}
+              onPick={setPicking} onAsk={setAsking} />
+          ))}
+        </div>
+      )}
 
       {canManage && (
         <div className="card p-4 space-y-3">
@@ -728,8 +826,8 @@ export default function ServingSchedule() {
             <div>
               <h4 className="text-sm font-semibold text-church-navy">Who is away</h4>
               <p className="text-xs text-gray-500 mt-0.5">
-                Blocked out across the congregation. Change one of them from
-                <strong> Church Office → Service Roster</strong>.
+                Each man blocks out his own days with My time away. To do it for him, open his name on
+                the <strong>Preferences</strong> tab.
               </p>
             </div>
             {(data?.blackouts?.length ?? 0) > 0 && (
@@ -773,7 +871,11 @@ export default function ServingSchedule() {
         <BuildMonthDialog
           services={data?.services ?? []}
           onClose={() => setBuilding(false)}
-          onBuilt={json => { setBuilding(false); setWeek(''); load(json.month); }}
+          onBuilt={json => {
+            setBuilding(false); setFocused(null);
+            setNotice(`Built ${json.month}: ${json.created} new slot${json.created === 1 ? '' : 's'}, ${json.filled} filled in${json.open ? `, ${json.open} still open` : ''}. Click any name to change it; nobody has been emailed yet.`);
+            load(json.month);
+          }}
         />
       )}
 
@@ -800,7 +902,16 @@ export default function ServingSchedule() {
           jobs={data?.jobs ?? []}
           serviceJobs={Array.isArray(data?.serviceJobs) ? data.serviceJobs : []}
           onClose={() => setAddingSpecial(false)}
-          onAdded={json => { setAddingSpecial(false); setWeek(''); load(json.month); }}
+          onAdded={json => { setAddingSpecial(false); load(json.month); }}
+        />
+      )}
+
+      {picking && (
+        <SlotPicker
+          slot={picking}
+          onClose={() => setPicking(null)}
+          onSaved={(saved, warning) => { setPicking(null); setNotice(warning || ''); load(month); }}
+          onMore={() => { setEditing(picking); setPicking(null); }}
         />
       )}
 

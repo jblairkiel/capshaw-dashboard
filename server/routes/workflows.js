@@ -36,7 +36,7 @@ router.get('/definitions', (req, res) => {
     .filter(d => holds(req.user, d.startRole || 'approved'))
     // One started from the thing it is about (a slot) is not offered on the
     // page's general start form.
-    .filter(d => !d.startedFrom)
+    .filter(d => !d.startedFrom && !d.retired)
     .map(d => ({
       id: d.id,
       page: d.page,

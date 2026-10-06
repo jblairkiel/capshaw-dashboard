@@ -490,7 +490,8 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       )}
       {!updating && activeTab === 'service-roster' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
-          <ServiceRosterView user={user} canManage={hasArea(user, 'serving-schedule')} tab={rosterTab} onTabChange={setRosterTab} />
+          <ServiceRosterView canManage={hasArea(user, 'serving-schedule')} tab={rosterTab} onTabChange={setRosterTab}
+            focus={deepLink?.page === 'service-roster' ? deepLink.service : null} />
         </main>
       )}
       {!updating && activeTab === 'action-history' && admin && (

@@ -71,7 +71,7 @@ describe('what fills itself in', () => {
   test('the live workflow flowcharts', () => {
     const followUp = blocksOf('guests').find(b => b.workflow);
     expect(followUp.chart.nodes.length).toBeGreaterThan(2);
-    expect(blocksOf('serving-schedule').find(b => b.workflow).chart.title).toBe('Monthly Worship Schedule');
+    expect(blocksOf('serving-schedule').find(b => b.workflow).chart.title).toBe('Replacement on the Serving Schedule');
   });
 });
 

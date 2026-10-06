@@ -88,10 +88,11 @@ describe('GET /api/workflows/definitions', () => {
   // a role rung — this definitions list has to check it the same way engine.js
   // does (holds(), not hasRole()) or an area-gated workflow never appears for
   // anybody, admins included, since an area id is never a rung on the ladder.
-  test('an admin sees a workflow gated by an area, not just one gated by a role', async () => {
+  test('an admin is offered what can be started from a page — not a retired workflow, nor one started from a slot', async () => {
     const res = await request(buildApp(ADMIN)).get('/api/workflows/definitions');
-    expect(res.body.definitions.map(d => d.id).sort())
-      .toEqual(['visitor-follow-up', 'worship-schedule']);
+    // The Monthly Worship Schedule is built from the Service Roster now, and a
+    // replacement is asked for from the slot itself.
+    expect(res.body.definitions.map(d => d.id).sort()).toEqual(['visitor-follow-up']);
   });
 
   test('a member who does not hold the area does not see that workflow', async () => {
