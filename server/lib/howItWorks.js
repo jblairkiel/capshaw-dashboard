@@ -264,6 +264,7 @@ const SECTIONS = [
         '**Service times** — when each service starts; the song leader\'s 96- and 24-hour reminders count back from these',
       ] },
       { p: 'Whoever holds **Song Tracker** tidies the song list from **Song Tracker → Library**: correct a title or number, or merge a duplicate into the song it repeats. Old history can still be brought in from capshawchurch.org with **Import**; nothing is sent back to that site.' },
+      { p: '**Adding a service by hand.** A service that was never submitted here — or an old one off a paper order of worship — goes straight into the history with **Song Tracker → History → Add**: the date, which service, the song leader, and the songs in the order they were sung. Open any service in the history to **Edit** it or **Remove** it. A service planned on **Submit a Service** needs none of this; it is recorded by itself once it is confirmed.' },
     ],
   },
   {
