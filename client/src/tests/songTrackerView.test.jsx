@@ -1,4 +1,4 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import SongTrackerView from '../components/SongTrackerView';
 
@@ -16,9 +16,9 @@ function mockApi(overrides = {}) {
     songs:     { success: true, songs: [{ id: 10, title: 'Amazing Grace', number: '123', hymnal: 'Praise' }] },
     refresh:   { success: true, songs: [{ id: 11, title: 'Refreshed Song' }] },
     sync:      { success: true, synced: 3, warnings: [] },
-    options:   { success: true, leaders: [{ id: 7, name: 'Tom Nelson' }], services: [{ id: 1, name: 'Sunday AM' }] },
+    options:   { success: true, leaders: ['Tom Nelson'], services: [{ name: 'Sunday AM Worship', tracker: 'Sun AM' }, { name: 'Wednesday Bible Study', tracker: 'Wednesday' }] },
     search:    { success: true, results: [{ id: 10, title: 'Amazing Grace', number: '123', hymnal: 'Praise' }] },
-    add:       { success: true, id: 99 },
+    saved:     { success: true, record: { id: 1000000, date: '2025-02-02', service: 'Sun AM', leader: 'Al Adams' }, songs: [{ id: 10, title: 'Amazing Grace' }] },
     ...overrides,
   };
   const fetchMock = vi.fn((url, opts = {}) => {
@@ -28,7 +28,7 @@ function mockApi(overrides = {}) {
     else if (url.includes('/options'))              body = routes.options;
     else if (url.includes('/search'))               body = routes.search;
     else if (method === 'POST' && url.includes('/sync'))    body = routes.sync;
-    else if (method === 'POST' && url.includes('/add'))     body = routes.add;
+    else if (url.includes('/api/songs/services'))  body = routes.saved;
     else if (method === 'POST' && url.includes('/refresh')) body = routes.refresh;
     else if (/\/api\/songs\/\d+$/.test(url))        body = routes.songs;
     else                                             body = routes.records;
@@ -232,13 +232,81 @@ describe('SongTrackerView — syncing (admin)', () => {
 // ─── Add service form ─────────────────────────────────────────────────────────
 
 describe('SongTrackerView — adding a record', () => {
-  test('Add goes to the Submit a Service tab rather than a form of its own', async () => {
+  const addSong = async title => {
+    fireEvent.change(screen.getByPlaceholderText(/Add a song — search/), { target: { value: title } });
+    fireEvent.mouseDown(await screen.findByRole('option', { name: new RegExp(title) }));
+  };
+
+  test('Add opens a form that records a service straight into the history', async () => {
+    const fetchMock = mockApi();
+    render(<SongTrackerView user={ADMIN} />);
+    await screen.findByText('Tom Nelson');
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    const form = await screen.findByRole('form', { name: 'Add a service to the history' });
+    await waitFor(() => expect(within(form).getByLabelText('Service')).toHaveValue('Sunday AM Worship'));
+    fireEvent.change(within(form).getByLabelText('Date'), { target: { value: '2025-02-02' } });
+    fireEvent.change(within(form).getByLabelText('Service'), { target: { value: 'Wednesday Bible Study' } });
+    fireEvent.change(within(form).getByLabelText('Song leader'), { target: { value: 'Al Adams' } });
+    await addSong('Amazing Grace');
+    expect(within(form).getByRole('list', { name: 'Songs in this service' })).toHaveTextContent('Amazing Grace');
+    fireEvent.click(within(form).getByRole('button', { name: 'Add to the history' }));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, o]) => url === '/api/songs/services' && o?.method === 'POST');
+      expect(JSON.parse(call[1].body)).toEqual({ date: '2025-02-02', service: 'Wednesday Bible Study', leader: 'Al Adams', songIds: [10] });
+    });
+    expect(await screen.findByText('Added Sun AM, 2025-02-02 — 1 song.')).toBeInTheDocument();
+    expect(screen.queryByRole('form')).not.toBeInTheDocument();
+  });
+
+  test('the form points an upcoming service to Submit a Service', async () => {
     mockApi();
     const onSubmitService = vi.fn();
     render(<SongTrackerView user={ADMIN} onSubmitService={onSubmitService} />);
-    await screen.findByText('Sun AM');
+    await screen.findByText('Tom Nelson');
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Use Submit a Service' }));
     expect(onSubmitService).toHaveBeenCalled();
+  });
+
+  test('a service in the history can be edited, keeping its own service name and songs', async () => {
+    const fetchMock = mockApi();
+    render(<SongTrackerView user={ADMIN} />);
+    fireEvent.click(await screen.findByText('Tom Nelson'));
+    await screen.findByText('Amazing Grace');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const form = await screen.findByRole('form', { name: 'Edit this service' });
+    expect(within(form).getByLabelText('Date')).toHaveValue('2025-01-05');
+    await waitFor(() => expect(within(form).getByLabelText('Service')).toHaveValue('Sunday AM Worship'));
+    expect(within(form).getByLabelText('Song leader')).toHaveValue('Tom Nelson');
+    fireEvent.click(within(form).getByRole('button', { name: 'Take Amazing Grace out' }));
+    expect(within(form).getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    await addSong('Amazing Grace');
+    fireEvent.click(within(form).getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, o]) => url === '/api/songs/services/1' && o?.method === 'PUT');
+      expect(JSON.parse(call[1].body)).toEqual({ date: '2025-01-05', service: 'Sunday AM Worship', leader: 'Tom Nelson', songIds: [10] });
+    });
+  });
+
+  test('a service can be taken out of the history, after asking', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const fetchMock = mockApi();
+    render(<SongTrackerView user={ADMIN} />);
+    fireEvent.click(await screen.findByText('Tom Nelson'));
+    await screen.findByText('Amazing Grace');
+    fireEvent.click(screen.getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, o]) => url === '/api/songs/services/1' && o?.method === 'DELETE')).toBe(true));
+    expect(await screen.findByText(/Removed Sun AM, 2025-01-05 from the history/)).toBeInTheDocument();
+    confirm.mockRestore();
+  });
+
+  test('a member gets no Edit or Remove on a service', async () => {
+    mockApi();
+    render(<SongTrackerView user={MEMBER} />);
+    fireEvent.click(await screen.findByText('Tom Nelson'));
+    await screen.findByText('Amazing Grace');
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Remove' })).toBeNull();
   });
 
   test('a record made here has nothing to refresh from', async () => {

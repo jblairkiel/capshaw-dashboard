@@ -336,6 +336,122 @@ router.post('/sync', requireSongs, async (req, res) => {
   }
 });
 
+// ─── Recording a service by hand ──────────────────────────────────────────────
+// Whoever keeps the songs can put a service straight into the history — one
+// that was never submitted here, or an old one from a paper order of worship —
+// and correct or remove one afterwards. A service planned on Submit a Service
+// lands here by itself when it is confirmed; this is for everything else.
+
+const plans = require('../lib/worshipPlans');
+const isIsoDate = v => /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) && !Number.isNaN(Date.parse(`${v}T12:00:00Z`));
+const MAX_SONGS = 20;
+
+// The services to choose from and the leaders already on record.
+router.get('/services/options', (req, res) => {
+  const services = plans.activeServices().map(s => ({ name: s.name, tracker: plans.trackerName(s.name) }));
+  const leaders = db.prepare("SELECT DISTINCT trim(leader) AS name FROM song_services WHERE trim(leader) <> '' ORDER BY name").all().map(r => r.name);
+  res.json({ success: true, services, leaders });
+});
+
+// Reads { date, service, leader, songIds } into a record, or says what is wrong.
+function readService(body = {}) {
+  const date = String(body.date || '').trim();
+  if (!isIsoDate(date)) return { error: 'Choose the date of the service' };
+  const chosen = String(body.service || '').trim();
+  if (!chosen) return { error: 'Choose which service it was' };
+  // Kept under the name the rest of that service's history uses ("AM", say).
+  const service = plans.serviceType(chosen) ? plans.trackerName(chosen) : chosen.slice(0, 60);
+  const leader = String(body.leader || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+  const ids = [...new Set((Array.isArray(body.songIds) ? body.songIds : []).map(Number).filter(Number.isInteger))];
+  if (!ids.length) return { error: 'Add at least one song' };
+  if (ids.length > MAX_SONGS) return { error: `That is more than ${MAX_SONGS} songs for one service` };
+  const known = new Set(db.prepare(`SELECT id FROM songs WHERE id IN (${ids.map(() => '?').join(',')})`).all(...ids).map(r => r.id));
+  const missing = ids.find(id => !known.has(id));
+  if (missing !== undefined) return { error: 'One of those songs is not in the song list any more' };
+  return { record: { date, service, leader }, songIds: ids };
+}
+
+function songsOf(id) {
+  return db.prepare(`
+    SELECT s.id, s.title, s.hymnal, s.number, sx.position
+      FROM service_songs sx JOIN songs s ON s.id = sx.song_id
+     WHERE sx.service_id = ? ORDER BY sx.position
+  `).all(id);
+}
+
+function writeSongs(id, songIds) {
+  db.prepare('DELETE FROM service_songs WHERE service_id = ?').run(id);
+  const add = db.prepare('INSERT INTO service_songs (service_id, song_id, position) VALUES (?, ?, ?)');
+  songIds.forEach((songId, at) => add.run(id, songId, at));
+}
+
+const describeService = r => `${r.service}, ${r.date}${r.leader ? ` (${r.leader})` : ''}`;
+
+// POST /api/songs/services { date, service, leader, songIds }
+router.post('/services', requireSongs, (req, res) => {
+  const read = readService(req.body);
+  if (read.error) return res.status(400).json({ success: false, error: read.error });
+  const { record, songIds } = read;
+  const same = db.prepare('SELECT id FROM song_services WHERE date = ? AND lower(service) = lower(?)').get(record.date, record.service);
+  if (same) return res.status(409).json({ success: false, error: `${record.service} on ${record.date} is already in the history — open it and choose Edit instead`, id: same.id });
+
+  const id = library.nextPortalId('song_services');
+  db.transaction(() => {
+    db.prepare("INSERT INTO song_services (id, date, service, leader, source) VALUES (?, ?, ?, ?, 'portal')").run(id, record.date, record.service, record.leader);
+    writeSongs(id, songIds);
+  })();
+  const songs = songsOf(id);
+  actionLog.record(req.user, {
+    area: 'songs', action: 'create', entity: 'song service', entityId: id,
+    summary: `Recorded ${describeService(record)} — ${songs.map(s => s.title).join(', ')}`,
+    after: { ...record, songs: songs.map(s => s.title) },
+  });
+  res.status(201).json({ success: true, record: { id, ...record, source: 'portal' }, songs });
+});
+
+// PUT /api/songs/services/:id — the same, over a service already in the history
+router.put('/services/:id', requireSongs, (req, res) => {
+  const before = db.prepare('SELECT * FROM song_services WHERE id = ?').get(Number(req.params.id));
+  if (!before) return res.status(404).json({ success: false, error: 'That service is not in the history' });
+  const read = readService(req.body);
+  if (read.error) return res.status(400).json({ success: false, error: read.error });
+  const { record, songIds } = read;
+  const clash = db.prepare('SELECT id FROM song_services WHERE date = ? AND lower(service) = lower(?) AND id <> ?').get(record.date, record.service, before.id);
+  if (clash) return res.status(409).json({ success: false, error: `${record.service} on ${record.date} is already in the history` });
+
+  const beforeSongs = songsOf(before.id).map(s => s.title);
+  db.transaction(() => {
+    db.prepare('UPDATE song_services SET date = ?, service = ?, leader = ? WHERE id = ?').run(record.date, record.service, record.leader, before.id);
+    writeSongs(before.id, songIds);
+  })();
+  const songs = songsOf(before.id);
+  actionLog.record(req.user, {
+    area: 'songs', action: 'update', entity: 'song service', entityId: before.id,
+    summary: `Corrected ${describeService(record)} in the song history`,
+    before: { date: before.date, service: before.service, leader: before.leader, songs: beforeSongs },
+    after: { ...record, songs: songs.map(s => s.title) },
+  });
+  res.json({ success: true, record: { ...before, ...record }, songs });
+});
+
+// DELETE /api/songs/services/:id
+router.delete('/services/:id', requireSongs, (req, res) => {
+  const before = db.prepare('SELECT * FROM song_services WHERE id = ?').get(Number(req.params.id));
+  if (!before) return res.status(404).json({ success: false, error: 'That service is not in the history' });
+  const songs = songsOf(before.id).map(s => s.title);
+  db.transaction(() => {
+    db.prepare('UPDATE worship_plans SET song_service_id = NULL WHERE song_service_id = ?').run(before.id);
+    db.prepare('DELETE FROM service_songs WHERE service_id = ?').run(before.id);
+    db.prepare('DELETE FROM song_services WHERE id = ?').run(before.id);
+  })();
+  actionLog.record(req.user, {
+    area: 'songs', action: 'delete', entity: 'song service', entityId: before.id,
+    summary: `Removed ${describeService(before)} from the song history`,
+    before: { ...before, songs },
+  });
+  res.json({ success: true });
+});
+
 // GET /api/songs — list cached service records with optional filters
 router.get('/', (req, res) => {
   const { service = '', q = '', limit = 50, offset = 0 } = req.query;

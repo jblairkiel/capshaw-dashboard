@@ -1,6 +1,126 @@
 import { useState, useEffect, useCallback } from 'react';
 import { hasArea } from '../lib/roles';
 import LibraryView from './upcoming/LibraryView';
+import { SongPicker } from './upcoming/shared';
+import { call } from './upcoming/api';
+import DateInput, { FIELD_CLASS } from './DateInput';
+
+// ─── Recording a service by hand ───────────────────────────────────────────────
+//
+// For whoever keeps the songs: a service straight into the history — one that
+// was never submitted here, or an old one off a paper order of worship — or a
+// correction to one already there. A service planned on Submit a Service
+// arrives by itself once it is confirmed.
+
+function ServiceForm({ record = null, initialSongs = [], onCancel, onSaved, onSubmitService }) {
+  const [options, setOptions] = useState(null);
+  const [date, setDate]       = useState(record?.date || '');
+  const [service, setService] = useState(record?.service || '');
+  const [leader, setLeader]   = useState(record?.leader || '');
+  const [songs, setSongs]     = useState(initialSongs);
+  const [busy, setBusy]       = useState(false);
+  const [error, setError]     = useState('');
+
+  useEffect(() => {
+    call('/api/songs/services/options').then(json => {
+      setOptions(json);
+      // A new one starts on the main worship service, not whatever is first on the list.
+      const usual = json.services.find(c => /worship/i.test(c.name) && !/bible|class|study/i.test(c.name)) || json.services[0];
+      if (!record && usual) setService(s => s || usual.name);
+    }).catch(e => setError(e.message));
+  }, [record]);
+
+  // A record already in the history keeps its own service name ("AM") even
+  // when it is not one of the church's listed services.
+  const choices = options ? [...options.services] : [];
+  if (record && !choices.some(c => c.name === service || c.tracker === service)) choices.unshift({ name: service, tracker: service });
+  const selected = choices.find(c => c.name === service) || choices.find(c => c.tracker === service);
+
+  const move = (i, by) => setSongs(list => {
+    const next = [...list];
+    [next[i], next[i + by]] = [next[i + by], next[i]];
+    return next;
+  });
+
+  async function save(e) {
+    e.preventDefault();
+    setBusy(true); setError('');
+    try {
+      const json = await call(record ? `/api/songs/services/${record.id}` : '/api/songs/services', {
+        method: record ? 'PUT' : 'POST',
+        body: JSON.stringify({ date, service: selected?.name || service, leader, songIds: songs.map(s => s.id) }),
+      });
+      onSaved(json);
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  const label = 'block text-xs font-medium text-gray-500 uppercase tracking-wide';
+
+  return (
+    <form onSubmit={save} className="card space-y-4" aria-label={record ? 'Edit this service' : 'Add a service to the history'}>
+      <div>
+        <h3 className="section-heading mb-0">{record ? 'Edit this service' : 'Add a service to the history'}</h3>
+        {!record && (
+          <p className="text-xs text-gray-500 mt-1">
+            For a service already held. Planning one that is coming up?{' '}
+            <button type="button" onClick={onSubmitService} className="text-church-gold hover:text-church-navy underline">Use Submit a Service</button>
+            {' '}— it lands here by itself once it is confirmed.
+          </p>
+        )}
+      </div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <label className="block">
+          <span className={label}>Date</span>
+          <DateInput required value={date} onChange={setDate} />
+        </label>
+        <label className="block">
+          <span className={label}>Service</span>
+          <select required value={selected?.name || service} onChange={e => setService(e.target.value)} className={FIELD_CLASS}>
+            {choices.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+          </select>
+        </label>
+        <label className="block">
+          <span className={label}>Song leader</span>
+          <input value={leader} onChange={e => setLeader(e.target.value)} list="song-leaders" className={FIELD_CLASS} />
+          <datalist id="song-leaders">{(options?.leaders || []).map(n => <option key={n} value={n} />)}</datalist>
+        </label>
+      </div>
+
+      <div>
+        <span className={label}>Songs, in the order they were sung</span>
+        <ol className="mt-1 space-y-1" aria-label="Songs in this service">
+          {songs.map((song, i) => (
+            <li key={song.id} className="flex items-center gap-2 text-sm">
+              <span className="text-church-gold text-xs font-bold w-5 shrink-0">{i + 1}.</span>
+              <span className="flex-1 min-w-0 truncate text-church-navy font-medium">
+                {song.title}
+                {(song.number || song.hymnal) && <span className="ml-1.5 text-xs text-gray-400 font-normal">{[song.hymnal, song.number].filter(Boolean).join(' ')}</span>}
+              </span>
+              <button type="button" onClick={() => move(i, -1)} disabled={i === 0} aria-label={`Move ${song.title} up`} className="px-1 text-gray-400 hover:text-church-navy disabled:opacity-30">↑</button>
+              <button type="button" onClick={() => move(i, 1)} disabled={i === songs.length - 1} aria-label={`Move ${song.title} down`} className="px-1 text-gray-400 hover:text-church-navy disabled:opacity-30">↓</button>
+              <button type="button" onClick={() => setSongs(list => list.filter(s => s.id !== song.id))} aria-label={`Take ${song.title} out`} className="px-1 text-gray-400 hover:text-red-600">×</button>
+            </li>
+          ))}
+        </ol>
+        <div className="mt-2">
+          <SongPicker value={null} label="Add a song" placeholder="Add a song — search by title or number…"
+            onChange={song => song && setSongs(list => (list.some(s => s.id === song.id) ? list : [...list, song]))} />
+        </div>
+      </div>
+
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      <div className="flex justify-end gap-2">
+        <button type="button" onClick={onCancel} className="text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600">Cancel</button>
+        <button type="submit" disabled={busy || !date || !songs.length} className="btn-primary text-sm disabled:opacity-50">
+          {busy ? 'Saving…' : record ? 'Save changes' : 'Add to the history'}
+        </button>
+      </div>
+    </form>
+  );
+}
 
 // ─── Analytics view ────────────────────────────────────────────────────────────
 
@@ -166,7 +286,7 @@ function AnalyticsView() {
 
 // ─── Service card ──────────────────────────────────────────────────────────────
 
-function ServiceCard({ record, canWrite }) {
+function ServiceCard({ record, canWrite, onEdit, onRemoved }) {
   const [open,       setOpen]       = useState(false);
   const [songs,      setSongs]      = useState(record.songs || null);
   const [loading,    setLoading]    = useState(false);
@@ -245,6 +365,16 @@ function ServiceCard({ record, canWrite }) {
               </li>
             ))}
           </ul>
+          {canWrite && (
+            <div className="mt-2.5 flex items-center gap-3">
+              <button type="button" onClick={() => onEdit(record, songs)} className="text-xs text-church-gold hover:text-church-navy underline">Edit</button>
+              <button type="button" onClick={async () => {
+                if (!window.confirm(`Take ${record.service}, ${dateStr} out of the song history? Its songs stay in the song list.`)) return;
+                try { await call(`/api/songs/services/${record.id}`, { method: 'DELETE' }); onRemoved(record); }
+                catch (err) { window.alert(err.message); }
+              }} className="text-xs text-gray-400 hover:text-red-600 underline">Remove</button>
+            </div>
+          )}
           {/* Only an imported record has anywhere to refresh from. */}
           {canWrite && record.source !== 'portal' && (
             <button
@@ -290,6 +420,8 @@ export default function SongTrackerView({ user, onSubmitService, version = 0 }) 
   const [syncInfo, setSyncInfo] = useState('');
   const [offset,   setOffset]   = useState(0);
   const [hasMore,  setHasMore]  = useState(false);
+  const [editing,  setEditing]  = useState(null);   // null | { record, songs } — record null for a new one
+  const [saved,    setSaved]    = useState('');
   const LIMIT = 25;
 
   const loadRecords = useCallback(async (off = 0, replace = true) => {
@@ -368,7 +500,7 @@ export default function SongTrackerView({ user, onSubmitService, version = 0 }) 
               Import from capshawchurch.org
             </button>
             <button
-              onClick={() => onSubmitService?.()}
+              onClick={() => { setSaved(''); setEditing({ record: null, songs: [] }); }}
               className="flex items-center gap-1.5 text-xs btn-primary py-1.5 px-2.5"
             >
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -385,9 +517,25 @@ export default function SongTrackerView({ user, onSubmitService, version = 0 }) 
 
       {view === 'library' && <LibraryView version={version} />}
 
+      {view === 'history' && editing && (
+        <ServiceForm
+          key={editing.record?.id ?? 'new'}
+          record={editing.record}
+          initialSongs={editing.songs}
+          onCancel={() => setEditing(null)}
+          onSubmitService={() => onSubmitService?.()}
+          onSaved={json => {
+            setEditing(null);
+            setSaved(`${editing.record ? 'Saved' : 'Added'} ${json.record.service}, ${json.record.date} — ${json.songs.length} song${json.songs.length === 1 ? '' : 's'}.`);
+            loadRecords(0);
+          }}
+        />
+      )}
+
       {/* History panel */}
       {view === 'history' && (
         <>
+          {saved && <p className="text-xs px-3 py-1.5 rounded-lg bg-green-50 text-green-700">{saved}</p>}
           {/* Filter chips + search */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-3">
             <div className="flex gap-1.5 flex-wrap flex-1">
@@ -435,13 +583,17 @@ export default function SongTrackerView({ user, onSubmitService, version = 0 }) 
               <p className="text-gray-400 text-sm">No service records found.</p>
               {canWrite && (
                 <p className="text-gray-400 text-xs mt-1">
-                  Submit a service to start the history, or import it from capshawchurch.org.
+                  Add a service, submit one, or import the history from capshawchurch.org.
                 </p>
               )}
             </div>
           ) : (
             <div className="space-y-2">
-              {records.map(r => <ServiceCard key={r.id} record={r} canWrite={canWrite} />)}
+              {records.map(r => (
+                <ServiceCard key={`${r.id}-${r.date}-${r.service}-${r.leader}-${r.song_count}`} record={r} canWrite={canWrite}
+                  onEdit={(record, songs) => { setSaved(''); setEditing({ record, songs }); window.scrollTo?.({ top: 0, behavior: 'smooth' }); }}
+                  onRemoved={record => { setSaved(`Removed ${record.service}, ${record.date} from the history.`); loadRecords(0); }} />
+              ))}
               {hasMore && (
                 <div className="text-center pt-2">
                   <button

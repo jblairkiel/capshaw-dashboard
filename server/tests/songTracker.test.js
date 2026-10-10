@@ -465,3 +465,71 @@ describe('POST /api/songs/:id/refresh', () => {
     expect(res.body.error).toBe('socket hang up');
   });
 });
+
+// ─── Recording a service by hand ──────────────────────────────────────────────
+
+describe('recording a service by hand', () => {
+  const KEEPER = { id: 3, role: 'approved', name: 'Kay', areas: ['songs'] };
+  const song = (id, title, number = '') => db.prepare("INSERT INTO songs (id, title, hymnal, number) VALUES (?, ?, 'Hymns for Worship', ?)").run(id, title, number);
+  const add = (user, body) => request(buildApp(user)).post('/api/songs/services').send(body);
+
+  beforeEach(() => {
+    db.prepare('DELETE FROM action_log').run();
+    db.prepare("UPDATE service_types SET song_names = 'AM' WHERE name = 'Sunday AM Worship'").run();
+    song(10, 'Blest Be the Tie', '858');
+    song(11, 'Just As I Am', '64');
+    song(12, 'Be With Me Lord', '370');
+  });
+
+  test('offers the church\'s services and the leaders on record', async () => {
+    db.prepare("INSERT INTO song_services (id, date, service, leader) VALUES (5, '2026-01-04', 'AM', 'Al Adams')").run();
+    const res = await request(buildApp(MEMBER)).get('/api/songs/services/options');
+    expect(res.body.services).toContainEqual({ name: 'Sunday AM Worship', tracker: 'AM' });
+    expect(res.body.leaders).toEqual(['Al Adams']);
+  });
+
+  test('puts a service and its songs, in order, into the history under the name that service already uses', async () => {
+    const res = await add(KEEPER, { date: '2026-02-01', service: 'Sunday AM Worship', leader: ' Ben  Brown ', songIds: [12, 10, 11, 10] });
+    expect(res.status).toBe(201);
+    expect(res.body.record).toMatchObject({ date: '2026-02-01', service: 'AM', leader: 'Ben Brown', source: 'portal' });
+    expect(res.body.record.id).toBeGreaterThanOrEqual(1_000_000);
+    expect(res.body.songs.map(s => s.title)).toEqual(['Be With Me Lord', 'Blest Be the Tie', 'Just As I Am']);
+
+    const list = await request(buildApp(MEMBER)).get('/api/songs');
+    expect(list.body.records).toEqual([expect.objectContaining({ service: 'AM', song_count: 3, source: 'portal' })]);
+    expect(db.prepare("SELECT summary FROM action_log WHERE entity = 'song service'").get().summary)
+      .toBe('Recorded AM, 2026-02-01 (Ben Brown) — Be With Me Lord, Blest Be the Tie, Just As I Am');
+  });
+
+  test('refuses a second copy of the same service, and anything incomplete', async () => {
+    await add(KEEPER, { date: '2026-02-01', service: 'Sunday AM Worship', songIds: [10] });
+    const again = await add(KEEPER, { date: '2026-02-01', service: 'Sunday AM Worship', songIds: [11] });
+    expect(again.status).toBe(409);
+    expect(again.body.error).toMatch(/already in the history/);
+    expect((await add(KEEPER, { service: 'Sunday AM Worship', songIds: [10] })).body.error).toMatch(/Choose the date/);
+    expect((await add(KEEPER, { date: '2026-02-08', songIds: [10] })).body.error).toMatch(/which service/);
+    expect((await add(KEEPER, { date: '2026-02-08', service: 'Sunday AM Worship', songIds: [] })).body.error).toMatch(/at least one song/);
+    expect((await add(KEEPER, { date: '2026-02-08', service: 'Sunday AM Worship', songIds: [999] })).body.error).toMatch(/not in the song list/);
+  });
+
+  test('only whoever keeps the songs', async () => {
+    expect((await add(MEMBER, { date: '2026-02-01', service: 'Sunday AM Worship', songIds: [10] })).status).toBe(403);
+  });
+
+  test('a service can be corrected, or taken out of the history', async () => {
+    const { body } = await add(KEEPER, { date: '2026-02-01', service: 'Sunday AM Worship', leader: 'Ben Brown', songIds: [10, 11] });
+    const id = body.record.id;
+    const fixed = await request(buildApp(KEEPER)).put(`/api/songs/services/${id}`).send({ date: '2026-02-01', service: 'Sunday AM Worship', leader: 'Cal Cole', songIds: [11, 12] });
+    expect(fixed.status).toBe(200);
+    expect(fixed.body.songs.map(s => s.title)).toEqual(['Just As I Am', 'Be With Me Lord']);
+    expect(db.prepare('SELECT leader FROM song_services WHERE id = ?').get(id).leader).toBe('Cal Cole');
+    expect((await request(buildApp(MEMBER)).put(`/api/songs/services/${id}`).send({})).status).toBe(403);
+
+    expect((await request(buildApp(KEEPER)).delete(`/api/songs/services/${id}`)).status).toBe(200);
+    expect(db.prepare('SELECT COUNT(*) n FROM song_services').get().n).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) n FROM service_songs').get().n).toBe(0);
+    expect(db.prepare("SELECT summary FROM action_log WHERE entity = 'song service' AND action = 'delete'").get().summary)
+      .toBe('Removed AM, 2026-02-01 (Cal Cole) from the song history');
+    expect((await request(buildApp(KEEPER)).delete(`/api/songs/services/${id}`)).status).toBe(404);
+  });
+});
