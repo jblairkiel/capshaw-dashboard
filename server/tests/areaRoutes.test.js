@@ -334,6 +334,65 @@ describe('/api/visitors', () => {
     expect(history()[0]).toMatchObject({ area: 'visitors', action: 'create', user_name: 'Gus' });
     expect(history()[0].summary).toMatch(/Sam Rivers/);
   });
+
+  describe('recording a service', () => {
+    test('returning guests get a visit, new guests are added with their details and a visit', async () => {
+      const pat = (await request(buildApp(GUESTS)).post('/api/visitors').send({ name: 'Pat Lane', phone: '555-0100' })).body.visitor;
+
+      const res = await request(buildApp(GUESTS)).post('/api/visitors/record').send({
+        date: '10/11/26', service: 'Sun AM',
+        guests: [
+          { id: pat.id, phone: '555-0199' },
+          { name: 'Jo Reed', email: 'jo@example.com', invited_by: 'The Carters' },
+        ],
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ added: 1, returning: 1 });
+      const [returning, fresh] = res.body.visitors;
+      expect(returning).toMatchObject({ name: 'Pat Lane', phone: '555-0199' });
+      expect(returning.visits).toEqual([expect.objectContaining({ date: '10/11/26', service: 'Sun AM' })]);
+      expect(fresh).toMatchObject({ name: 'Jo Reed', email: 'jo@example.com', invited_by: 'The Carters' });
+      expect(fresh.visits).toHaveLength(1);
+    });
+
+    test('a returning guest with nothing changed leaves no edit in the history', async () => {
+      const pat = (await request(buildApp(GUESTS)).post('/api/visitors').send({ name: 'Pat Lane' })).body.visitor;
+      await request(buildApp(GUESTS)).post('/api/visitors/record')
+        .send({ date: '10/11/26', service: 'Sun AM', guests: [{ id: pat.id, name: 'Pat Lane' }] });
+
+      expect(history().filter(h => h.action === 'update')).toHaveLength(0);
+      expect(history()[0].summary).toMatch(/visit by Pat Lane on 10\/11\/26 \(Sun AM\)/);
+    });
+
+    test('recording the same service twice does not count the visit twice', async () => {
+      const pat = (await request(buildApp(GUESTS)).post('/api/visitors').send({ name: 'Pat Lane' })).body.visitor;
+      const body = { date: '10/11/26', service: 'Sun AM', guests: [{ id: pat.id }] };
+      await request(buildApp(GUESTS)).post('/api/visitors/record').send(body);
+      const again = await request(buildApp(GUESTS)).post('/api/visitors/record').send(body);
+      expect(again.body.visitors[0].visits).toHaveLength(1);
+    });
+
+    test('one bad entry records nothing at all', async () => {
+      const res = await request(buildApp(GUESTS)).post('/api/visitors/record').send({
+        date: '10/11/26', guests: [{ name: 'Jo Reed' }, { email: 'nameless@example.com' }],
+      });
+      expect(res.status).toBe(400);
+      expect(db.prepare('SELECT COUNT(*) n FROM visitors').get().n).toBe(0);
+
+      const missing = await request(buildApp(GUESTS)).post('/api/visitors/record')
+        .send({ date: '10/11/26', guests: [{ name: 'Jo Reed' }, { id: 999 }] });
+      expect(missing.status).toBe(404);
+      expect(db.prepare('SELECT COUNT(*) n FROM visitors').get().n).toBe(0);
+    });
+
+    test('needs a date, a guest, and the area', async () => {
+      expect((await request(buildApp(GUESTS)).post('/api/visitors/record').send({ guests: [{ name: 'Jo' }] })).status).toBe(400);
+      expect((await request(buildApp(GUESTS)).post('/api/visitors/record').send({ date: '10/11/26', guests: [] })).status).toBe(400);
+      expect((await request(buildApp(MEMBER)).post('/api/visitors/record')
+        .send({ date: '10/11/26', guests: [{ name: 'Jo' }] })).status).toBe(403);
+    });
+  });
 });
 
 // ─── Elders and deacons ───────────────────────────────────────────────────────

@@ -271,6 +271,84 @@ describe('VisitorTracker', () => {
     expect(screen.getByText(/No guests match your search/i)).toBeInTheDocument();
   });
 
+  // ── Recording the guests at a service ──────────────────────────────────────
+
+  function recordBody(fetchMock) {
+    const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/api/visitors/record'));
+    return call && JSON.parse(call[1].body);
+  }
+
+  function mockRecording() {
+    const fetchMock = vi.fn((url) => Promise.resolve({
+      json: () => Promise.resolve(String(url).endsWith('/record')
+        ? { success: true, date: '10/11/26', service: 'Sun AM', added: 1, returning: 1, visitors: [] }
+        : { success: true, visitors: GUESTS, canManage: true }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  test('records returning and new guests together for one service', async () => {
+    const fetchMock = mockRecording();
+    render(<VisitorTracker />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Record guests' }));
+    const dialog = screen.getByRole('dialog');
+
+    type(within(dialog).getByLabelText(/^Service/), 'Sun AM');
+
+    // A returning guest, picked off the list and their phone put right
+    type(within(dialog).getByLabelText(/^Add a guest/), 'pat');
+    fireEvent.click(within(dialog).getByRole('button', { name: /Pat Lane/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Edit details' }));
+    type(within(dialog).getByLabelText(/^Phone/), '256-555-0199');
+
+    // A new one, started from what was typed
+    type(within(dialog).getByLabelText(/^Add a guest/), 'Jo Reed');
+    fireEvent.click(within(dialog).getByRole('button', { name: /Add “Jo Reed” as a new guest/ }));
+    const entries = within(dialog).getAllByTestId('guest-entry');
+    type(within(entries[1]).getByLabelText(/^Email/), 'jo@example.com');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Record 2 guests' }));
+
+    await waitFor(() => expect(recordBody(fetchMock)).toBeTruthy());
+    const body = recordBody(fetchMock);
+    expect(body.service).toBe('Sun AM');
+    expect(body.date).toMatch(/^\d{2}\/\d{2}\/\d{2}$/);
+    // Only what changed goes up for somebody already on the list
+    expect(body.guests[0]).toEqual({ id: 1, phone: '256-555-0199' });
+    expect(body.guests[1]).toMatchObject({ name: 'Jo Reed', email: 'jo@example.com' });
+    expect(body.guests[1]).not.toHaveProperty('id');
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Recorded 1 new guest and 1 returning for 10/11/26 (Sun AM).');
+  });
+
+  test('a guest already picked is not offered again', async () => {
+    mockRecording();
+    render(<VisitorTracker />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Record guests' }));
+    const dialog = screen.getByRole('dialog');
+
+    type(within(dialog).getByLabelText(/^Add a guest/), 'pat');
+    fireEvent.click(within(dialog).getByRole('button', { name: /Pat Lane/ }));
+    type(within(dialog).getByLabelText(/^Add a guest/), 'pat');
+    expect(within(dialog).queryByRole('button', { name: /^Pat Lane/ })).not.toBeInTheDocument();
+  });
+
+  test('typing in a new guest who is already on the list offers to use them instead', async () => {
+    const fetchMock = mockRecording();
+    render(<VisitorTracker />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Record guests' }));
+    const dialog = screen.getByRole('dialog');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '+ New guest' }));
+    type(within(dialog).getByLabelText(/^Name/), 'sam ford');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Use them instead' }));
+    expect(within(dialog).getByText('Returning')).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Record 1 guest' }));
+    await waitFor(() => expect(recordBody(fetchMock)?.guests).toEqual([{ id: 2 }]));
+  });
+
   // ── Follow-ups, from the guest they are about ──────────────────────────────
 
   test('shows where a guest\'s follow-up has got to', async () => {
@@ -330,38 +408,35 @@ describe('VisitorTracker', () => {
     expect(screen.queryByRole('button', { name: /follow up/i })).not.toBeInTheDocument();
   });
 
-  test('only the guest area is offered the Add and Edit buttons', async () => {
+  test('only the guest area is offered the Record button', async () => {
     mockGuests(GUESTS, false);
     const { unmount } = render(<VisitorTracker />);
     await screen.findByRole('button', { name: 'Pat Lane' });
-    expect(screen.queryByRole('button', { name: /add a guest/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /record guests/i })).not.toBeInTheDocument();
     unmount();
 
     mockGuests(GUESTS, true);
     render(<VisitorTracker />);
-    expect(await screen.findByRole('button', { name: /add a guest/i })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: /record guests/i })).toBeInTheDocument();
   });
 
-  test('adding a guest posts their details, and the first visit with them', async () => {
-    const fetchMock = mockGuests(GUESTS, true);
+  test('the service date is picked as ISO and still saved as MM/DD/YY', async () => {
+    const fetchMock = mockRecording();
     render(<VisitorTracker />);
-    fireEvent.click(await screen.findByRole('button', { name: /add a guest/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Record guests' }));
 
     const dialog = screen.getByRole('dialog');
+    type(within(dialog).getByLabelText(/^Date/), '2025-05-04');
+    fireEvent.click(within(dialog).getByRole('button', { name: '+ New guest' }));
     type(within(dialog).getByLabelText(/^Name/), 'Dana Webb');
     type(within(dialog).getByLabelText(/^Phone/), '256-555-0170');
     type(within(dialog).getByLabelText(/^Our notes/), 'Neighbour of the Carters');
-    // The picker speaks ISO; the visit is still saved as MM/DD/YY.
-    type(within(dialog).getByLabelText(/^First visit/), '2025-05-04');
-    fireEvent.click(within(dialog).getByRole('button', { name: /add guest/i }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Record 1 guest' }));
 
-    await waitFor(() => {
-      const call = fetchMock.mock.calls.find(([url, opts]) => url === '/api/visitors' && opts?.method === 'POST');
-      expect(call).toBeTruthy();
-      const body = JSON.parse(call[1].body);
-      expect(body).toMatchObject({ name: 'Dana Webb', phone: '256-555-0170', notes: 'Neighbour of the Carters' });
-      expect(body.visit).toEqual({ date: '05/04/25', service: '' });
-    });
+    await waitFor(() => expect(recordBody(fetchMock)).toBeTruthy());
+    const body = recordBody(fetchMock);
+    expect(body.date).toBe('05/04/25');
+    expect(body.guests[0]).toMatchObject({ name: 'Dana Webb', phone: '256-555-0170', notes: 'Neighbour of the Carters' });
   });
 });
 
