@@ -267,6 +267,9 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
   const [activeTab,   setActiveTab]   = useState(deepLink?.page || 'upcoming');
   const [upcomingTab, setUpcomingTab] = useState(deepLink?.page === 'upcoming' && deepLink.tab || 'order');
   const [rosterTab,   setRosterTab]   = useState(deepLink?.page === 'service-roster' && deepLink.tab || 'scheduled');
+  // Which sign-up the Sign-Ups page opens on: its permanent link, or one
+  // clicked on the calendar. Moving between pages any other way clears it.
+  const [signupFocus, setSignupFocus] = useState(deepLink?.page === 'signups' ? deepLink.list : null);
   // Every way of moving between pages goes through here, so a page that became
   // a tab ("songs", "order") still arrives where it should.
   const goTo = useCallback(id => {
@@ -274,7 +277,9 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
     if (alias?.page === 'upcoming') setUpcomingTab(alias.tab);
     if (alias?.page === 'service-roster') setRosterTab(alias.tab);
     setActiveTab(alias ? alias.page : id);
+    setSignupFocus(null);
   }, []);
+  const openSignup = useCallback(id => { setActiveTab('signups'); setSignupFocus(id); }, []);
   const [siteData,    setSiteData]    = useState(null);
 
   useEffect(() => {
@@ -471,7 +476,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       )}
       {!updating && activeTab === 'calendar' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
-          <CalendarView user={user} />
+          <CalendarView user={user} onOpenSignup={openSignup} />
         </main>
       )}
       {!updating && activeTab === 'member-match' && user && (
@@ -491,7 +496,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       )}
       {!updating && activeTab === 'signups' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
-          <SignupsView initialListId={deepLink?.page === 'signups' ? deepLink.list : null} />
+          <SignupsView key={signupFocus || 'index'} initialListId={signupFocus} />
         </main>
       )}
       {!updating && activeTab === 'livestreams' && (

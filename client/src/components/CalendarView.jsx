@@ -234,11 +234,14 @@ function EventDetail({ event, onClose }) {
 
 // ─── Calendar ─────────────────────────────────────────────────────────────────
 
-export default function CalendarView({ user }) {
+export default function CalendarView({ user, onOpenSignup }) {
   const now = new Date();
   const [year,  setYear]  = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth());
   const [items, setItems] = useState([]);
+  // Sign-up dates are shown alongside, read-only: they belong to their lists
+  // on the Sign-Ups page, and clicking one opens it there.
+  const [signups, setSignups] = useState([]);
   const [modal, setModal] = useState(null);
   // What somebody who cannot edit the calendar opens instead of the editor:
   // the event as written, and the conversation under it.
@@ -257,6 +260,11 @@ export default function CalendarView({ user }) {
       const json = await res.json();
       if (!json.success) throw new Error(json.error || 'Could not load the calendar');
       setItems(json.items.filter(i => i.event_date));
+      // A calendar without its sign-ups is still a calendar.
+      fetch('/api/signups/calendar', { credentials: 'include' })
+        .then(r => r.json())
+        .then(j => setSignups(j.success && Array.isArray(j.dates) ? j.dates : []))
+        .catch(() => setSignups([]));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -279,6 +287,15 @@ export default function CalendarView({ user }) {
     return map;
   }, [items]);
 
+  const signupsByDate = useMemo(() => {
+    const map = new Map();
+    for (const s of signups) {
+      if (!map.has(s.date)) map.set(s.date, []);
+      map.get(s.date).push(s);
+    }
+    return map;
+  }, [signups]);
+
   const weeks = useMemo(() => buildWeeks(year, month), [year, month]);
   const today = todayKey();
 
@@ -294,7 +311,14 @@ export default function CalendarView({ user }) {
     setMonth(n.getMonth());
   }
 
-  const monthCount = items.filter(i => i.event_date?.startsWith(`${year}-${String(month + 1).padStart(2, '0')}`)).length;
+  const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+  const monthCount = items.filter(i => i.event_date?.startsWith(monthKey)).length;
+  const monthSignups = signups.filter(s => s.date.startsWith(monthKey)).length;
+
+  function openSignup(s) {
+    if (onOpenSignup) onOpenSignup(s.listId);
+    else window.location.assign(`/?page=signups&list=${s.listId}`);
+  }
 
   return (
     <div className="space-y-4">
@@ -302,7 +326,9 @@ export default function CalendarView({ user }) {
         <div>
           <h2 className="section-heading mb-0">Church Calendar</h2>
           <p className="text-xs text-gray-400 mt-0.5">
-            {monthCount} {monthCount === 1 ? 'event' : 'events'} this month · shared with Announcements
+            {monthCount} {monthCount === 1 ? 'event' : 'events'} this month
+            {monthSignups > 0 && ` · ${monthSignups} ${monthSignups === 1 ? 'sign-up' : 'sign-ups'}`}
+            {' · '}shared with Announcements
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -340,6 +366,7 @@ export default function CalendarView({ user }) {
 
                 const key    = toKey(year, month, day);
                 const events = byDate.get(key) || [];
+                const daySignups = signupsByDate.get(key) || [];
                 const isToday = key === today;
 
                 return (
@@ -368,6 +395,21 @@ export default function CalendarView({ user }) {
                           {ev.title}
                         </button>
                       ))}
+                      {daySignups.map(s => (
+                        <button
+                          key={`signup-${s.dateId}`}
+                          onClick={e => { e.stopPropagation(); openSignup(s); }}
+                          aria-label={`Sign-up: ${s.title}${s.stillNeeded > 0 && !s.closed ? `, ${s.stillNeeded} still needed` : ''}`}
+                          title={[s.time, s.note, s.closed ? 'Closed' : s.stillNeeded > 0 ? `${s.stillNeeded} still needed` : s.needed ? 'Filled' : `${s.names} signed up`].filter(Boolean).join(' · ')}
+                          className={`block w-full text-left text-xs px-1.5 py-1 rounded leading-tight truncate border border-dashed ${
+                            s.closed ? 'border-gray-200 bg-gray-50 text-gray-400' : 'border-stone-300 bg-stone-100 text-stone-800'
+                          }`}
+                        >
+                          {s.time && <span className="opacity-70">{s.time} </span>}
+                          <span className="font-medium">Sign-up:</span> {s.title}
+                          {s.stillNeeded > 0 && !s.closed && <span className="ml-1 text-amber-700">({s.stillNeeded} needed)</span>}
+                        </button>
+                      ))}
                     </div>
                   </div>
                 );
@@ -380,6 +422,7 @@ export default function CalendarView({ user }) {
       {!canEdit && (
         <p className="text-xs text-gray-400">
           Events come from the announcements page. Ask the church office to add or change one.
+          Sign-ups come from the Sign-Ups page, where anybody can make one.
         </p>
       )}
 

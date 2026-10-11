@@ -24,6 +24,12 @@ router.get('/', (req, res) => {
   res.json({ success: true, lists: lists.summaries(req.user, today()), canManage: lists.isManager(req.user) });
 });
 
+// GET /api/signups/calendar — every sign-up date, for the church calendar.
+// Everyone signed in can see every list, so everyone sees these.
+router.get('/calendar', (req, res) => {
+  res.json({ success: true, dates: lists.calendarDates() });
+});
+
 // GET /api/signups/analytics — for the sign-up manager.
 router.get('/analytics', requireArea(AREA), (req, res) => {
   res.json({ success: true, ...lists.analytics(today()) });

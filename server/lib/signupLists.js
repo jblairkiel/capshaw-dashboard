@@ -300,6 +300,23 @@ function summaries(user, today) {
   });
 }
 
+// Every date of every list, for the church calendar: what it is, when, and
+// how much of it is still needed that day.
+function calendarDates() {
+  const lists = new Map(db.prepare('SELECT id, title, closed FROM signup_lists').all().map(l => [l.id, l]));
+  const items = db.prepare('SELECT * FROM signup_items').all();
+  const entries = db.prepare('SELECT * FROM signup_entries').all();
+  return db.prepare('SELECT * FROM signup_dates ORDER BY date, time, position').all().map(d => {
+    const list = lists.get(d.list_id);
+    const totals = totalsOf(items.filter(i => i.list_id === d.list_id), [d], entries.filter(e => e.date_id === d.id));
+    return {
+      listId: list.id, dateId: d.id, title: list.title, closed: !!list.closed,
+      date: d.date, time: d.time, note: d.note,
+      needed: totals.needed, stillNeeded: totals.needed - totals.filled, names: totals.entries,
+    };
+  });
+}
+
 // ─── Analytics, for the sign-up manager ───────────────────────────────────────
 
 function analytics(today) {
@@ -364,5 +381,5 @@ function peopleOn(listId) {
 
 module.exports = {
   AREA, KINDS, LIMITS, isManager, canEdit, listRow, readList, create, update, setClosed, remove,
-  signUp, removeEntry, detail, summaries, analytics, peopleOn,
+  signUp, removeEntry, detail, summaries, calendarDates, analytics, peopleOn,
 };
