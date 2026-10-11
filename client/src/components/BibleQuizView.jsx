@@ -42,7 +42,7 @@ function SoloSetup({ bank, onStarted }) {
   async function start() {
     setBusy(true); setError('');
     try {
-      const { game } = await send(`${API}/solo`, { method: 'POST', body: JSON.stringify({ difficulty, length, sections }) });
+      const { game } = await send(`${API}/solo`, { method: 'POST', body: JSON.stringify({ difficulty, count: length, sections }) });
       onStarted(game);
     } catch (err) {
       setError(err.message);

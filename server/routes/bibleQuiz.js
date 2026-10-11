@@ -34,9 +34,12 @@ router.get('/questions', (req, res) => {
   res.json({ success: true, questions });
 });
 
-// POST /api/bible-quiz/solo { difficulty, length, sections } — start a game.
+// POST /api/bible-quiz/solo { difficulty, count, sections } — start a game.
 router.post('/solo', (req, res) => {
-  const result = solo.start(req.user, req.body || {});
+  // Only a settings object, and only the three settings: a body that is an
+  // array or anything else is no settings at all.
+  const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+  const result = solo.start(req.user, { difficulty: body.difficulty, count: body.count, sections: body.sections });
   if (result.error) return fail(res, result);
   res.status(201).json({ success: true, game: result.game });
 });

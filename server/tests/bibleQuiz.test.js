@@ -69,7 +69,7 @@ describe('the classroom bank', () => {
 
 describe('a single-player game', () => {
   test('deals the questions asked for, one at a time and never with the answer', async () => {
-    const res = await startGame(ANN, { difficulty: 'hard', length: 20 });
+    const res = await startGame(ANN, { difficulty: 'hard', count: 20 });
     expect(res.status).toBe(201);
     const { game } = res.body;
     expect(game).toMatchObject({ length: 20, position: 0, score: 0, finished: false, difficulty: 'hard' });
@@ -82,7 +82,7 @@ describe('a single-player game', () => {
   });
 
   test('marks each answer, scores right answers by difficulty, and says where the answer is found', async () => {
-    const { game } = (await startGame(ANN, { difficulty: 'mixed', length: 10 })).body;
+    const { game } = (await startGame(ANN, { difficulty: 'mixed', count: 10 })).body;
     const first = game.question;
     const res = await request(buildApp(ANN)).post(`/api/bible-quiz/solo/${game.id}/answer`).send({ questionId: first.id, answer: rightAnswer(first) });
     expect(res.body.result).toMatchObject({ correct: true, points: bank.POINTS[first.difficulty], answer: bank.byId(first.id).answer, ref: bank.byId(first.id).ref });
@@ -95,7 +95,7 @@ describe('a single-player game', () => {
   });
 
   test('answers only the question being asked, once, and only in your own game', async () => {
-    const { game } = (await startGame(ANN, { length: 10 })).body;
+    const { game } = (await startGame(ANN, { count: 10 })).body;
     const q = game.question;
     const ids = JSON.parse(db.prepare('SELECT question_ids FROM bible_quiz_games WHERE id = ?').get(game.id).question_ids);
     // Skipping ahead to a later question is refused.
@@ -111,7 +111,7 @@ describe('a single-player game', () => {
   });
 
   test('finishes after the last question, and takes no more answers', async () => {
-    const { game } = (await startGame(ANN, { difficulty: 'easy', length: 10 })).body;
+    const { game } = (await startGame(ANN, { difficulty: 'easy', count: 10 })).body;
     const done = await play(ANN, game, rightAnswer);
     expect(done).toMatchObject({ finished: true, position: 10, correct: 10, score: 10, bestStreak: 10, question: null });
     expect((await request(buildApp(ANN)).post(`/api/bible-quiz/solo/${game.id}/answer`).send({ questionId: 'genesis-1', answer: 'Noah' })).status).toBe(409);
@@ -121,7 +121,7 @@ describe('a single-player game', () => {
     const shortHard = bank.filter({ types: ['short'] }).find(q => q.id === 'jesus-14');
     expect(shortHard.answer).toBe('Forty');
     // Deal a game, then point its first question at this one.
-    const { game } = (await startGame(BEN, { length: 10 })).body;
+    const { game } = (await startGame(BEN, { count: 10 })).body;
     const ids = JSON.parse(db.prepare('SELECT question_ids FROM bible_quiz_games WHERE id = ?').get(game.id).question_ids);
     ids[0] = 'jesus-14';
     db.prepare('UPDATE bible_quiz_games SET question_ids = ? WHERE id = ?').run(JSON.stringify(ids), game.id);
@@ -130,16 +130,20 @@ describe('a single-player game', () => {
   });
 
   test('refuses a game that cannot be dealt, or an odd length', async () => {
-    expect((await startGame(ANN, { length: 7 })).status).toBe(400);
+    expect((await startGame(ANN, { count: 7 })).status).toBe(400);
+    // A body that is not a settings object is no settings: the defaults apply.
+    const list = await request(buildApp(ANN)).post('/api/bible-quiz/solo').send([20, 'hard']);
+    expect(list.status).toBe(201);
+    expect(list.body.game).toMatchObject({ length: 10, difficulty: 'mixed' });
     expect((await startGame(ANN, { difficulty: 'impossible' })).status).toBe(400);
     // Values of the wrong type are refused or ignored, never matched.
     expect((await startGame(ANN, { difficulty: ['hard'] })).status).toBe(400);
     expect((await startGame(ANN, { difficulty: { hard: true } })).status).toBe(400);
-    const odd = await startGame(ANN, { sections: [['jesus'], { id: 'jesus' }, 'jesus'], length: 10 });
+    const odd = await startGame(ANN, { sections: [['jesus'], { id: 'jesus' }, 'jesus'], count: 10 });
     expect(odd.status).toBe(201);
     expect(odd.body.game.sections).toEqual(['jesus']);
     // Who Said It? has only a handful of hard questions.
-    const res = await startGame(ANN, { difficulty: 'hard', sections: ['sayings'], length: 20 });
+    const res = await startGame(ANN, { difficulty: 'hard', sections: ['sayings'], count: 20 });
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/Only \d+ questions match/);
   });
@@ -147,7 +151,7 @@ describe('a single-player game', () => {
   test('a regular player meets questions they have not seen before repeats', async () => {
     const seen = new Set();
     for (let i = 0; i < 5; i++) {
-      const { game } = (await startGame(BEN, { difficulty: 'medium', length: 20 })).body;
+      const { game } = (await startGame(BEN, { difficulty: 'medium', count: 20 })).body;
       const done = await play(BEN, game, wrongAnswer);
       expect(done.finished).toBe(true);
       JSON.parse(db.prepare('SELECT question_ids FROM bible_quiz_games WHERE id = ?').get(game.id).question_ids).forEach(id => {
@@ -160,12 +164,12 @@ describe('a single-player game', () => {
 
 describe('the leaderboard', () => {
   test('ranks every member who has played by points, then hit rate, by their directory name', async () => {
-    const annGame = (await startGame(ANN, { difficulty: 'hard', length: 10 })).body.game;
+    const annGame = (await startGame(ANN, { difficulty: 'hard', count: 10 })).body.game;
     await play(ANN, annGame, (q, i) => (i < 5 ? rightAnswer(q) : wrongAnswer(q))); // 15 points
-    const benGame = (await startGame(BEN, { difficulty: 'easy', length: 10 })).body.game;
+    const benGame = (await startGame(BEN, { difficulty: 'easy', count: 10 })).body.game;
     await play(BEN, benGame, rightAnswer); // 10 points
     // Ben starts another and quits after one right answer: it still counts.
-    const quit = (await startGame(BEN, { difficulty: 'easy', length: 10 })).body.game;
+    const quit = (await startGame(BEN, { difficulty: 'easy', count: 10 })).body.game;
     await request(buildApp(BEN)).post(`/api/bible-quiz/solo/${quit.id}/answer`).send({ questionId: quit.question.id, answer: rightAnswer(quit.question) });
 
     const res = await request(buildApp(BEN)).get('/api/bible-quiz/leaderboard');
@@ -177,11 +181,11 @@ describe('the leaderboard', () => {
   });
 
   test('this month counts only this month\'s answers', async () => {
-    const g = (await startGame(ANN, { difficulty: 'easy', length: 10 })).body.game;
+    const g = (await startGame(ANN, { difficulty: 'easy', count: 10 })).body.game;
     await play(ANN, g, rightAnswer);
     db.prepare("UPDATE bible_quiz_answers SET answered_on = '2026-09-28'").run();
     db.prepare("UPDATE bible_quiz_games SET started_at = '2026-09-28 10:00:00'").run();
-    const g2 = (await startGame(BEN, { difficulty: 'easy', length: 10 })).body.game;
+    const g2 = (await startGame(BEN, { difficulty: 'easy', count: 10 })).body.game;
     await play(BEN, g2, (q, i) => (i < 3 ? rightAnswer(q) : wrongAnswer(q)));
 
     const month = (await request(buildApp(ANN)).get('/api/bible-quiz/leaderboard?period=month')).body;

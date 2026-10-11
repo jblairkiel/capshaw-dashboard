@@ -46,7 +46,7 @@ describe('Bible Quiz — single player', () => {
     fireEvent.click(screen.getByRole('button', { name: 'The Life of Jesus' }));
     fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     expect(await screen.findByText('Who built an ark?')).toBeInTheDocument();
-    expect(sent(fetchMock, '/api/bible-quiz/solo')).toEqual({ difficulty: 'hard', length: 20, sections: ['jesus'] });
+    expect(sent(fetchMock, '/api/bible-quiz/solo')).toEqual({ difficulty: 'hard', count: 20, sections: ['jesus'] });
   });
 
   test('says why a game could not be dealt', async () => {
