@@ -48,10 +48,13 @@ function view(game) {
 }
 
 function start(user, { difficulty = 'mixed', length = 10, sections = [] } = {}) {
-  if (!DIFFICULTY_CHOICES.includes(difficulty)) return { error: 'Choose easy, medium, hard or mixed' };
+  // Straight from the request body, so each is checked for its type as well
+  // as its value: an array or object is not a difficulty or a section name.
+  if (typeof difficulty !== 'string' || !DIFFICULTY_CHOICES.includes(difficulty)) return { error: 'Choose easy, medium, hard or mixed' };
   const n = Number(length);
   if (!LENGTHS.includes(n)) return { error: `A game is ${LENGTHS.join(' or ')} questions` };
-  const secs = (Array.isArray(sections) ? sections : []).filter(s => bank.SECTIONS.some(x => x.id === s));
+  const secs = (Array.isArray(sections) ? sections : [])
+    .filter(s => typeof s === 'string' && bank.SECTIONS.some(x => x.id === s));
 
   const pool = bank.filter({ difficulty: difficulty === 'mixed' ? null : difficulty, sections: secs });
   if (pool.length < n) return { error: `Only ${pool.length} questions match that — choose more sections or a shorter game` };

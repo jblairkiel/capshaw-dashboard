@@ -35,9 +35,9 @@ const byId = id => BY_ID.get(String(id)) || null;
 // Which questions match a choice of difficulty, sections and types. Anything
 // not chosen means "all of them".
 function filter({ difficulty, sections, types } = {}) {
-  const diffs = difficulty && DIFFICULTIES.includes(difficulty) ? [difficulty] : DIFFICULTIES;
-  const secs = (sections || []).filter(s => SECTIONS.some(x => x.id === s));
-  const kinds = (types || []).filter(t => TYPES.includes(t));
+  const diffs = typeof difficulty === 'string' && DIFFICULTIES.includes(difficulty) ? [difficulty] : DIFFICULTIES;
+  const secs = (Array.isArray(sections) ? sections : []).filter(s => typeof s === 'string' && SECTIONS.some(x => x.id === s));
+  const kinds = (Array.isArray(types) ? types : []).filter(t => typeof t === 'string' && TYPES.includes(t));
   return QUESTIONS.filter(q =>
     diffs.includes(q.difficulty)
     && (!secs.length || secs.includes(q.section))

@@ -132,6 +132,12 @@ describe('a single-player game', () => {
   test('refuses a game that cannot be dealt, or an odd length', async () => {
     expect((await startGame(ANN, { length: 7 })).status).toBe(400);
     expect((await startGame(ANN, { difficulty: 'impossible' })).status).toBe(400);
+    // Values of the wrong type are refused or ignored, never matched.
+    expect((await startGame(ANN, { difficulty: ['hard'] })).status).toBe(400);
+    expect((await startGame(ANN, { difficulty: { hard: true } })).status).toBe(400);
+    const odd = await startGame(ANN, { sections: [['jesus'], { id: 'jesus' }, 'jesus'], length: 10 });
+    expect(odd.status).toBe(201);
+    expect(odd.body.game.sections).toEqual(['jesus']);
     // Who Said It? has only a handful of hard questions.
     const res = await startGame(ANN, { difficulty: 'hard', sections: ['sayings'], length: 20 });
     expect(res.status).toBe(400);
