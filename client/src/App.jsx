@@ -624,6 +624,10 @@ export default function App() {
   // Set only while an admin is viewing the portal as a member: `user` is then
   // the member, and this is the admin behind them.
   const [impersonatedBy, setImpersonatedBy] = useState(null);
+  // The single sign-on buttons the sign-in page may show. The spinner stays up
+  // until they are known, so the page appears whole rather than the buttons
+  // arriving late.
+  const [providers, setProviders] = useState(undefined);
 
   // Set by the OAuth callbacks and by the confirmation link in the registration
   // email, which the API answers with a redirect back to here.
@@ -641,7 +645,17 @@ export default function App() {
       .catch(() => setUser(null));
   }, []);
 
-  if (user === undefined) {
+  // Only the sign-in page needs the providers, so they are asked for once we
+  // know nobody is signed in (on load, or after signing out).
+  useEffect(() => {
+    if (user !== null || providers !== undefined) return;
+    fetch('/api/auth/providers')
+      .then(r => r.ok ? r.json() : null)
+      .then(j => setProviders(Array.isArray(j?.providers) ? j.providers : []))
+      .catch(() => setProviders([]));
+  }, [user, providers]);
+
+  if (user === undefined || (user === null && providers === undefined)) {
     return (
       <div className="min-h-screen bg-church-cream flex items-center justify-center">
         <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-church-gold" />
@@ -656,6 +670,7 @@ export default function App() {
         verified={verified}
         verifyError={verifyError}
         resetToken={resetToken}
+        providers={providers}
         onSignedIn={setUser}
       />
     );

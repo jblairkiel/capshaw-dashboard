@@ -89,7 +89,7 @@ describe('LoginPage — choosing a new password from the link', () => {
 
 describe('LoginPage — why Google or Facebook', () => {
   test('says signing in with them means this site never stores a password', () => {
-    render(<LoginPage />);
+    render(<LoginPage providers={['google', 'facebook']} />);
     expect(screen.getByText(/Google or Facebook is the safer choice/)).toHaveTextContent('never sees or stores it');
   });
 });

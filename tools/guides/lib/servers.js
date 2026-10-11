@@ -27,6 +27,13 @@ const BLANKED = [
 function portalEnv(work) {
   const env = { ...process.env, NODE_ENV: 'development' };
   for (const key of BLANKED) env[key] = '';
+  // The sign-in page only shows the buttons for providers that are configured,
+  // so give it placeholders: a guide shows the page members see, and never
+  // follows the buttons.
+  Object.assign(env, {
+    GOOGLE_CLIENT_ID: 'guide', GOOGLE_CLIENT_SECRET: 'guide',
+    FACEBOOK_APP_ID:  'guide', FACEBOOK_APP_SECRET:  'guide',
+  });
   env.CAPSHAW_DATA_DIR = path.join(work, 'data');
   env.CAPSHAW_UPLOAD_DIR = path.join(work, 'data', 'uploads');
   return env;
