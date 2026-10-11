@@ -109,6 +109,19 @@ function requireSiteAuth(req, res, next) {
   return requireAuth(req, res, next);
 }
 
+// ─── Waiting for approval ─────────────────────────────────────────────────────
+// Somebody signed in but not yet approved sees nothing of the portal: only a
+// page saying they are waiting, with the admins they can contact. Everything
+// else under /api answers 403, whatever a route would otherwise allow, so a
+// route that forgets requireApproved still gives nothing away.
+const PENDING_API_PATHS = ['/auth', '/health', '/welcome'];
+
+function limitPending(req, res, next) {
+  if (req.user?.role !== 'pending') return next();
+  if (PENDING_API_PATHS.some(p => req.path === p || req.path.startsWith(`${p}/`))) return next();
+  return res.status(403).json({ success: false, code: 'pending_approval', error: 'Your account is waiting to be approved' });
+}
+
 const requireApproved = requireRole('approved', 'Account pending approval');
 const requireAdmin    = requireRole('admin',    'Admin access required');
 
@@ -118,4 +131,5 @@ module.exports = {
   requireArea, requireAnyArea,
   requireAuth, requireApproved, requireAdmin,
   PUBLIC_API_PATHS, isPublicApiPath, requireSiteAuth,
+  PENDING_API_PATHS, limitPending,
 };

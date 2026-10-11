@@ -110,7 +110,7 @@ const EMAILS = [
     id: 'account-awaiting', category: 'notifications',
     name: 'Waiting for approval',
     audience: 'Every admin with an address on file',
-    trigger: 'A new account confirms its email address.',
+    trigger: 'A new account confirms its email address, or somebody new signs in with Google or Facebook.',
     like: ['account:%:awaiting-approval'],
     preview: () => accounts.compose.awaitingApproval({ user: SAMPLE.user }),
   },

@@ -213,3 +213,78 @@ describe('createApp — viewing the portal as a member', () => {
     expect(res.status).toBe(401);
   });
 });
+
+describe('createApp — an account still waiting for approval', () => {
+  const PASSWORD = 'correct horse battery staple';
+  const ORIGIN = 'http://localhost:5173';
+  let app;
+  let db;
+  let hashPassword;
+
+  async function addLocal(name, email, role) {
+    const { lastInsertRowid: id } = db.prepare(`
+      INSERT INTO users (provider, provider_id, email, name, role, password_hash, email_verified_at)
+      VALUES ('local', ?, ?, ?, ?, ?, datetime('now'))
+    `).run(email, email, name, role, await hashPassword(PASSWORD));
+    return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  }
+
+  async function signIn(email) {
+    const agent = request.agent(app);
+    const res = await agent.post('/api/auth/login').set('Origin', ORIGIN).send({ email, password: PASSWORD });
+    expect(res.status).toBe(200);
+    return agent;
+  }
+
+  beforeEach(() => {
+    app = buildApp({ NODE_ENV: 'test', SESSION_SECRET: 'test-secret' });
+    db = require('../db');
+    ({ hashPassword } = require('../lib/passwords'));
+    db.prepare('DELETE FROM users').run();
+    require('../routes/auth').resetRateLimits();
+  });
+
+  test('signs in, but reaches nothing except who to contact', async () => {
+    await addLocal('Ada Admin', 'ada@example.com', 'admin');
+    db.prepare("INSERT INTO users (provider, provider_id, email, name, role) VALUES ('google', 'bo-id', NULL, 'Bo Admin', 'admin')").run();
+    await addLocal('Mel Member', 'mel@example.com', 'approved');
+    const pat = await addLocal('Pat New', 'pat@example.com', 'pending');
+    const agent = await signIn('pat@example.com');
+
+    expect((await agent.get('/api/auth/me')).body.user).toMatchObject({ id: pat.id, role: 'pending' });
+    const contacts = await agent.get('/api/welcome/contacts');
+    expect(contacts.status).toBe(200);
+    expect(contacts.body).toMatchObject({ approved: false, you: { name: 'Pat New', email: 'pat@example.com' } });
+    // Only the admins, and only a name and an address.
+    expect(contacts.body.admins).toEqual([
+      { name: 'Ada Admin', email: 'ada@example.com' },
+      { name: 'Bo Admin', email: null },
+    ]);
+
+    for (const path of ['/api/announcements', '/api/signups', '/api/members/data', '/api/directory', '/api/how-it-works']) {
+      const res = await agent.get(path);
+      expect([path, res.status, res.body.code]).toEqual([path, 403, 'pending_approval']);
+    }
+    expect((await agent.post('/api/auth/logout').set('Origin', ORIGIN)).status).toBe(200);
+  });
+
+  test('once approved, the same session reaches the portal', async () => {
+    const pat = await addLocal('Pat New', 'pat@example.com', 'pending');
+    const agent = await signIn('pat@example.com');
+    expect((await agent.get('/api/announcements')).status).toBe(403);
+    db.prepare("UPDATE users SET role = 'approved' WHERE id = ?").run(pat.id);
+    expect((await agent.get('/api/announcements')).status).toBe(200);
+  });
+
+  test('an admin viewing the portal as a waiting account sees what they would see', async () => {
+    await addLocal('Ada Admin', 'ada@example.com', 'admin');
+    const pat = await addLocal('Pat New', 'pat@example.com', 'pending');
+    const agent = await signIn('ada@example.com');
+    await agent.post('/api/auth/impersonate').set('Origin', ORIGIN).send({ userId: pat.id });
+    expect((await agent.get('/api/announcements')).body.code).toBe('pending_approval');
+    expect((await agent.get('/api/welcome/contacts')).status).toBe(200);
+    // And can still stop.
+    expect((await agent.delete('/api/auth/impersonate').set('Origin', ORIGIN)).status).toBe(200);
+    expect((await agent.get('/api/announcements')).status).toBe(200);
+  });
+});

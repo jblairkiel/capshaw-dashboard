@@ -16,6 +16,7 @@ const gameQuestionRoutes         = require('./routes/gameQuestions');
 const lessonPlannerRoutes        = require('./routes/lessonPlanner');
 const announcementRoutes         = require('./routes/announcements');
 const authRoutes                 = require('./routes/auth');
+const welcomeRoutes              = require('./routes/welcome');
 const songRoutes                 = require('./routes/songTracker');
 const worshipRoutes              = require('./routes/worship');
 const howItWorksRoutes          = require('./routes/howItWorks');
@@ -43,7 +44,7 @@ const mailDeliveryRoutes         = require('./routes/mailDelivery');
 const signupRoutes               = require('./routes/signups');
 const communionPrepRoutes        = require('./routes/communionPrep');
 const paths                      = require('./lib/paths');
-const { requireSiteAuth }        = require('./middleware/auth');
+const { requireSiteAuth, limitPending } = require('./middleware/auth');
 const { applyImpersonation }     = require('./middleware/impersonation');
 const { requireTrustedOrigin }   = require('./middleware/csrf');
 const rateLimit                  = require('express-rate-limit');
@@ -124,9 +125,14 @@ function createApp() {
   // borrowed account from the database, so it sits behind the rate limit rather
   // than above it — and under /api rather than on every request, since a static
   // asset has no use for it.
-  app.use('/api', apiRateLimit, requireTrustedOrigin(allowedOrigins), requireSiteAuth, applyImpersonation);
+  //
+  // limitPending follows it, so it judges whoever the request is answered as:
+  // an account still waiting for approval reaches only the sign-in routes and
+  // the page that tells it who to contact.
+  app.use('/api', apiRateLimit, requireTrustedOrigin(allowedOrigins), requireSiteAuth, applyImpersonation, limitPending);
 
   app.use('/api/auth', authRoutes);
+  app.use('/api/welcome', welcomeRoutes);
   app.use('/api/scraper', scraperRoutes);
   app.use('/api/members', scraperRoutes);
   app.use('/api/documents',    documentRoutes);

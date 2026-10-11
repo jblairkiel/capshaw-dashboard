@@ -662,7 +662,7 @@ function UserDetail({ user, currentUserId, people, busy, onSetRole, onSetAreas, 
               <p className="text-xs text-orange-800 mt-1">
                 {user.provider === 'local' && !user.email_verified_at
                   ? 'They have not opened the confirmation email yet, so they cannot sign in even once you approve them. You can still approve now — it will be waiting for them.'
-                  : 'They cannot sign in until you approve them. Approving is also where you say who they are in the member directory.'}
+                  : 'Until you approve them they see only a page saying they are waiting, with the admins to contact. Approving is also where you say who they are in the member directory.'}
               </p>
               <button
                 type="button"

@@ -156,7 +156,7 @@ describe('LoginPage — creating an account', () => {
 describe('LoginPage — coming back from the confirmation link', () => {
   test('a confirmed address that still needs approval says so', () => {
     render(<LoginPage verified="pending" />);
-    expect(screen.getByRole('status')).toHaveTextContent(/church office still has to approve/i);
+    expect(screen.getByRole('status')).toHaveTextContent(/admin still has to approve.*sign in now to see who to contact/i);
   });
 
   test('a confirmed and approved account is invited to sign in', () => {

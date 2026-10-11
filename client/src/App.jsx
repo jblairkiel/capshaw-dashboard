@@ -11,6 +11,7 @@ import BibleClassView from './components/BibleClassView';
 import AnnouncementsView from './components/AnnouncementsView';
 import AnnouncementsDisplay from './components/AnnouncementsDisplay';
 import LoginPage from './components/LoginPage';
+import WaitingForApproval from './components/WaitingForApproval';
 import UsersView from './components/UsersView';
 import UpcomingServiceView from './components/UpcomingServiceView';
 import DatabaseAdminView from './components/DatabaseAdminView';
@@ -343,18 +344,6 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
           to be able to change the tab. */}
       <Header user={user} onLogout={onLogout} onGoToPage={goTo} />
 
-      {/* Pending approval banner */}
-      {user?.role === 'pending' && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2.5 text-sm text-amber-800 flex items-center gap-2">
-          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
-          </svg>
-          <span>
-            <strong>Welcome! Your account is waiting to be confirmed.</strong> You can look around the whole portal — once the church office confirms you as a member, you will be able to add and edit as well.
-          </span>
-        </div>
-      )}
-
       {/* Nav */}
       <div className="bg-church-navy shadow-md sticky top-0 z-10">
         <div className="max-w-6xl mx-auto flex items-center">
@@ -669,6 +658,25 @@ export default function App() {
         resetToken={resetToken}
         onSignedIn={setUser}
       />
+    );
+  }
+
+  // Not yet approved: nothing of the portal, only who to contact. An admin
+  // viewing the portal as such an account sees the same, under their banner.
+  if (user.role === 'pending') {
+    return (
+      <>
+        {impersonatedBy && (
+          <ImpersonationBanner user={user} impersonatedBy={impersonatedBy}
+            onStopped={admin => { setUser(admin); setImpersonatedBy(null); }} />
+        )}
+        <WaitingForApproval
+          key={`${user.id}:${impersonatedBy?.id ?? ''}`}
+          user={user}
+          onApproved={setUser}
+          onLogout={() => { setUser(null); setImpersonatedBy(null); }}
+        />
+      </>
     );
   }
 

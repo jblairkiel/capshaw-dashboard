@@ -399,6 +399,26 @@ describe('auto-linking at sign-in', () => {
   });
 });
 
+describe('a new account from Google or Facebook', () => {
+  const { upsertUser } = authRouter;
+  const toAdmins = () => db.prepare("SELECT * FROM mail_outbox WHERE context LIKE 'account:%:awaiting-approval'").all();
+
+  test('tells every admin straight away, once, and says how they signed up', () => {
+    db.prepare('DELETE FROM mail_outbox').run();
+    const user = upsertUser('facebook', 'fb-1', 'pat@example.com', 'Pat New', null);
+    expect(user.role).toBe('pending');
+    const sent = toAdmins();
+    expect(sent).toHaveLength(1);
+    expect(sent[0].intended_for || sent[0].to_email).toMatch(/ada@example.com/);
+    expect(sent[0].body).toMatch(/signed in with Facebook/);
+    expect(sent[0].body).toMatch(/Signed up with: Facebook/);
+
+    // Signing in again is not news.
+    upsertUser('facebook', 'fb-1', 'pat@example.com', 'Pat New', null);
+    expect(toAdmins()).toHaveLength(1);
+  });
+});
+
 // ─── Areas of responsibility ──────────────────────────────────────────────────
 
 function areasOf(userId) {
