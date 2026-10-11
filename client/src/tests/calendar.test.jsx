@@ -183,3 +183,40 @@ describe('CalendarView', () => {
     expect(await screen.findByText('Database is away')).toBeInTheDocument();
   });
 });
+
+describe('sign-ups on the calendar', () => {
+  const SIGNUPS = [
+    { listId: 7, dateId: 70, title: 'Meal train', closed: false, date: '2026-05-12', time: '', note: '', needed: 1, stillNeeded: 1, names: 0 },
+    { listId: 8, dateId: 80, title: 'Work day', closed: true, date: '2026-05-20', time: '08:00', note: '', needed: 4, stillNeeded: 2, names: 2 },
+  ];
+  function mockBoth() {
+    const fetchMock = vi.fn(url => Promise.resolve({
+      json: () => Promise.resolve(String(url) === '/api/signups/calendar' ? { success: true, dates: SIGNUPS } : { success: true, items: [EVENT] }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  test('shows each sign-up date, with what is still needed, and opens the sign-up when chosen', async () => {
+    mockBoth();
+    const onOpenSignup = vi.fn();
+    render(<CalendarView user={{ role: 'admin' }} onOpenSignup={onOpenSignup} />);
+    const open = await screen.findByRole('button', { name: 'Sign-up: Meal train, 1 still needed' });
+    expect(screen.getByText(/1 event this month · 2 sign-ups/)).toBeInTheDocument();
+    // A closed sign-up still shows, but asks for nobody.
+    expect(screen.getByRole('button', { name: 'Sign-up: Work day' })).toBeInTheDocument();
+    fireEvent.click(open);
+    expect(onOpenSignup).toHaveBeenCalledWith(7);
+    // Choosing it opens the sign-up, not the editor for that day.
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  test('a calendar whose sign-ups cannot be read still shows its events', async () => {
+    vi.stubGlobal('fetch', vi.fn(url => (String(url) === '/api/signups/calendar'
+      ? Promise.reject(new Error('offline'))
+      : Promise.resolve({ json: () => Promise.resolve({ success: true, items: [EVENT] }) }))));
+    render(<CalendarView user={{ role: 'admin' }} />);
+    expect(await screen.findByText(/Fellowship Breakfast/)).toBeInTheDocument();
+    expect(screen.queryByText(/Sign-up:/)).not.toBeInTheDocument();
+  });
+});

@@ -206,3 +206,23 @@ describe('analytics', () => {
     expect(res.body.byCreator).toEqual([{ name: 'Mia', count: 1 }, { name: 'Ned', count: 1 }]);
   });
 });
+
+describe('on the church calendar', () => {
+  test('every date of every list, with what is still needed that day, for anybody signed in', async () => {
+    const meal = (await make()).body.list;
+    const train = (await make(TRAIN, NED)).body.list;
+    await signUp(JOE, train.id, { dateId: train.dates[0].id, itemId: train.items[0].id });
+    await signUp(NED, meal.id, { dateId: meal.dates[0].id, itemId: null, note: 'Rolls' });
+    await request(buildApp(MAKER)).post(`/api/signups/${meal.id}/close`).send({ closed: true });
+
+    const res = await request(buildApp(NED)).get('/api/signups/calendar');
+    expect(res.status).toBe(200);
+    expect(res.body.dates.map(d => [d.title, d.date, d.stillNeeded, d.names])).toEqual([
+      ['Meal train', '2026-10-20', 0, 1],
+      ['Meal train', '2026-10-21', 1, 0],
+      ['Meal train', '2026-10-22', 1, 0],
+      ['Fellowship meal', '2026-11-15', 2, 1],
+    ]);
+    expect(res.body.dates[3]).toMatchObject({ listId: meal.id, dateId: meal.dates[0].id, time: '12:00', closed: true, needed: 2 });
+  });
+});
