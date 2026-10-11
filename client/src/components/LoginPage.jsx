@@ -471,6 +471,15 @@ export default function LoginPage({ authError, verified, verifyError, resetToken
                 }
               </p>
 
+              {/* Google and Facebook come first: they are the way in we recommend. */}
+              <ProviderButtons />
+              <p className="text-xs text-gray-500 text-center mt-3 leading-relaxed">
+                Signing in with Google or Facebook is the safer choice: they check your password,
+                so this site never sees or stores it.
+              </p>
+
+              <Divider>or use an email address</Divider>
+
               {mode === 'signin'
                 ? <SignInForm onSignedIn={onSignedIn} onForgot={email => { setForgotEmail(email); setPasswordChanged(''); setMode('forgot'); }} />
                 : <RegisterForm onRegistered={setRegistered} />
@@ -492,13 +501,6 @@ export default function LoginPage({ authError, verified, verifyError, resetToken
                     </button>
                   </>
                 )}
-              </p>
-
-              <Divider>or</Divider>
-              <ProviderButtons />
-              <p className="text-xs text-gray-500 text-center mt-3 leading-relaxed">
-                Signing in with Google or Facebook is the safer choice: they check your password,
-                so this site never sees or stores it.
               </p>
             </>
           )}

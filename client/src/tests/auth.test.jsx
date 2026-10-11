@@ -23,6 +23,13 @@ describe('LoginPage', () => {
     expect(link.getAttribute('href')).toBe('/api/auth/facebook');
   });
 
+  test('puts Google and Facebook above the email and password form', () => {
+    render(<LoginPage />);
+    const google   = screen.getByRole('link', { name: /sign in with google/i });
+    const password = screen.getByLabelText('Password');
+    expect(google.compareDocumentPosition(password) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   test('welcomes the church family rather than staff', () => {
     render(<LoginPage />);
     expect(screen.getByText(/member portal/i)).toBeInTheDocument();
