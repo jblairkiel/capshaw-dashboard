@@ -57,6 +57,41 @@ function initSchema(db) {
     created_at TEXT    NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- ── Bible quiz, single player ─────────────────────────────────────────────
+  -- A game is a set of questions from the bank (lib/bibleQuiz), dealt when it
+  -- starts and answered in order; every answer is kept, and the members'
+  -- leaderboard is the sum of them. A game left unfinished still counts what
+  -- was answered, so quitting a bad run gains nothing.
+  CREATE TABLE IF NOT EXISTS bible_quiz_games (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    difficulty   TEXT    NOT NULL DEFAULT 'mixed',
+    sections     TEXT    NOT NULL DEFAULT '[]',
+    question_ids TEXT    NOT NULL,
+    position     INTEGER NOT NULL DEFAULT 0,
+    score        INTEGER NOT NULL DEFAULT 0,
+    correct      INTEGER NOT NULL DEFAULT 0,
+    streak       INTEGER NOT NULL DEFAULT 0,
+    best_streak  INTEGER NOT NULL DEFAULT 0,
+    started_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    finished_at  TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_bible_quiz_games_user ON bible_quiz_games(user_id);
+
+  CREATE TABLE IF NOT EXISTS bible_quiz_answers (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id     INTEGER NOT NULL REFERENCES bible_quiz_games(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    question_id TEXT    NOT NULL,
+    given       TEXT    NOT NULL DEFAULT '',
+    correct     INTEGER NOT NULL DEFAULT 0,
+    points      INTEGER NOT NULL DEFAULT 0,
+    answered_on TEXT    NOT NULL,
+    answered_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(game_id, question_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_bible_quiz_answers_user ON bible_quiz_answers(user_id);
+
   CREATE TABLE IF NOT EXISTS users (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     provider    TEXT    NOT NULL,

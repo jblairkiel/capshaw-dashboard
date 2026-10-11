@@ -1,46 +1,36 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { hasWriteAccess } from '../lib/roles';
 
-// ─── Built-in question bank (multiple-choice) ─────────────────────────────────
+// ─── The question bank ────────────────────────────────────────────────────────
+//
+// The church's 500 Bible quiz questions (server/lib/bibleQuiz): multiple
+// choice and true/false mark themselves; a short answer is read out and the
+// teacher marks it, with the expected answer shown. A harder question moves a
+// team further.
 
-const BUILTIN = [
-  { q: 'Who built the ark?', a: ['Moses', 'Noah', 'Abraham', 'Elijah'], c: 1 },
-  { q: 'What did God create on the very first day?', a: ['Animals', 'Light', 'Stars', 'Water'], c: 1 },
-  { q: 'Who was swallowed by a great fish?', a: ['Elijah', 'Daniel', 'Jonah', 'Ezekiel'], c: 2 },
-  { q: 'How many disciples did Jesus choose?', a: ['7', '10', '12', '14'], c: 2 },
-  { q: 'What did David use to defeat Goliath?', a: ['A sword', 'A sling and stone', 'A spear', 'His fists'], c: 1 },
-  { q: 'What is the very first book of the Bible?', a: ['Exodus', 'Matthew', 'Genesis', 'Psalms'], c: 2 },
-  { q: 'What did Jesus turn water into at a wedding?', a: ['Juice', 'Milk', 'Honey', 'Wine'], c: 3 },
-  { q: 'Where was Jesus born?', a: ['Jerusalem', 'Nazareth', 'Bethlehem', 'Egypt'], c: 2 },
-  { q: 'How many days was Jesus in the tomb?', a: ['1', '2', '3', '7'], c: 2 },
-  { q: 'Who was thrown into the lions\' den?', a: ['Shadrach', 'Daniel', 'Ezekiel', 'Nehemiah'], c: 1 },
-  { q: 'What did Jesus feed 5,000 people with?', a: ['Manna and honey', 'Bread and fish', 'Figs and olives', 'Loaves and grapes'], c: 1 },
-  { q: 'Who was the first man God created?', a: ['Noah', 'Cain', 'Adam', 'Abraham'], c: 2 },
-  { q: 'Which sea did God part for Moses?', a: ['Dead Sea', 'Red Sea', 'Sea of Galilee', 'Mediterranean'], c: 1 },
-  { q: 'Who was the first king of Israel?', a: ['David', 'Solomon', 'Saul', 'Samuel'], c: 2 },
-  { q: 'What river was Jesus baptized in?', a: ['Nile', 'Euphrates', 'Jordan', 'Tigris'], c: 2 },
-  { q: 'Which disciple denied Jesus three times?', a: ['John', 'James', 'Judas', 'Peter'], c: 3 },
-  { q: 'What was the name of Abraham\'s wife?', a: ['Rachel', 'Rebecca', 'Ruth', 'Sarah'], c: 3 },
-  { q: 'Which disciple betrayed Jesus?', a: ['Thomas', 'Judas', 'Simon', 'Philip'], c: 1 },
-  { q: 'How many plagues came upon Egypt?', a: ['7', '8', '10', '12'], c: 2 },
-  { q: 'Who wrote most of the Psalms?', a: ['Moses', 'David', 'Solomon', 'Isaiah'], c: 1 },
-  { q: 'What was the name of Moses\'s brother?', a: ['Aaron', 'Caleb', 'Joshua', 'Levi'], c: 0 },
-  { q: 'Who was wrestling with God in Genesis?', a: ['Abraham', 'Isaac', 'Jacob', 'Joseph'], c: 2 },
-  { q: 'What did God use to lead Israel through the desert?', a: ['A star', 'An angel', 'A pillar of cloud and fire', 'A rainbow'], c: 2 },
-  { q: 'Who survived a fiery furnace and praised God?', a: ['Daniel and friends', 'Shadrach, Meshach & Abednego', 'Elijah and Elisha', 'Moses and Aaron'], c: 1 },
-  { q: 'What is the shortest verse in the Bible?', a: ['God is love', 'Jesus wept', 'Pray always', 'Fear not'], c: 1 },
-  { q: 'How many books are in the New Testament?', a: ['24', '25', '27', '39'], c: 2 },
-  { q: 'Who was the father of John the Baptist?', a: ['Joseph', 'Zacharias', 'Simeon', 'Eli'], c: 1 },
-  { q: 'Who hid two Israelite spies in Jericho?', a: ['Ruth', 'Deborah', 'Rahab', 'Esther'], c: 2 },
-  { q: 'What tribe was the apostle Paul from?', a: ['Judah', 'Levi', 'Benjamin', 'Ephraim'], c: 2 },
-  { q: 'On what day did God rest after creation?', a: ['5th', '6th', '7th', '8th'], c: 2 },
-  { q: 'Who built the first temple in Jerusalem?', a: ['David', 'Solomon', 'Josiah', 'Ezra'], c: 1 },
-  { q: 'What garden did Adam and Eve live in?', a: ['Garden of Gethsemane', 'Garden of Eden', 'Garden of Olives', 'Garden of God'], c: 1 },
-  { q: 'How did Elijah go to heaven?', a: ['On angel wings', 'He walked up a mountain', 'A whirlwind and chariot of fire', 'A great white cloud'], c: 2 },
-  { q: 'Which judge had supernatural strength?', a: ['Gideon', 'Samson', 'Jephthah', 'Othniel'], c: 1 },
-  { q: 'How many brothers did Joseph (son of Jacob) have?', a: ['10', '11', '12', '8'], c: 1 },
-  { q: 'Who was the first woman?', a: ['Ruth', 'Mary', 'Eve', 'Deborah'], c: 2 },
-];
+const DIFFICULTY_MOVES  = { easy: 2, medium: 3, hard: 4 };
+const DIFFICULTY_LABELS = { mixed: 'Mixed', easy: 'Easy', medium: 'Medium', hard: 'Hard' };
+const DIFFICULTY_TONES  = { easy: 'bg-emerald-100 text-emerald-800', medium: 'bg-amber-100 text-amber-800', hard: 'bg-red-100 text-red-800' };
+const BANK_TYPES = [['mc', 'Multiple choice'], ['tf', 'True / False'], ['short', 'Short answer']];
+
+function shuffle(list) {
+  const copy = [...list];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function bankToGame(q) {
+  const base = { difficulty: q.difficulty, ref: q.ref };
+  if (q.type === 'mc') {
+    const a = shuffle(q.options);
+    return { ...base, q: q.question, a, c: a.indexOf(q.answer) };
+  }
+  if (q.type === 'tf') return { ...base, q: q.question, answer: q.answer === 'true' ? 'True' : 'False', type: 'true-false', isLibrary: true };
+  return { ...base, q: q.question, answer: q.answer, type: 'comprehension', isLibrary: true };
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -57,7 +47,10 @@ const TEAM_PRESETS = [
   { name: 'Blue Lions',   color: '#3b82f6', token: '#93c5fd', emoji: '🦁' },
   { name: 'Green Sharks', color: '#10b981', token: '#6ee7b7', emoji: '🦈' },
   { name: 'Gold Bears',   color: '#f59e0b', token: '#fcd34d', emoji: '🐻' },
+  { name: 'Purple Owls',  color: '#8b5cf6', token: '#c4b5fd', emoji: '🦉' },
+  { name: 'Orange Foxes', color: '#f97316', token: '#fdba74', emoji: '🦊' },
 ];
+const TEAM_COUNTS = [2, 3, 4, 5, 6];
 
 const ROUND_OPTIONS = [5, 10, 15, 20];
 
@@ -525,13 +518,28 @@ function StadiumSVG({ teams }) {
 function SetupScreen({ onStart, canWrite }) {
   const [count, setCount] = useState(2);
   const [names, setNames] = useState(TEAM_PRESETS.map(t => t.name));
+  // Who is on each team, one name a line; the game calls them up in turn.
+  const [players, setPlayers] = useState(TEAM_PRESETS.map(() => ''));
   const [rounds, setRounds] = useState(10);
-  const [source, setSource] = useState('builtin');
+  const [source, setSource] = useState('bank');
+  const [bankInfo, setBankInfo] = useState(null);
+  const [difficulty, setDifficulty] = useState('mixed');
+  const [sections, setSections] = useState([]);
+  const [types, setTypes] = useState(BANK_TYPES.map(([t]) => t));
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState('');
   const [libSets, setLibSets] = useState([]);
   const [libLoading, setLibLoading] = useState(false);
   const [libError, setLibError] = useState('');
   const [selectedSetId, setSelectedSetId] = useState('all');
   const [customQs, setCustomQs] = useState([]);
+
+  useEffect(() => {
+    fetch('/api/bible-quiz/bank', { credentials: 'include' })
+      .then(r => r.json())
+      .then(j => { if (j.success) setBankInfo(j); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (source !== 'library') return;
@@ -545,17 +553,36 @@ function SetupScreen({ onStart, canWrite }) {
   }, [source]);
 
   const canStart =
-    source === 'builtin' ||
+    (source === 'bank' && types.length > 0 && !starting) ||
     (source === 'library' && !libLoading && libSets.length > 0) ||
     (source === 'custom'  && customQs.length > 0);
 
-  const handleStart = () => {
+  const handleStart = async () => {
     const teams = TEAM_PRESETS.slice(0, count).map((p, i) => ({
       ...p, name: names[i].trim() || p.name, position: 0, totalDistance: 0,
+      players: players[i].split('\n').map(n => n.trim()).filter(Boolean), turns: 0,
     }));
 
     let pool = null;
-    if (source === 'library') {
+    if (source === 'bank') {
+      setStarting(true); setStartError('');
+      try {
+        const query = new URLSearchParams({
+          difficulty: difficulty === 'mixed' ? '' : difficulty,
+          sections: sections.join(','),
+          types: types.join(','),
+        });
+        const json = await (await fetch(`/api/bible-quiz/questions?${query}`, { credentials: 'include' })).json();
+        if (!json.success) throw new Error(json.error || 'Could not load the questions');
+        if (!json.questions.length) throw new Error('No questions match those choices.');
+        pool = json.questions.map(bankToGame);
+      } catch (err) {
+        setStartError(err.message);
+        setStarting(false);
+        return;
+      }
+      setStarting(false);
+    } else if (source === 'library') {
       const sets = selectedSetId === 'all' ? libSets : libSets.filter(s => s.id === Number(selectedSetId));
       pool = sets.flatMap(s => s.questions.map(q => ({
         q: q.question, answer: q.answer, hint: q.hint || '', type: q.type, isLibrary: true,
@@ -579,22 +606,33 @@ function SetupScreen({ onStart, canWrite }) {
       <div className="card space-y-3">
         <h3 className="font-semibold text-church-navy">Number of Teams</h3>
         <div className="flex gap-2">
-          {[2, 3, 4].map(n => (
-            <button key={n} onClick={() => setCount(n)}
+          {TEAM_COUNTS.map(n => (
+            <button key={n} onClick={() => setCount(n)} aria-label={`${n} teams`} aria-pressed={count === n}
               className={`flex-1 py-3 rounded-lg font-bold text-lg border-2 transition-all ${count === n ? 'bg-church-navy text-church-gold border-church-gold' : 'bg-white text-church-navy border-gray-200 hover:border-church-gold'}`}
             >{n}</button>
           ))}
         </div>
         <div className="space-y-2 pt-1">
           {TEAM_PRESETS.slice(0, count).map((p, i) => (
-            <div key={i} className="flex items-center gap-3">
-              <span className="text-xl">{p.emoji}</span>
-              <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: p.color }} />
-              <input
-                className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-church-gold"
-                value={names[i]}
-                onChange={e => setNames(prev => { const n = [...prev]; n[i] = e.target.value; return n; })}
-                placeholder={p.name}
+            <div key={i} className="space-y-1.5">
+              <div className="flex items-center gap-3">
+                <span className="text-xl">{p.emoji}</span>
+                <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: p.color }} />
+                <input
+                  className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-church-gold"
+                  value={names[i]}
+                  onChange={e => setNames(prev => { const n = [...prev]; n[i] = e.target.value; return n; })}
+                  placeholder={p.name}
+                  aria-label={`Team ${i + 1} name`}
+                />
+              </div>
+              <textarea
+                rows={2}
+                value={players[i]}
+                onChange={e => setPlayers(prev => { const n = [...prev]; n[i] = e.target.value; return n; })}
+                placeholder="Players, one per line — they take turns answering. Leave blank for none."
+                aria-label={`Players on ${names[i].trim() || p.name}`}
+                className="w-full ml-0 sm:ml-9 sm:w-[calc(100%-2.25rem)] border border-gray-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-church-gold"
               />
             </div>
           ))}
@@ -618,12 +656,61 @@ function SetupScreen({ onStart, canWrite }) {
       <div className="card space-y-3">
         <h3 className="font-semibold text-church-navy">Question Source</h3>
         <div className="flex gap-1.5">
-          {[['builtin', '🎲 Built-in'], ['library', '📚 Library'], ['custom', '✏️ Custom']].map(([val, label]) => (
+          {[['bank', `📖 Question Bank${bankInfo ? ` (${bankInfo.total})` : ''}`], ['library', '📚 Library'], ['custom', '✏️ Custom']].map(([val, label]) => (
             <button key={val} onClick={() => setSource(val)}
               className={`flex-1 py-2.5 rounded-lg font-medium text-sm border-2 transition-all ${source === val ? 'bg-church-navy text-church-gold border-church-gold' : 'bg-white text-church-navy border-gray-200 hover:border-church-gold'}`}
             >{label}</button>
           ))}
         </div>
+
+        {source === 'bank' && (
+          <div className="pt-1 space-y-3">
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Difficulty</p>
+              <div className="flex gap-1.5">
+                {Object.entries(DIFFICULTY_LABELS).map(([val, label]) => (
+                  <button key={val} onClick={() => setDifficulty(val)} aria-pressed={difficulty === val}
+                    className={`flex-1 py-2 rounded-lg text-xs font-bold border-2 transition-all ${difficulty === val ? 'bg-church-navy text-church-gold border-church-gold' : 'bg-white text-church-navy border-gray-200 hover:border-church-gold'}`}
+                  >{label}</button>
+                ))}
+              </div>
+              <p className="text-xs text-gray-400 mt-1">A right answer moves a team 2 squares on an easy question, 3 on medium, 4 on hard.</p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Question types</p>
+              <div className="flex flex-wrap gap-1.5">
+                {BANK_TYPES.map(([val, label]) => {
+                  const on = types.includes(val);
+                  return (
+                    <button key={val} aria-pressed={on}
+                      onClick={() => setTypes(t => (on ? t.filter(x => x !== val) : [...t, val]))}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${on ? 'bg-church-navy text-white border-church-navy' : 'bg-white text-gray-600 border-gray-300'}`}
+                    >{label}</button>
+                  );
+                })}
+              </div>
+              {types.includes('short') && <p className="text-xs text-gray-400 mt-1">Short answers are read aloud; you mark them Correct or Incorrect, with the expected answer shown.</p>}
+              {!types.length && <p className="text-xs text-amber-600 mt-1">Choose at least one type.</p>}
+            </div>
+            {bankInfo && (
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1.5">Sections {sections.length ? '' : '(all)'}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {bankInfo.sections.map(sec => {
+                    const on = sections.includes(sec.id);
+                    return (
+                      <button key={sec.id} aria-pressed={on}
+                        onClick={() => setSections(list => (on ? list.filter(x => x !== sec.id) : [...list, sec.id]))}
+                        className={`px-2.5 py-1 rounded-full text-xs border transition-all ${on ? 'bg-church-gold text-church-navy border-church-gold font-semibold' : 'bg-white text-gray-600 border-gray-300'}`}
+                      >{sec.label}</button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {startError && <p className="text-sm text-red-600" role="alert">{startError}</p>}
+          </div>
+        )}
 
         {source === 'library' && (
           <div className="pt-1">
@@ -678,7 +765,7 @@ function SetupScreen({ onStart, canWrite }) {
         disabled={!canStart}
         className="w-full py-4 bg-church-gold text-church-navy font-bold text-xl rounded-xl shadow hover:bg-amber-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
       >
-        🏁 Start the Game!
+        {starting ? 'Getting questions…' : '🏁 Start the Game!'}
       </button>
     </div>
   );
@@ -686,7 +773,7 @@ function SetupScreen({ onStart, canWrite }) {
 
 // ─── Question Card ────────────────────────────────────────────────────────────
 
-function QuestionCard({ question, selected, onAnswer, isBonus }) {
+function QuestionCard({ question, selected, onAnswer, isBonus, player }) {
   const letters = ['A', 'B', 'C', 'D'];
   const answerColors = [
     'bg-red-100 border-red-300 hover:bg-red-200',
@@ -698,6 +785,17 @@ function QuestionCard({ question, selected, onAnswer, isBonus }) {
   return (
     <div className={`card space-y-4 border-2 ${isBonus ? 'border-indigo-400 bg-indigo-50' : 'border-church-gold'}`}>
       {isBonus && <div className="text-center text-indigo-700 font-bold text-sm">🙏 BONUS — Correct = +3 extra spaces!</div>}
+
+      {(question.difficulty || player) && (
+        <div className="flex items-center justify-center gap-2 text-xs">
+          {player && <span className="font-semibold text-church-navy">🙋 {player}</span>}
+          {question.difficulty && !isBonus && (
+            <span className={`px-2 py-0.5 rounded-full font-semibold ${DIFFICULTY_TONES[question.difficulty]}`}>
+              {DIFFICULTY_LABELS[question.difficulty]} · {DIFFICULTY_MOVES[question.difficulty]} squares
+            </span>
+          )}
+        </div>
+      )}
 
       <p className="text-base sm:text-lg font-semibold text-church-navy text-center leading-snug">{question.q}</p>
 
@@ -779,6 +877,10 @@ function QuestionCard({ question, selected, onAnswer, isBonus }) {
           })}
         </div>
       )}
+
+      {selected !== null && question.ref && (
+        <p className="text-center text-xs text-gray-500">📖 {question.ref}</p>
+      )}
     </div>
   );
 }
@@ -787,7 +889,7 @@ function QuestionCard({ question, selected, onAnswer, isBonus }) {
 
 function FinalStandings({ teams, onRestart }) {
   const ranked = [...teams].sort((a, b) => b.totalDistance - a.totalDistance);
-  const medals = ['🥇', '🥈', '🥉', '4️⃣'];
+  const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣', '6️⃣'];
 
   return (
     <div className="max-w-md mx-auto space-y-5">
@@ -839,7 +941,7 @@ export default function StadiumGame({ user }) {
   const [extraTurn, setExtraTurn]   = useState(false);
   const [totalRounds, setTotalRounds] = useState(10);
   const [turnsDone, setTurnsDone]   = useState(0);
-  const [questionPool, setQuestionPool] = useState(null); // null = use BUILTIN
+  const [questionPool, setQuestionPool] = useState(null);
   const [usedIdxs, setUsedIdxs]    = useState(new Set());
   const [isFullscreen, setIsFullscreen] = useState(false);
   const containerRef = useRef(null);
@@ -873,7 +975,7 @@ export default function StadiumGame({ user }) {
 
   // ── Pick question ───────────────────────────────────────────────────────────
   const pickQuestion = useCallback((pool, used) => {
-    const source = pool ?? BUILTIN;
+    const source = pool ?? [];
     const avail = source.map((q, i) => ({ q, i })).filter(({ i }) => !used.has(i));
     const list = avail.length > 0 ? avail : source.map((q, i) => ({ q, i }));
     const pick = list[Math.floor(Math.random() * list.length)];
@@ -921,7 +1023,9 @@ export default function StadiumGame({ user }) {
     setWasCorrect(correct);
 
     if (correct) {
-      const spaces = 2 + Math.floor(Math.random() * 3); // 2–4
+      // A bank question moves by its difficulty; the class's own questions,
+      // which have none, by a roll of 2–4.
+      const spaces = DIFFICULTY_MOVES[question.difficulty] ?? 2 + Math.floor(Math.random() * 3);
       const effective = isBonus ? 3 : spaces;
 
       let msg = isBonus ? `🙏 Correct! +3 bonus spaces!` : `✅ Correct! +${effective} spaces!`;
@@ -973,12 +1077,14 @@ export default function StadiumGame({ user }) {
     if (nextDone >= totalTurns) { setTurnsDone(nextDone); setPhase('standings'); return; }
 
     setTurnsDone(nextDone);
+    setTeams(prev => prev.map((t, i) => (i === currentIdx ? { ...t, turns: (t.turns || 0) + 1 } : t)));
     setCurrentIdx((currentIdx + 1) % teams.length);
     setPhase('playing');
   };
 
   // ── Render ──────────────────────────────────────────────────────────────────
   const currentTeam = teams[currentIdx];
+  const upNow = currentTeam?.players?.length ? currentTeam.players[(currentTeam.turns || 0) % currentTeam.players.length] : null;
   const totalTurns = totalRounds * teams.length;
   const turnsLeft = Math.max(0, totalTurns - turnsDone);
   const roundNum = Math.floor(turnsDone / (teams.length || 1)) + 1;
@@ -1041,7 +1147,7 @@ export default function StadiumGame({ user }) {
           <StadiumSVG teams={teams} />
 
           {/* Scoreboard */}
-          <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${teams.length}, 1fr)` }}>
+          <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${teams.length <= 4 ? teams.length : 3}, 1fr)` }}>
             {teams.map((team, i) => {
               const laps = Math.floor(team.totalDistance / TOTAL_SQUARES);
               const active = i === currentIdx && phase !== 'result';
@@ -1063,6 +1169,7 @@ export default function StadiumGame({ user }) {
             <div className="card text-center space-y-3 border-2" style={{ borderColor: currentTeam.color }}>
               <div className="text-3xl">{currentTeam.emoji}</div>
               <h3 className="text-lg font-bold" style={{ color: currentTeam.color }}>{currentTeam.name}&apos;s Turn!</h3>
+              {upNow && <p className="text-base font-semibold text-church-navy">🙋 {upNow}, you&apos;re up!</p>}
               <p className="text-gray-500 text-xs">Square {currentTeam.position} · Total distance: {currentTeam.totalDistance}</p>
               <button
                 onClick={() => drawQuestion(false)}
@@ -1073,7 +1180,7 @@ export default function StadiumGame({ user }) {
           )}
 
           {phase === 'question' && question && (
-            <QuestionCard question={question} selected={selected} onAnswer={submitAnswer} isBonus={isBonus} />
+            <QuestionCard question={question} selected={selected} onAnswer={submitAnswer} isBonus={isBonus} player={upNow} />
           )}
 
           {phase === 'bonus-prompt' && (

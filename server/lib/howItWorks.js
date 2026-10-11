@@ -215,11 +215,21 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'bible-quiz', title: 'Bible Quiz', audience: 'everyone',
+    blocks: [
+      { p: '**Grow → Bible Class → Bible Quiz** has 500 questions from Genesis to Revelation — multiple choice, true or false, and short answer — each one easy, medium or hard, and each telling you where in the Bible its answer is.' },
+      { p: '**Single player.** Choose a difficulty (or mixed), 10 or 20 questions, and any sections you like, then **Start**. A right answer is worth 1 point on easy, 2 on medium and 3 on hard. Short answers are marked for you: capitals, punctuation and "forty" or "40" do not matter. The game favors questions you have not seen yet, and one you leave part way through carries on next time you open it.' },
+      { p: '**Leaderboard.** Every member who has played, ranked by points, for all time or this month, with how often they are right and their best game. Every answer counts, so stopping a game early never helps anyone.' },
+      { p: '**Classroom (teams).** The teacher sets up 2 to 6 teams, with the players on each if they like — the game then calls each player up in turn. Choose the difficulty, sections and question types, and the teams race around the Bible Bowl Stadium: a right answer moves 2 squares on an easy question, 3 on medium, 4 on hard. Short answers are read aloud and the teacher marks them, with the expected answer shown.' },
+      { chart: flow('A single-player game', ['Choose difficulty and length', 'Answer each question', 'See the answer and verse', 'Climb the leaderboard']) },
+    ],
+  },
+  {
     id: 'other-pages', title: 'Everything else', audience: 'everyone',
     blocks: [
       { table: { head: ['Page', 'What it is'], rows: [
         ['Grow → Member Match', 'A game for learning names and faces from the directory photos'],
-        ['Grow → Bible Class', 'Class questions and lesson planning'],
+        ['Grow → Bible Class', 'Class questions, lesson planning and the Bible Quiz'],
         ['Our Church Family → Birthdays & Anniversaries', 'Whose are coming up, from the church website'],
         ['Our Church Family → Elders & Deacons', 'Who they are and what each looks after'],
         ['Worship → Livestreams', 'The church\'s YouTube channel, newest first'],

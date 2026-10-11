@@ -5,8 +5,21 @@ import StadiumGame from '../components/StadiumGame';
 const APPROVED = { id: 1, role: 'approved' };
 const PENDING  = { id: 2, role: 'pending' };
 
+// A few questions from the bank, all easy multiple choice unless a test says
+// otherwise, so a game always moves the same and every question has A–D.
+const BANK_QS = [
+  { id: 'genesis-1', section: 'genesis', type: 'mc', difficulty: 'easy', ref: 'Genesis 6:14', question: 'Who built an ark?', options: ['Noah', 'Moses', 'Abraham', 'Jacob'], answer: 'Noah' },
+  { id: 'jesus-1', section: 'jesus', type: 'mc', difficulty: 'easy', ref: 'Luke 2:4-7', question: 'Where was Jesus born?', options: ['Bethlehem', 'Nazareth', 'Jerusalem', 'Capernaum'], answer: 'Bethlehem' },
+];
+const BANK = {
+  success: true, total: 500,
+  sections: [{ id: 'genesis', label: 'Creation & the Patriarchs' }, { id: 'jesus', label: 'The Life of Jesus' }],
+};
+
 function mockApi(overrides = {}) {
   const routes = {
+    bank:             BANK,
+    bankQuestions:    { success: true, questions: BANK_QS },
     customQuestions: { success: true, questions: [] },
     librarySets:      { success: true, sets: [] },
     generate:         { success: true, questions: [] },
@@ -17,7 +30,9 @@ function mockApi(overrides = {}) {
   const fetchMock = vi.fn((url, opts = {}) => {
     const method = opts.method || 'GET';
     let body;
-    if (url.includes('/game-questions/generate'))       body = routes.generate;
+    if (url.includes('/bible-quiz/bank'))               body = routes.bank;
+    else if (url.includes('/bible-quiz/questions'))     body = routes.bankQuestions;
+    else if (url.includes('/game-questions/generate'))  body = routes.generate;
     else if (url === '/api/game-questions' && method === 'GET') body = routes.customQuestions;
     else if (method === 'DELETE')                        body = routes.remove;
     else if (method === 'POST' || method === 'PUT')      body = routes.save;
@@ -52,23 +67,62 @@ describe('StadiumGame — setup', () => {
   test('choosing more teams reveals more name fields', () => {
     mockApi();
     render(<StadiumGame user={APPROVED} />);
-    fireEvent.click(screen.getByRole('button', { name: '4' }));
+    fireEvent.click(screen.getByRole('button', { name: '4 teams' }));
     expect(screen.getByDisplayValue('Green Sharks')).toBeInTheDocument();
     expect(screen.getByDisplayValue('Gold Bears')).toBeInTheDocument();
   });
 
-  test('a custom team name is used once the game starts', () => {
+  test('a custom team name is used once the game starts', async () => {
     mockApi();
     render(<StadiumGame user={APPROVED} />);
     fireEvent.change(screen.getByDisplayValue('Red Eagles'), { target: { value: 'Sunday School Stars' } });
     fireEvent.click(screen.getByRole('button', { name: /Start the Game/i }));
-    expect(screen.getByText(/Sunday School Stars.*Turn/)).toBeInTheDocument();
+    expect(await screen.findByText(/Sunday School Stars.*Turn/)).toBeInTheDocument();
   });
 
-  test('built-in trivia can start immediately', () => {
+  test('up to six teams can play', () => {
     mockApi();
     render(<StadiumGame user={APPROVED} />);
+    fireEvent.click(screen.getByRole('button', { name: '6 teams' }));
+    expect(screen.getByDisplayValue('Purple Owls')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('Orange Foxes')).toBeInTheDocument();
+  });
+
+  test('the question bank is the default, and can start straight away', async () => {
+    mockApi();
+    render(<StadiumGame user={APPROVED} />);
+    expect(await screen.findByRole('button', { name: /Question Bank \(500\)/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Start the Game/i })).not.toBeDisabled();
+  });
+
+  test('the teacher picks difficulty, sections and question types, and only those are asked for', async () => {
+    const fetchMock = mockApi();
+    render(<StadiumGame user={APPROVED} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Hard' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'The Life of Jesus' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Short answer' }));
+    fireEvent.click(screen.getByRole('button', { name: /Start the Game/i }));
+    await screen.findByText(/Turn/);
+    const url = fetchMock.mock.calls.map(([u]) => String(u)).find(u => u.startsWith('/api/bible-quiz/questions'));
+    const params = new URLSearchParams(url.split('?')[1]);
+    expect(params.get('difficulty')).toBe('hard');
+    expect(params.get('sections')).toBe('jesus');
+    expect(params.get('types')).toBe('mc,tf');
+  });
+
+  test('says so when no questions match, rather than starting an empty game', async () => {
+    mockApi({ bankQuestions: { success: true, questions: [] } });
+    render(<StadiumGame user={APPROVED} />);
+    fireEvent.click(screen.getByRole('button', { name: /Start the Game/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/No questions match/);
+    expect(screen.queryByText(/Turn/)).not.toBeInTheDocument();
+  });
+
+  test('without any question type chosen, the game cannot start', () => {
+    mockApi();
+    render(<StadiumGame user={APPROVED} />);
+    for (const t of ['Multiple choice', 'True / False', 'Short answer']) fireEvent.click(screen.getByRole('button', { name: t }));
+    expect(screen.getByRole('button', { name: /Start the Game/i })).toBeDisabled();
   });
 
   test('the library source is disabled to start until a set is available', async () => {
@@ -205,14 +259,15 @@ describe('StadiumGame — managing custom questions', () => {
 // ─── Playing a round ──────────────────────────────────────────────────────────
 
 describe('StadiumGame — playing', () => {
-  function start() {
-    mockApi();
+  async function start(routes) {
+    mockApi(routes);
     render(<StadiumGame user={APPROVED} />);
     fireEvent.click(screen.getByRole('button', { name: /Start the Game/i }));
+    await screen.findByText(/Turn!/);
   }
 
-  test("shows the first team's turn and lets them draw a question", () => {
-    start();
+  test("shows the first team's turn and lets them draw a question", async () => {
+    await start();
     expect(screen.getByText(/Red Eagles.*Turn/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Draw a Bible Question/i }));
 
@@ -230,7 +285,7 @@ describe('StadiumGame — playing', () => {
   }
 
   test('answering moves on to the result panel either way', async () => {
-    start();
+    await start();
     fireEvent.click(screen.getByRole('button', { name: /Draw a Bible Question/i }));
     answerCurrentQuestion();
 
@@ -248,6 +303,7 @@ describe('StadiumGame — playing', () => {
     // advances by the minimum, 2 squares, so no special square is ever hit).
     fireEvent.click(screen.getByRole('button', { name: '5' }));
     fireEvent.click(screen.getByRole('button', { name: /Start the Game/i }));
+    await screen.findByText(/Turn!/);
 
     for (let turn = 0; turn < 10; turn++) {
       fireEvent.click(screen.getByRole('button', { name: /Draw a Bible Question/i }));
@@ -258,5 +314,62 @@ describe('StadiumGame — playing', () => {
     expect(screen.getByText('Final Standings')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /Play Again/i }));
     expect(screen.getByText('Bible Bowl Stadium')).toBeInTheDocument();
+  });
+});
+
+describe('StadiumGame — the classroom', () => {
+  test('a harder question moves a team further, and says where the answer is found', async () => {
+    mockApi({ bankQuestions: { success: true, questions: [{ ...BANK_QS[0], difficulty: 'hard' }] } });
+    render(<StadiumGame user={APPROVED} />);
+    fireEvent.click(screen.getByRole('button', { name: /Start the Game/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Draw a Bible Question/i }));
+    expect(screen.getByText(/Hard · 4 squares/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Noah/ }));
+    expect(screen.getByText(/Genesis 6:14/)).toBeInTheDocument();
+    expect(await screen.findByText(/Correct! \+4 spaces/)).toBeInTheDocument();
+  });
+
+  test('a short answer is the teacher\'s to mark, with the expected answer shown after', async () => {
+    mockApi({ bankQuestions: { success: true, questions: [
+      { id: 'exodus-10', section: 'exodus', type: 'short', difficulty: 'easy', ref: 'Exodus 15:20', question: 'What was the name of Moses\' sister?', answer: 'Miriam', accept: ['Miriam'] },
+    ] } });
+    render(<StadiumGame user={APPROVED} />);
+    fireEvent.click(screen.getByRole('button', { name: /Start the Game/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Draw a Bible Question/i }));
+    expect(screen.queryByText('Miriam')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /✓ Correct/ }));
+    expect(screen.getByText('Miriam')).toBeInTheDocument();
+  });
+
+  test('a true/false question marks itself', async () => {
+    mockApi({ bankQuestions: { success: true, questions: [
+      { id: 'kings-8', section: 'kings', type: 'tf', difficulty: 'easy', ref: '1 Kings 6:1, 14', question: 'King David built the first temple in Jerusalem.', answer: 'false' },
+    ] } });
+    render(<StadiumGame user={APPROVED} />);
+    fireEvent.click(screen.getByRole('button', { name: /Start the Game/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Draw a Bible Question/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'True' }));
+    expect(await screen.findByText(/Incorrect/)).toBeInTheDocument();
+  });
+
+  test('a team\'s players are called up in turn', async () => {
+    mockApi();
+    render(<StadiumGame user={APPROVED} />);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Players on Red Eagles' }), { target: { value: 'Ann\nBen\n' } });
+    fireEvent.click(screen.getByRole('button', { name: /Start the Game/i }));
+    expect(await screen.findByText(/Ann, you're up!/)).toBeInTheDocument();
+    async function takeTurn() {
+      fireEvent.click(screen.getByRole('button', { name: /Draw a Bible Question/i }));
+      fireEvent.click(screen.getByText('A', { selector: 'span' }).closest('button'));
+      fireEvent.click(await screen.findByRole('button', { name: /Next Team|Take Another Turn/i }));
+    }
+    await takeTurn();                      // Red Eagles: Ann
+    expect(screen.getByText(/Blue Lions's Turn/)).toBeInTheDocument();
+    expect(screen.queryByText(/you're up!/)).not.toBeInTheDocument();
+    await takeTurn();                      // Blue Lions, nobody named
+    expect(screen.getByText(/Ben, you're up!/)).toBeInTheDocument();
+    await takeTurn();
+    await takeTurn();
+    expect(screen.getByText(/Ann, you're up!/)).toBeInTheDocument();
   });
 });

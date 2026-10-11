@@ -69,6 +69,8 @@ const NOT_FILLED = {
   workflow_participants: 'Who may see a workflow, which is earned by taking part. Sample follow-ups are not aimed at a real account, so nobody is a participant in one.',
   notifications: 'Somebody\'s bell. An entry here tells a real person about something, so sample data would be telling them about a meeting that was never called.',
   bug_reports: 'A member saying something is actually broken. Inventing one would be reporting a bug that never happened, which is exactly what this feature exists to tell apart from a real one.',
+  bible_quiz_games: 'A member\'s own single-player Bible quiz games. Sample games would have to belong to a real account, putting real members on the leaderboard with scores they never earned.',
+  bible_quiz_answers: 'Each answer in those games, which is what the leaderboard adds up. The same reason: a made-up answer is a made-up score for a real member.',
   seed_batches: 'The record of what sample data made.',
   seed_records: 'The record of what sample data made.',
 };
