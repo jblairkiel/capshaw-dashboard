@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { hasWriteAccess } from '../lib/roles';
+import QuizFlag from './QuizFlag';
 
 // ─── The question bank ────────────────────────────────────────────────────────
 //
@@ -23,7 +24,7 @@ function shuffle(list) {
 }
 
 function bankToGame(q) {
-  const base = { difficulty: q.difficulty, ref: q.ref };
+  const base = { id: q.id, difficulty: q.difficulty, ref: q.ref };
   if (q.type === 'mc') {
     const a = shuffle(q.options);
     return { ...base, q: q.question, a, c: a.indexOf(q.answer) };
@@ -656,7 +657,7 @@ function SetupScreen({ onStart, canWrite }) {
       <div className="card space-y-3">
         <h3 className="font-semibold text-church-navy">Question Source</h3>
         <div className="flex gap-1.5">
-          {[['bank', `📖 Question Bank${bankInfo ? ` (${bankInfo.total})` : ''}`], ['library', '📚 Library'], ['custom', '✏️ Custom']].map(([val, label]) => (
+          {[['bank', `📖 Question Bank${bankInfo ? ` (${bankInfo.total.toLocaleString('en-US')})` : ''}`], ['library', '📚 Library'], ['custom', '✏️ Custom']].map(([val, label]) => (
             <button key={val} onClick={() => setSource(val)}
               className={`flex-1 py-2.5 rounded-lg font-medium text-sm border-2 transition-all ${source === val ? 'bg-church-navy text-church-gold border-church-gold' : 'bg-white text-church-navy border-gray-200 hover:border-church-gold'}`}
             >{label}</button>
@@ -880,6 +881,9 @@ function QuestionCard({ question, selected, onAnswer, isBonus, player }) {
 
       {selected !== null && question.ref && (
         <p className="text-center text-xs text-gray-500">📖 {question.ref}</p>
+      )}
+      {selected !== null && question.id && (
+        <div className="text-center"><QuizFlag key={question.id} questionId={question.id} compact /></div>
       )}
     </div>
   );

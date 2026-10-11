@@ -143,3 +143,126 @@ describe('Bible Quiz — classroom', () => {
     expect(screen.getByRole('button', { name: '6 teams' })).toBeInTheDocument();
   });
 });
+
+describe('Bible Quiz — flagging a question', () => {
+  const wrongOnQ1 = { success: true, result: { answerId: 41, correct: false, points: 0, answer: 'Noah', ref: 'Genesis 6:14' }, game: game({ position: 1, question: Q2 }) };
+
+  test('after a wrong answer, it can be flagged as one that should have counted', async () => {
+    const fetchMock = mockApi([
+      bankRoute,
+      route('/api/bible-quiz/solo/7/answer', 'POST', wrongOnQ1),
+      route('/api/bible-quiz/solo', 'POST', { success: true, game: game() }),
+      route('/api/bible-quiz/flags', 'POST', { success: true, flag: { id: 3, status: 'open' } }),
+    ]);
+    render(<BibleQuizView user={{ role: 'approved' }} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Moses' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Flag this question/ }));
+    const form = screen.getByRole('group', { name: 'Flag this question' });
+    fireEvent.click(within(form).getByRole('radio', { name: 'My answer should have counted' }));
+    fireEvent.change(within(form).getByRole('textbox'), { target: { value: 'Moses built one too?' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Send flag' }));
+    expect(await screen.findByText(/Flagged — the Bible Quiz Keeper will look at it/)).toBeInTheDocument();
+    expect(sent(fetchMock, '/api/bible-quiz/flags')).toEqual({ questionId: 'genesis-1', reason: 'my-answer', note: 'Moses built one too?', answerId: 41 });
+  });
+
+  test('a right answer can be flagged, but not as one that should have counted', async () => {
+    mockApi([
+      bankRoute,
+      route('/api/bible-quiz/solo/7/answer', 'POST', { ...wrongOnQ1, result: { ...wrongOnQ1.result, correct: true, points: 1 } }),
+      route('/api/bible-quiz/solo', 'POST', { success: true, game: game() }),
+    ]);
+    render(<BibleQuizView user={{ role: 'approved' }} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Start' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Noah' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Flag this question/ }));
+    expect(screen.queryByRole('radio', { name: 'My answer should have counted' })).not.toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'The answer key is wrong' })).toBeChecked();
+    // "Something else" needs a note before it can be sent.
+    fireEvent.click(screen.getByRole('radio', { name: 'Something else' }));
+    expect(screen.getByRole('button', { name: 'Send flag' })).toBeDisabled();
+  });
+
+  test('a finished game lists every answer, and an earlier one can still be flagged', async () => {
+    const fetchMock = mockApi([
+      bankRoute,
+      route('/api/bible-quiz/solo/7/review', 'GET', { success: true, answers: [
+        { answerId: 41, questionId: 'genesis-1', question: 'Who built an ark?', type: 'mc', given: 'Moses', correct: false, points: 0, answer: 'Noah', ref: 'Genesis 6:14', flag: null },
+        { answerId: 42, questionId: 'jesus-14', question: 'How many days did Jesus fast in the wilderness?', type: 'short', given: '40', correct: true, points: 1, answer: 'Forty', ref: 'Matthew 4:2', flag: 'open' },
+      ] }),
+      route('/api/bible-quiz/solo/7', 'GET', { success: true, game: game({ position: 2, finished: false, question: Q2 }) }),
+      route('/api/bible-quiz/leaderboard', 'GET', LEADERS),
+      route('/api/bible-quiz/flags', 'POST', { success: true, flag: { id: 4, status: 'open' } }),
+      route('/api/bible-quiz/solo/7/answer', 'POST', { success: true, result: { answerId: 43, correct: true, points: 1, answer: 'Forty', ref: 'Matthew 4:2' }, game: game({ position: 2, finished: true, question: null, score: 1, correct: 1 }) }),
+    ]);
+    localStorage.setItem('bibleQuiz.soloGame', '7');
+    render(<BibleQuizView user={{ role: 'approved' }} />);
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Your answer' }), { target: { value: '40' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Answer' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'See how you did' }));
+
+    const review = await screen.findByRole('region', { name: 'Your answers' });
+    const items = within(review).getAllByRole('listitem');
+    expect(items[0]).toHaveTextContent('✗ You said: Moses');
+    expect(items[0]).toHaveTextContent('Answer: Noah');
+    expect(items[0]).toHaveTextContent('Genesis 6:14');
+    // One already flagged says so.
+    expect(within(items[1]).getByText(/Flagged/)).toBeInTheDocument();
+    fireEvent.click(within(items[0]).getByRole('button', { name: /Flag this question/ }));
+    fireEvent.click(within(items[0]).getByRole('button', { name: 'Send flag' }));
+    await waitFor(() => expect(sent(fetchMock, '/api/bible-quiz/flags')).toEqual({ questionId: 'genesis-1', reason: 'answer-wrong', note: '', answerId: 41 }));
+  });
+});
+
+describe('Bible Quiz — the Bible Quiz Keeper', () => {
+  const FLAG = {
+    id: 9, status: 'open', reason: 'my-answer', reasonLabel: 'My answer should have counted', note: 'I wrote forty days',
+    given: 'forty days', source: 'solo', by: 'Ann Adams', wasCorrect: false, creditable: true, retired: false,
+    question: { id: 'jesus-14', question: 'How many days did Jesus fast in the wilderness?', type: 'short', difficulty: 'easy', ref: 'Matthew 4:2', section: 'The Life of Jesus', options: null, answer: 'Forty', accept: ['Forty', '40'] },
+  };
+
+  test('only a keeper has the Flags tab, with how many are waiting', async () => {
+    mockApi([bankRoute]);
+    render(<BibleQuizView user={{ role: 'approved' }} />);
+    await screen.findByText(/500 questions/);
+    expect(screen.queryByRole('tab', { name: /Flags/ })).not.toBeInTheDocument();
+  });
+
+  test('sees each flag in full and credits an answer, with a word back', async () => {
+    const fetchMock = mockApi([
+      route('/api/bible-quiz/bank', 'GET', { ...BANK, canReview: true, openFlags: 1 }),
+      route('/api/bible-quiz/flags/9/decide', 'POST', { success: true, credited: 2, closed: 1, openFlags: 0, flag: { ...FLAG, status: 'credited' } }),
+      { match: (u, m) => u.startsWith('/api/bible-quiz/flags?status=open') && m === 'GET', body: () => ({ success: true, flags: fetchMock.mock.calls.some(([u]) => String(u).includes('/decide')) ? [] : [FLAG], openFlags: fetchMock.mock.calls.some(([u]) => String(u).includes('/decide')) ? 0 : 1 }) },
+    ]);
+    render(<BibleQuizView user={{ role: 'approved' }} />);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Flags (1)' }));
+    const card = await screen.findByRole('listitem', { name: /Flag on How many days/ });
+    expect(card).toHaveTextContent('Answer key: Forty');
+    expect(card).toHaveTextContent('also counts: 40');
+    expect(card).toHaveTextContent('My answer should have counted');
+    expect(card).toHaveTextContent('Their answer: forty days (marked wrong)');
+    expect(card).toHaveTextContent('I wrote forty days');
+    fireEvent.change(within(card).getByRole('textbox', { name: /Reply to the member/ }), { target: { value: 'Fair enough.' } });
+    fireEvent.click(within(card).getByRole('button', { name: 'Credit this answer' }));
+    expect(await screen.findByText('Credited — 2 answers put right.')).toBeInTheDocument();
+    expect(sent(fetchMock, '/api/bible-quiz/flags/9/decide')).toEqual({ action: 'credit', response: 'Fair enough.' });
+    expect(await screen.findByText('Nothing flagged right now.')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Flags' })).toBeInTheDocument();
+  });
+
+  test('can put a question taken out of play back', async () => {
+    const fetchMock = mockApi([
+      route('/api/bible-quiz/bank', 'GET', { ...BANK, canReview: true, openFlags: 0 }),
+      route('/api/bible-quiz/flags', 'GET', { success: true, flags: [], openFlags: 0 }),
+      route('/api/bible-quiz/retired/genesis-1', 'DELETE', { success: true }),
+      route('/api/bible-quiz/retired', 'GET', { success: true, retired: [{ questionId: 'genesis-1', question: 'Who built an ark?', ref: 'Genesis 6:14', reason: 'Rewording', by: 'Kit', at: '2026-10-11' }] }),
+    ]);
+    render(<BibleQuizView user={{ role: 'approved' }} />);
+    fireEvent.click(await screen.findByRole('tab', { name: 'Flags' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Out of play' }));
+    expect(await screen.findByText('Who built an ark?')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Put back' }));
+    expect(await screen.findByText('Put back into play.')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([u, o]) => String(u) === '/api/bible-quiz/retired/genesis-1' && o?.method === 'DELETE')).toBe(true);
+  });
+});

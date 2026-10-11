@@ -1,6 +1,6 @@
 // ─── The Bible quiz question bank ─────────────────────────────────────────────
 //
-// Five hundred questions in twelve sections, each multiple choice, true/false
+// A thousand questions in twenty-three sections, each multiple choice, true/false
 // or short answer, and easy, medium or hard. The classroom game reads them with
 // their answers (the teacher is running it); the single-player game hands them
 // out one at a time without the answer and grades on the server, so the
@@ -9,6 +9,9 @@
 const SECTION_FILES = [
   'genesis', 'exodus', 'conquest', 'kings', 'prophets', 'wisdom',
   'jesus', 'teachings', 'acts', 'letters', 'books', 'sayings',
+  // The second five hundred.
+  'women', 'miracles', 'places', 'numbers', 'divided', 'families',
+  'paul', 'words', 'passion', 'hebrews', 'memory',
 ];
 
 const TYPES = ['mc', 'tf', 'short'];

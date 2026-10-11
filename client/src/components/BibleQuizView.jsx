@@ -1,13 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import StadiumGame from './StadiumGame';
+import QuizFlag from './QuizFlag';
 
 // ─── Bible Quiz ───────────────────────────────────────────────────────────────
 //
-// The church's 500 Bible quiz questions, three ways:
+// The church's 1,000 Bible quiz questions, three ways:
 //   - Single player: a game of 10 or 20, marked on the server, scored by
 //     difficulty (easy 1, medium 2, hard 3) — and every point counts toward
 //   - the Leaderboard of all members, for all time or this month;
 //   - Classroom: the teacher sets up teams to race around the stadium.
+// Any question can be flagged as looking wrong; whoever keeps the quiz sees
+// the flags on a fourth tab and decides each one.
 
 const API = '/api/bible-quiz';
 const LEVELS = [['mixed', 'Mixed'], ['easy', 'Easy'], ['medium', 'Medium'], ['hard', 'Hard']];
@@ -183,6 +186,7 @@ function SoloQuestion({ game, onAnswered }) {
           <p className="text-xs opacity-80">📖 {result.ref}</p>
         </div>
       )}
+      {result && <QuizFlag key={q.id} questionId={q.id} answerId={result.answerId} wasWrong={!result.correct} />}
       {result && (
         <div className="flex justify-end">
           <button type="button" onClick={() => onAnswered(next)} className="btn-primary px-5" autoFocus>
@@ -191,6 +195,33 @@ function SoloQuestion({ game, onAnswered }) {
         </div>
       )}
     </div>
+  );
+}
+
+// Every question in the game, looked back over: what you said, the answer,
+// where it is found — and a flag for any that look wrong.
+function GameReview({ gameId }) {
+  const [answers, setAnswers] = useState(null);
+  useEffect(() => { send(`${API}/solo/${gameId}/review`).then(j => setAnswers(j.answers)).catch(() => setAnswers([])); }, [gameId]);
+  if (!answers?.length) return null;
+  const shown = (a, value) => (a.type === 'tf' ? (value === 'true' ? 'True' : 'False') : value);
+  return (
+    <section className="text-left space-y-2 pt-2" aria-label="Your answers">
+      <h4 className="text-sm font-semibold text-church-navy">Your answers</h4>
+      <ol className="space-y-2">
+        {answers.map((a, i) => (
+          <li key={a.answerId} className={`rounded-lg border p-3 text-sm ${a.correct ? 'border-emerald-200 bg-emerald-50/50' : 'border-red-200 bg-red-50/50'}`}>
+            <p className="font-medium text-church-navy">{i + 1}. {a.question}</p>
+            <p className="text-xs mt-1">
+              <span className={a.correct ? 'text-emerald-700' : 'text-red-700'}>{a.correct ? '✓' : '✗'} You said: {shown(a, a.given)}</span>
+              {!a.correct && <span className="text-gray-700"> · Answer: <strong>{shown(a, a.answer)}</strong></span>}
+              <span className="text-gray-500"> · 📖 {a.ref}</span>
+            </p>
+            <QuizFlag questionId={a.questionId} answerId={a.answerId} wasWrong={!a.correct} flagged={a.flag === 'open' ? a.flag : null} compact />
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 
@@ -213,6 +244,7 @@ function SoloFinished({ game, onAgain, onLeaderboard }) {
         <button type="button" onClick={onAgain} className="btn-primary px-5">Play again</button>
         <button type="button" onClick={onLeaderboard} className="px-4 py-2 rounded-lg border border-church-navy text-church-navy text-sm hover:bg-church-navy hover:text-white">Leaderboard</button>
       </div>
+      <GameReview gameId={game.id} />
     </div>
   );
 }
@@ -322,6 +354,140 @@ function Leaderboard() {
   );
 }
 
+// ─── Flags, for the Bible Quiz Keeper ─────────────────────────────────────────
+
+const STATUS_LABEL = { credited: 'Answer credited', retired: 'Taken out of play', fixed: 'Marked fixed', dismissed: 'Dismissed' };
+
+function FlagCard({ flag, onDecided }) {
+  const [response, setResponse] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const q = flag.question;
+
+  async function decide(action) {
+    setBusy(true); setError('');
+    try {
+      const json = await send(`${API}/flags/${flag.id}/decide`, { method: 'POST', body: JSON.stringify({ action, response }) });
+      onDecided(json);
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  const answerText = q && (q.type === 'tf' ? (q.answer === 'true' ? 'True' : 'False') : q.answer);
+  return (
+    <li className="card space-y-2" aria-label={`Flag on ${q?.question || flag.id}`}>
+      <div className="flex items-start justify-between gap-2 flex-wrap">
+        <p className="text-xs text-gray-500">{q?.section} · {q?.difficulty} · {q?.ref}{flag.retired ? ' · out of play' : ''}</p>
+        <p className="text-xs text-gray-500">{flag.by || 'A member'} · {flag.source === 'classroom' ? 'classroom' : 'single player'}</p>
+      </div>
+      <p className="font-semibold text-church-navy">{q?.question}</p>
+      {q?.options && <p className="text-xs text-gray-600">Choices: {q.options.join(' · ')}</p>}
+      <p className="text-sm">Answer key: <strong>{answerText}</strong>{q?.accept?.length > 1 ? <span className="text-xs text-gray-500"> (also counts: {q.accept.slice(1).join(', ')})</span> : null}</p>
+      <div className="rounded-lg bg-amber-50 border border-amber-100 p-2 text-sm">
+        <p><strong>{flag.reasonLabel}</strong></p>
+        {flag.given && <p className="text-xs">Their answer: <strong>{q?.type === 'tf' ? (flag.given === 'true' ? 'True' : 'False') : flag.given}</strong>{flag.wasCorrect === false ? ' (marked wrong)' : ''}</p>}
+        {flag.note && <p className="text-xs text-gray-700 mt-0.5">“{flag.note}”</p>}
+      </div>
+      {flag.status === 'open' ? (
+        <>
+          <textarea rows={2} value={response} onChange={e => setResponse(e.target.value)} maxLength={500} aria-label="Reply to the member (optional)"
+            placeholder="A word back to the member (optional)" className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm" />
+          {error && <p className="text-xs text-red-600" role="alert">{error}</p>}
+          <div className="flex flex-wrap gap-2">
+            {flag.creditable && (
+              <button type="button" disabled={busy} onClick={() => decide('credit')} className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white disabled:opacity-50"
+                title="Mark this answer right for everyone who gave it, and count it from now on">Credit this answer</button>
+            )}
+            <button type="button" disabled={busy} onClick={() => decide('retire')} className="text-xs px-3 py-1.5 rounded-lg border border-red-300 text-red-700 disabled:opacity-50">Take out of play</button>
+            <button type="button" disabled={busy} onClick={() => decide('fixed')} className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 disabled:opacity-50">Mark fixed</button>
+            <button type="button" disabled={busy} onClick={() => decide('dismiss')} className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 disabled:opacity-50">Dismiss</button>
+          </div>
+        </>
+      ) : (
+        <p className="text-xs text-gray-600">
+          <strong>{STATUS_LABEL[flag.status] || flag.status}</strong>{flag.status === 'credited' && flag.credited ? ` · ${flag.credited} answer${flag.credited === 1 ? '' : 's'} put right` : ''}
+          {flag.decidedBy ? ` by ${flag.decidedBy}` : ''}{flag.response ? ` — “${flag.response}”` : ''}
+        </p>
+      )}
+    </li>
+  );
+}
+
+function FlagsReview({ onCount }) {
+  const [view, setView] = useState('open');
+  const [flags, setFlags] = useState(null);
+  const [retired, setRetired] = useState(null);
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+
+  const load = useCallback(() => {
+    setError('');
+    if (view === 'retired') {
+      send(`${API}/retired`).then(j => setRetired(j.retired)).catch(e => setError(e.message));
+    } else {
+      send(`${API}/flags?status=${view}`).then(j => { setFlags(j.flags); onCount(j.openFlags); }).catch(e => setError(e.message));
+    }
+  }, [view, onCount]);
+  useEffect(() => { setFlags(null); setRetired(null); load(); }, [load]);
+
+  async function restore(id) {
+    try { await send(`${API}/retired/${encodeURIComponent(id)}`, { method: 'DELETE' }); setNotice('Put back into play.'); load(); }
+    catch (err) { setError(err.message); }
+  }
+
+  return (
+    <div className="space-y-3 max-w-2xl mx-auto">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h3 className="section-heading mb-0">Flagged questions</h3>
+        <div className="flex gap-1" role="group" aria-label="Show">
+          {[['open', 'Waiting'], ['decided', 'Decided'], ['retired', 'Out of play']].map(([val, label]) => (
+            <button key={val} type="button" onClick={() => { setView(val); setNotice(''); }} aria-pressed={view === val}
+              className={`px-3 py-1.5 rounded-lg text-sm border ${view === val ? 'bg-church-navy text-white border-church-navy' : 'bg-white text-gray-600 border-gray-300'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="text-xs text-gray-500">
+        <strong>Credit this answer</strong> marks it right for everyone who gave it, with their points, and counts it from now on.
+        {' '}<strong>Take out of play</strong> keeps the question out of every game until it is put back.
+        The member who flagged it is told what you decided.
+      </p>
+      {notice && <p className="text-xs px-3 py-1.5 rounded-lg bg-green-50 text-green-700" role="status">{notice}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {view !== 'retired' && !flags && !error && <p className="text-sm text-gray-400">Loading…</p>}
+      {view !== 'retired' && flags?.length === 0 && <p className="card text-sm text-gray-500 text-center py-8">{view === 'open' ? 'Nothing flagged right now.' : 'Nothing decided yet.'}</p>}
+      {view !== 'retired' && flags?.length > 0 && (
+        <ul className="space-y-3">
+          {flags.map(f => (
+            <FlagCard key={f.id} flag={f} onDecided={json => {
+              setNotice(json.credited ? `Credited — ${json.credited} answer${json.credited === 1 ? '' : 's'} put right.` : `${STATUS_LABEL[json.flag.status]}.${json.closed > 1 ? ` ${json.closed} flags on it closed.` : ''}`);
+              load();
+            }} />
+          ))}
+        </ul>
+      )}
+      {view === 'retired' && retired && (retired.length === 0
+        ? <p className="card text-sm text-gray-500 text-center py-8">No questions are out of play.</p>
+        : (
+          <ul className="space-y-2">
+            {retired.map(r => (
+              <li key={r.questionId} className="card flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-church-navy">{r.question}</p>
+                  <p className="text-xs text-gray-500">📖 {r.ref}{r.by ? ` · by ${r.by}` : ''}{r.reason ? ` — “${r.reason}”` : ''}</p>
+                </div>
+                <button type="button" onClick={() => restore(r.questionId)} className="text-xs px-3 py-1.5 rounded-lg border border-church-navy text-church-navy shrink-0">Put back</button>
+              </li>
+            ))}
+          </ul>
+        ))}
+    </div>
+  );
+}
+
 // ─── The page ─────────────────────────────────────────────────────────────────
 
 const MODES = [
@@ -333,18 +499,20 @@ const MODES = [
 export default function BibleQuizView({ user }) {
   const [mode, setMode] = useState('solo');
   const [bank, setBank] = useState(null);
+  const [openFlags, setOpenFlags] = useState(0);
 
-  useEffect(() => { send(`${API}/bank`).then(setBank).catch(() => {}); }, []);
+  useEffect(() => { send(`${API}/bank`).then(j => { setBank(j); setOpenFlags(j.openFlags || 0); }).catch(() => {}); }, []);
+  const modes = bank?.canReview ? [...MODES, ['flags', `Flags${openFlags ? ` (${openFlags})` : ''}`]] : MODES;
 
   return (
     <div className="space-y-4">
       <div className="text-center space-y-1">
         <h2 className="text-2xl font-bold text-church-navy">Bible Quiz</h2>
-        <p className="text-sm text-gray-500">{bank ? `${bank.total} questions` : 'Hundreds of questions'} from Genesis to Revelation — easy, medium and hard.</p>
+        <p className="text-sm text-gray-500">{bank ? `${bank.total.toLocaleString('en-US')} questions` : 'Hundreds of questions'} from Genesis to Revelation — easy, medium and hard.</p>
       </div>
       <div className="flex justify-center">
-        <div className="inline-flex rounded-xl border border-gray-200 bg-white p-1 gap-1" role="tablist" aria-label="Mode">
-          {MODES.map(([val, label]) => (
+        <div className="inline-flex flex-wrap justify-center rounded-xl border border-gray-200 bg-white p-1 gap-1" role="tablist" aria-label="Mode">
+          {modes.map(([val, label]) => (
             <button key={val} type="button" role="tab" aria-selected={mode === val} onClick={() => setMode(val)}
               className={`px-3 sm:px-4 py-2 rounded-lg text-sm font-medium ${mode === val ? 'bg-church-navy text-church-gold' : 'text-gray-600 hover:text-church-navy'}`}>
               {label}
@@ -355,6 +523,7 @@ export default function BibleQuizView({ user }) {
       {mode === 'solo' && <SoloPlay bank={bank} onLeaderboard={() => setMode('leaderboard')} />}
       {mode === 'classroom' && <StadiumGame user={user} />}
       {mode === 'leaderboard' && <Leaderboard />}
+      {mode === 'flags' && bank?.canReview && <FlagsReview onCount={setOpenFlags} />}
     </div>
   );
 }

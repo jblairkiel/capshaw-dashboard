@@ -41,12 +41,14 @@ function normalize(value) {
   return s;
 }
 
-function isCorrect(question, given) {
+// `extra` is any more answers the Bible Quiz Keeper has said should count for
+// a short-answer question (lib/bibleQuiz/review.js).
+function isCorrect(question, given, extra = []) {
   if (question.type === 'mc') return String(given) === question.answer;
   if (question.type === 'tf') return String(given).toLowerCase() === question.answer;
   const said = normalize(given);
   if (!said) return false;
-  return question.accept.some(a => normalize(a) === said);
+  return [...question.accept, ...extra].some(a => normalize(a) === said);
 }
 
 module.exports = { normalize, isCorrect };

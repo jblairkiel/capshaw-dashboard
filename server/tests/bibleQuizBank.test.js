@@ -1,14 +1,14 @@
-// The Bible quiz question bank: five hundred questions, every type at every
+// The Bible quiz question bank: a thousand questions, every type at every
 // difficulty, and each one well formed — a malformed question would only show
 // up in front of a class.
 const bank = require('../lib/bibleQuiz/bank');
 const { normalize, isCorrect } = require('../lib/bibleQuiz/grade');
 
 describe('the question bank', () => {
-  test('has five hundred questions, each with its own id and its own wording', () => {
-    expect(bank.QUESTIONS).toHaveLength(500);
-    expect(new Set(bank.QUESTIONS.map(q => q.id)).size).toBe(500);
-    expect(new Set(bank.QUESTIONS.map(q => normalize(q.question))).size).toBe(500);
+  test('has a thousand questions, each with its own id and its own wording', () => {
+    expect(bank.QUESTIONS).toHaveLength(1000);
+    expect(new Set(bank.QUESTIONS.map(q => q.id)).size).toBe(1000);
+    expect(new Set(bank.QUESTIONS.map(q => normalize(q.question))).size).toBe(1000);
   });
 
   test('every type at every difficulty, enough of each difficulty for a full game', () => {
@@ -20,7 +20,7 @@ describe('the question bank', () => {
   });
 
   test('every section has questions at every difficulty', () => {
-    expect(bank.SECTIONS).toHaveLength(12);
+    expect(bank.SECTIONS).toHaveLength(23);
     for (const s of bank.SECTIONS) {
       for (const d of bank.DIFFICULTIES) {
         expect([s.id, d, bank.QUESTIONS.some(q => q.section === s.id && q.difficulty === d)]).toEqual([s.id, d, true]);
@@ -57,13 +57,13 @@ describe('the question bank', () => {
   });
 
   test('filters by difficulty, section and type, and "all" when nothing is chosen', () => {
-    expect(bank.filter()).toHaveLength(500);
+    expect(bank.filter()).toHaveLength(1000);
     const hardJesus = bank.filter({ difficulty: 'hard', sections: ['jesus'] });
     expect(hardJesus.length).toBeGreaterThan(0);
     expect(hardJesus.every(q => q.difficulty === 'hard' && q.section === 'jesus')).toBe(true);
     expect(bank.filter({ types: ['tf'] }).every(q => q.type === 'tf')).toBe(true);
     // Nonsense in a filter is ignored rather than matching nothing.
-    expect(bank.filter({ difficulty: 'impossible', sections: ['nowhere'], types: ['essay'] })).toHaveLength(500);
+    expect(bank.filter({ difficulty: 'impossible', sections: ['nowhere'], types: ['essay'] })).toHaveLength(1000);
   });
 });
 

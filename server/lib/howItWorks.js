@@ -217,10 +217,12 @@ const SECTIONS = [
   {
     id: 'bible-quiz', title: 'Bible Quiz', audience: 'everyone',
     blocks: [
-      { p: '**Grow → Bible Class → Bible Quiz** has 500 questions from Genesis to Revelation — multiple choice, true or false, and short answer — each one easy, medium or hard, and each telling you where in the Bible its answer is.' },
+      { p: '**Grow → Bible Class → Bible Quiz** has 1,000 questions from Genesis to Revelation, in 23 sections from the Patriarchs to Memory Verses — multiple choice, true or false, and short answer — each one easy, medium or hard, and each telling you where in the Bible its answer is.' },
       { p: '**Single player.** Choose a difficulty (or mixed), 10 or 20 questions, and any sections you like, then **Start**. A right answer is worth 1 point on easy, 2 on medium and 3 on hard. Short answers are marked for you: capitals, punctuation and "forty" or "40" do not matter. The game favors questions you have not seen yet, and one you leave part way through carries on next time you open it.' },
       { p: '**Leaderboard.** Every member who has played, ranked by points, for all time or this month, with how often they are right and their best game. Every answer counts, so stopping a game early never helps anyone.' },
       { p: '**Classroom (teams).** The teacher sets up 2 to 6 teams, with the players on each if they like — the game then calls each player up in turn. Choose the difficulty, sections and question types, and the teams race around the Bible Bowl Stadium: a right answer moves 2 squares on an easy question, 3 on medium, 4 on hard. Short answers are read aloud and the teacher marks them, with the expected answer shown.' },
+      { p: '**Flagging a question.** If a question looks wrong — the answer key, an answer of yours that should have counted, or the wording — choose **Flag this question** after answering it, or from **Your answers** at the end of a game, which lists every question with what you said and the right answer. A teacher can flag one from the classroom game too. You are told what was decided.' },
+      { p: 'Whoever holds **Bible Quiz Keeper** sees the flags on a **Flags** tab. **Credit this answer** marks it right for everyone who gave it, puts their points right on the leaderboard, and counts it from then on. **Take out of play** keeps a question out of every game until it is put back; **Mark fixed** and **Dismiss** answer the flag without changing anything.' },
       { chart: flow('A single-player game', ['Choose difficulty and length', 'Answer each question', 'See the answer and verse', 'Climb the leaderboard']) },
     ],
   },

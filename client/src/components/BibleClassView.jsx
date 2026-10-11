@@ -73,7 +73,7 @@ const APPS = [
   {
     id:          'stadium-game',
     title:       'Bible Quiz',
-    description: '500 questions from Genesis to Revelation. Play on your own for the members\' leaderboard, or set up teams to race around the Bible Bowl Stadium in class.',
+    description: '1,000 questions from Genesis to Revelation. Play on your own for the members\' leaderboard, or set up teams to race around the Bible Bowl Stadium in class.',
     component:   BibleQuizView,
     available:   true,
     icon: (

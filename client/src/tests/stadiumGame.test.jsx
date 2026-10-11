@@ -352,6 +352,23 @@ describe('StadiumGame — the classroom', () => {
     expect(await screen.findByText(/Incorrect/)).toBeInTheDocument();
   });
 
+  test('a question from the bank can be flagged after it is answered, against the question alone', async () => {
+    const fetchMock = mockApi();
+    render(<StadiumGame user={APPROVED} />);
+    fireEvent.click(screen.getByRole('button', { name: /Start the Game/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Draw a Bible Question/i }));
+    expect(screen.queryByRole('button', { name: /Flag this question/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('A', { selector: 'span' }).closest('button'));
+    fireEvent.click(screen.getByRole('button', { name: /Flag this question/ }));
+    // There is no answer of a member's to say should have counted.
+    expect(screen.queryByRole('radio', { name: 'My answer should have counted' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: 'The question is unclear' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send flag' }));
+    expect(await screen.findByText(/Flagged — the Bible Quiz Keeper/)).toBeInTheDocument();
+    const call = fetchMock.mock.calls.find(([u, o]) => u === '/api/bible-quiz/flags' && o?.method === 'POST');
+    expect(JSON.parse(call[1].body)).toEqual({ questionId: expect.stringMatching(/^(genesis|jesus)-1$/), reason: 'unclear', note: '' });
+  });
+
   test('a team\'s players are called up in turn', async () => {
     mockApi();
     render(<StadiumGame user={APPROVED} />);

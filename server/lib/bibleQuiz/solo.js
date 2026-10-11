@@ -10,6 +10,7 @@
 const db = require('../../db');
 const bank = require('./bank');
 const { isCorrect } = require('./grade');
+const review = require('./review');
 
 const LENGTHS = [10, 20];
 const DIFFICULTY_CHOICES = ['mixed', ...bank.DIFFICULTIES];
@@ -56,7 +57,10 @@ function start(user, { difficulty = 'mixed', count = 10, sections = [] } = {}) {
   const secs = (Array.isArray(sections) ? sections : [])
     .filter(s => typeof s === 'string' && bank.SECTIONS.some(x => x.id === s));
 
-  const pool = bank.filter({ difficulty: difficulty === 'mixed' ? null : difficulty, sections: secs });
+  // Never a question the Bible Quiz Keeper has taken out of play.
+  const retired = review.retiredIds();
+  const pool = bank.filter({ difficulty: difficulty === 'mixed' ? null : difficulty, sections: secs })
+    .filter(q => !retired.has(q.id));
   if (pool.length < n) return { error: `Only ${pool.length} questions match that — choose more sections or a shorter game` };
 
   // Least seen first, at random among equals, so a regular player works
@@ -96,17 +100,18 @@ function answer(user, id, { questionId, answer: given } = {}, today) {
   if (!q || String(questionId) !== q.id) return { error: 'That is not the question being asked', status: 409 };
   if (given === undefined || given === null || String(given).trim() === '') return { error: 'Give an answer' };
 
-  const right = isCorrect(q, given);
+  const right = isCorrect(q, given, q.type === 'short' ? review.extraAccepts(q.id) : []);
   const points = right ? bank.POINTS[q.difficulty] : 0;
   const streak = right ? game.streak + 1 : 0;
   const position = game.position + 1;
   const done = position >= list.length;
 
+  let answerId = null;
   db.transaction(() => {
-    db.prepare(`
+    answerId = Number(db.prepare(`
       INSERT INTO bible_quiz_answers (game_id, user_id, question_id, given, correct, points, answered_on)
       VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(game.id, user.id, q.id, String(given).slice(0, 200), right ? 1 : 0, points, today);
+    `).run(game.id, user.id, q.id, String(given).slice(0, 200), right ? 1 : 0, points, today).lastInsertRowid);
     db.prepare(`
       UPDATE bible_quiz_games
          SET position = ?, score = score + ?, correct = correct + ?, streak = ?,
@@ -117,6 +122,7 @@ function answer(user, id, { questionId, answer: given } = {}, today) {
 
   return {
     result: {
+      answerId,
       correct: right,
       points,
       answer: q.answer,
@@ -124,6 +130,30 @@ function answer(user, id, { questionId, answer: given } = {}, today) {
       ...(q.type === 'short' ? { given: String(given) } : {}),
     },
     game: view(gameRow(game.id)),
+  };
+}
+
+// Every question answered so far in a game, with what was given, the right
+// answer and where it is found — and whether this player has flagged it —
+// so a question from earlier in the game can be looked at again and flagged.
+function reviewGame(user, id) {
+  const game = mine(user, id);
+  if (!game) return { error: 'That game is not here', status: 404 };
+  const order = ids(game);
+  const answers = db.prepare('SELECT * FROM bible_quiz_answers WHERE game_id = ?').all(game.id);
+  const byQuestion = new Map(answers.map(a => [a.question_id, a]));
+  const flags = new Map(db.prepare('SELECT question_id, status FROM bible_quiz_flags WHERE user_id = ? ORDER BY id').all(user.id)
+    .map(f => [f.question_id, f.status]));
+  return {
+    answers: order.filter(qid => byQuestion.has(qid)).map(qid => {
+      const a = byQuestion.get(qid);
+      const q = bank.byId(qid);
+      return {
+        answerId: a.id, questionId: qid, question: q.question, type: q.type, difficulty: q.difficulty,
+        given: a.given, correct: !!a.correct, points: a.points, answer: q.answer, ref: q.ref,
+        flag: flags.get(qid) || null,
+      };
+    }),
   };
 }
 
@@ -166,4 +196,4 @@ function standing(user, { period = 'all', today } = {}) {
   return leaderboard({ period, today, limit: Infinity }).find(r => r.userId === user.id) || null;
 }
 
-module.exports = { LENGTHS, DIFFICULTY_CHOICES, start, get, answer, leaderboard, standing };
+module.exports = { LENGTHS, DIFFICULTY_CHOICES, start, get, answer, reviewGame, leaderboard, standing };
