@@ -2,7 +2,7 @@ import { useState } from 'react';
 import QuestionGenerator from './QuestionGenerator';
 import QuestionLibrary from './QuestionLibrary';
 import LessonPlanner from './LessonPlanner';
-import StadiumGame from './StadiumGame';
+import BibleQuizView from './BibleQuizView';
 
 // ─── App registry ─────────────────────────────────────────────────────────────
 
@@ -72,9 +72,9 @@ const APPS = [
   },
   {
     id:          'stadium-game',
-    title:       'Bible Bowl Stadium',
-    description: 'Race your team around the stadium by answering Bible trivia! First to 3 laps wins.',
-    component:   StadiumGame,
+    title:       'Bible Quiz',
+    description: '1,000 questions from Genesis to Revelation. Play on your own for the members\' leaderboard, or set up teams to race around the Bible Bowl Stadium in class.',
+    component:   BibleQuizView,
     available:   true,
     icon: (
       <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">

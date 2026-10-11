@@ -49,6 +49,12 @@ const AREAS = [
     description: 'Edit, close or delete anybody\'s sign-up list, add or take off anybody\'s name, email a distribution group about a list, and see the sign-up analytics.',
   },
   {
+    id:    'bible-quiz',
+    label: 'Bible Quiz Keeper',
+    page:  'Bible Class',
+    description: 'Review the Bible Quiz questions members flag: credit an answer that should have counted, take a question out of play, or mark a flag fixed or dismissed.',
+  },
+  {
     id:    'attendance',
     label: 'Attendance',
     page:  'Attendance',

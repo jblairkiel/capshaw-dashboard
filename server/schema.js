@@ -57,6 +57,82 @@ function initSchema(db) {
     created_at TEXT    NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- ── Bible quiz, single player ─────────────────────────────────────────────
+  -- A game is a set of questions from the bank (lib/bibleQuiz), dealt when it
+  -- starts and answered in order; every answer is kept, and the members'
+  -- leaderboard is the sum of them. A game left unfinished still counts what
+  -- was answered, so quitting a bad run gains nothing.
+  CREATE TABLE IF NOT EXISTS bible_quiz_games (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    difficulty   TEXT    NOT NULL DEFAULT 'mixed',
+    sections     TEXT    NOT NULL DEFAULT '[]',
+    question_ids TEXT    NOT NULL,
+    position     INTEGER NOT NULL DEFAULT 0,
+    score        INTEGER NOT NULL DEFAULT 0,
+    correct      INTEGER NOT NULL DEFAULT 0,
+    streak       INTEGER NOT NULL DEFAULT 0,
+    best_streak  INTEGER NOT NULL DEFAULT 0,
+    started_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    finished_at  TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_bible_quiz_games_user ON bible_quiz_games(user_id);
+
+  CREATE TABLE IF NOT EXISTS bible_quiz_answers (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id     INTEGER NOT NULL REFERENCES bible_quiz_games(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    question_id TEXT    NOT NULL,
+    given       TEXT    NOT NULL DEFAULT '',
+    correct     INTEGER NOT NULL DEFAULT 0,
+    points      INTEGER NOT NULL DEFAULT 0,
+    answered_on TEXT    NOT NULL,
+    answered_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(game_id, question_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_bible_quiz_answers_user ON bible_quiz_answers(user_id);
+
+  -- A member saying a question looks wrong: the answer key, their own answer
+  -- that should have counted, or the wording. The Bible Quiz Keeper decides:
+  -- credit the answer (to everybody who gave it), take the question out of
+  -- play, or mark the flag fixed or dismissed (lib/bibleQuiz/review.js).
+  CREATE TABLE IF NOT EXISTS bible_quiz_flags (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    question_id     TEXT    NOT NULL,
+    user_id         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    user_name       TEXT    NOT NULL DEFAULT '',
+    answer_id       INTEGER REFERENCES bible_quiz_answers(id) ON DELETE SET NULL,
+    given           TEXT    NOT NULL DEFAULT '',
+    source          TEXT    NOT NULL DEFAULT 'solo',
+    reason          TEXT    NOT NULL,
+    note            TEXT    NOT NULL DEFAULT '',
+    status          TEXT    NOT NULL DEFAULT 'open',
+    response        TEXT    NOT NULL DEFAULT '',
+    credited        INTEGER NOT NULL DEFAULT 0,
+    decided_by_name TEXT    NOT NULL DEFAULT '',
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    decided_at      TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_bible_quiz_flags_status ON bible_quiz_flags(status);
+
+  -- More answers that count for a short-answer question, added when the
+  -- keeper credits one; and questions taken out of play until they are fixed.
+  CREATE TABLE IF NOT EXISTS bible_quiz_accepts (
+    question_id   TEXT NOT NULL,
+    answer        TEXT NOT NULL,
+    normalized    TEXT NOT NULL,
+    added_by_name TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (question_id, normalized)
+  );
+
+  CREATE TABLE IF NOT EXISTS bible_quiz_retired (
+    question_id     TEXT PRIMARY KEY,
+    reason          TEXT NOT NULL DEFAULT '',
+    retired_by_name TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS users (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     provider    TEXT    NOT NULL,

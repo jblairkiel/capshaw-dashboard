@@ -84,6 +84,13 @@ export const AREAS = [
     tone:        'bg-stone-200 text-stone-800',
   },
   {
+    id:          'bible-quiz',
+    label:       'Bible Quiz Keeper',
+    page:        'Bible Class',
+    description: 'Review the Bible Quiz questions members flag: credit an answer that should have counted, take a question out of play, or mark a flag fixed or dismissed.',
+    tone:        'bg-purple-100 text-purple-800',
+  },
+  {
     id:          'attendance',
     label:       'Attendance',
     page:        'Attendance',
