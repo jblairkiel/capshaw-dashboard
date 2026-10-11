@@ -187,6 +187,11 @@ function createApp() {
       message: { success: false, error: 'Too many requests. Please wait a few minutes and try again.' },
     });
     app.use(staticRateLimit, express.static(clientDist));
+    // The privacy policy (client/public/privacy.html), at the short address
+    // given to Google and Facebook. It is public, like every static file.
+    app.get('/privacy', staticRateLimit, (req, res) => {
+      res.sendFile(path.join(clientDist, 'privacy.html'));
+    });
     app.get('*', staticRateLimit, (req, res) => {
       res.sendFile(path.join(clientDist, 'index.html'));
     });
