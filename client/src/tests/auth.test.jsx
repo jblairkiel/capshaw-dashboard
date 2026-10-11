@@ -10,24 +10,39 @@ import { hasWriteAccess, isAdmin, hasRole } from '../lib/roles';
 
 describe('LoginPage', () => {
   test('renders Google sign-in link pointing to /api/auth/google', () => {
-    render(<LoginPage />);
+    render(<LoginPage providers={['google', 'facebook']} />);
     const link = screen.getByRole('link', { name: /sign in with google/i });
     expect(link).toBeInTheDocument();
     expect(link.getAttribute('href')).toBe('/api/auth/google');
   });
 
   test('renders Facebook sign-in link pointing to /api/auth/facebook', () => {
-    render(<LoginPage />);
+    render(<LoginPage providers={['google', 'facebook']} />);
     const link = screen.getByRole('link', { name: /sign in with facebook/i });
     expect(link).toBeInTheDocument();
     expect(link.getAttribute('href')).toBe('/api/auth/facebook');
   });
 
   test('puts Google and Facebook above the email and password form', () => {
-    render(<LoginPage />);
+    render(<LoginPage providers={['google', 'facebook']} />);
     const google   = screen.getByRole('link', { name: /sign in with google/i });
     const password = screen.getByLabelText('Password');
     expect(google.compareDocumentPosition(password) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  test('shows only the providers that are set up', () => {
+    render(<LoginPage providers={['google']} />);
+    expect(screen.getByRole('link', { name: /sign in with google/i })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /sign in with facebook/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/Signing in with Google is the safer choice: it checks/)).toBeInTheDocument();
+  });
+
+  test('with no provider set up, offers just the email and password form', () => {
+    render(<LoginPage providers={[]} />);
+    expect(screen.queryByRole('link', { name: /sign in with/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/safer choice/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/or use an email address/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Password')).toBeInTheDocument();
   });
 
   test('welcomes the church family rather than staff', () => {
@@ -45,10 +60,13 @@ describe('LoginPage', () => {
 
 // ─── App — the site is signed-in only ─────────────────────────────────────────
 
-function mockApi(user) {
+function mockApi(user, providers = ['google', 'facebook']) {
   const fetchMock = vi.fn(url => {
     if (url.startsWith('/api/auth/me')) {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({ user }) });
+    }
+    if (url.startsWith('/api/auth/providers')) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true, providers }) });
     }
     return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true, data: null }) });
   });
@@ -65,6 +83,13 @@ describe('App — site-wide sign-in gate', () => {
     expect(await screen.findByRole('link', { name: /sign in with google/i })).toBeInTheDocument();
     expect(screen.queryByText(portalFooter)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /refresh/i })).not.toBeInTheDocument();
+  });
+
+  test('shows only the providers the server says are set up', async () => {
+    mockApi(null, ['facebook']);
+    render(<App />);
+    expect(await screen.findByRole('link', { name: /sign in with facebook/i })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /sign in with google/i })).not.toBeInTheDocument();
   });
 
   test('shows the portal once a member is signed in', async () => {

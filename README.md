@@ -84,6 +84,13 @@ member — the session cookie lasts seven days.
 There are three ways in: Google, Facebook, and an email address with a
 password. The first two are unchanged. The third is described below.
 
+The sign-in page shows the Google and Facebook buttons first, as the
+recommended way in, but only for a provider whose credentials are set
+(`GET /api/auth/providers` lists them). With neither configured, the page
+offers just the email and password form, and an old link to
+`/api/auth/google` or `/api/auth/facebook` goes back to the sign-in page with
+that provider's error.
+
 ### Registering with an email address and a password
 
 Anyone may create an account from the sign-in page, but a new account is worth
@@ -1987,8 +1994,8 @@ pm2 restart capshaw-dashboard
 | `MAIL_REDIRECT_TO` | No | Redirects all outgoing mail to one address. Defaults to `jblairkiel@gmail.com`; clear it to send for real |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` | For email | Mail server. Unset means messages queue but are not sent |
 | `MAIL_FROM` | No | From address on outgoing mail |
-| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | For Google sign-in | Google OAuth credentials |
-| `FACEBOOK_APP_ID` / `FACEBOOK_APP_SECRET` | For Facebook sign-in | Facebook OAuth credentials |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | For Google sign-in | Google OAuth credentials. The Google button only appears when both are set |
+| `FACEBOOK_APP_ID` / `FACEBOOK_APP_SECRET` | For Facebook sign-in | Facebook OAuth credentials. The Facebook button only appears when both are set |
 | `YOUTUBE_CHANNEL` | No | Channel handle for the Livestreams tab (default `@CapshawChurch`) |
 | `YOUTUBE_CHANNEL_ID` | No | Skips the handle lookup by giving the `UC…` channel id outright |
 | `NODE_ENV` | Production only | Set to `production` to serve the React build |

@@ -312,6 +312,41 @@ describe.each(['google', 'facebook'])('GET /api/auth/%s/callback', provider => {
   });
 });
 
+// ─── Which providers the sign-in page offers ──────────────────────────────────
+
+describe('GET /api/auth/providers', () => {
+  const list = async env => {
+    const { router } = loadAuth(env);
+    return (await request(buildApp(router)).get('/api/auth/providers')).body.providers;
+  };
+
+  test('lists nothing when neither provider is configured', async () => {
+    expect(await list({ GOOGLE_CLIENT_ID: '', FACEBOOK_APP_ID: '' })).toEqual([]);
+  });
+
+  test('lists only the providers with both credentials set', async () => {
+    expect(await list({ GOOGLE_CLIENT_ID: 'gid', GOOGLE_CLIENT_SECRET: 'gsecret', FACEBOOK_APP_ID: 'fid', FACEBOOK_APP_SECRET: '' }))
+      .toEqual(['google']);
+    expect(await list({ GOOGLE_CLIENT_ID: 'gid', GOOGLE_CLIENT_SECRET: 'gsecret', FACEBOOK_APP_ID: 'fid', FACEBOOK_APP_SECRET: 'fsecret' }))
+      .toEqual(['google', 'facebook']);
+  });
+});
+
+describe.each(['google', 'facebook'])('a link to %s when it is not configured', provider => {
+  const CLIENT_URL = 'http://localhost:5173';
+  const unconfigured = { GOOGLE_CLIENT_ID: '', GOOGLE_CLIENT_SECRET: '', FACEBOOK_APP_ID: '', FACEBOOK_APP_SECRET: '' };
+
+  test.each([
+    ['the sign-in link', ''],
+    ['the callback',     '/callback'],
+  ])('%s goes back to the sign-in page with its error', async (_what, suffix) => {
+    const { router } = loadAuth(unconfigured);
+    const res = await request(buildApp(router)).get(`/api/auth/${provider}${suffix}`);
+    expect(res.status).toBe(302);
+    expect(res.headers.location).toBe(`${CLIENT_URL}/?auth_error=${provider}`);
+  });
+});
+
 // ─── /me, /logout and /password-policy ────────────────────────────────────────
 
 describe('session endpoints', () => {

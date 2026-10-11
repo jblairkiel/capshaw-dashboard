@@ -20,7 +20,7 @@ function bodyOf(fetchMock, url) {
 
 describe('LoginPage — signing in with an email address and password', () => {
   test('offers a password sign-in alongside the two providers', () => {
-    render(<LoginPage />);
+    render(<LoginPage providers={['google', 'facebook']} />);
     expect(screen.getByLabelText(/email address/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/^password$/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^sign in$/i })).toBeInTheDocument();
