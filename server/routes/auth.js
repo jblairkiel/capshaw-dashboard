@@ -78,7 +78,11 @@ function upsertUser(provider, profileId, email, name, photo) {
   const { lastInsertRowid: id } = db.prepare(
     'INSERT INTO users (provider, provider_id, email, name, photo, role, directory_id, last_login) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))'
   ).run(provider, profileId, email || null, name, photo || null, role, findPersonByEmail(email));
-  return db.prepare('SELECT * FROM users WHERE id=?').get(id);
+  const created = db.prepare('SELECT * FROM users WHERE id=?').get(id);
+  // Google or Facebook has already vouched for the address, so there is
+  // something for an admin to decide straight away.
+  if (role === 'pending') accountMail.awaitingApproval({ user: created });
+  return created;
 }
 
 // ─── Google strategy ──────────────────────────────────────────────────────────
@@ -498,13 +502,8 @@ router.post('/login', limitSignIn, asyncRoute(async (req, res, next) => {
       error:   'Please confirm your email address first — open the link in the email we sent you.',
     });
   }
-  if (user.role === 'pending') {
-    return res.status(403).json({
-      success: false,
-      code:    'pending_approval',
-      error:   'Thank you for confirming your address. The church office still has to approve your account — you will get an email as soon as they do.',
-    });
-  }
+  // An account still waiting for approval signs in like any other, but sees
+  // only the page saying so, with the admins it can contact (limitPending).
 
   // A brand-new session id for the signed-in session, so a cookie somebody was
   // handed before they signed in cannot be reused afterwards.

@@ -267,16 +267,17 @@ describe('POST /api/auth/login', () => {
     expect(app.loggedIn()).toBeUndefined();
   });
 
-  test('refuses after confirmation while an admin has not approved them', async () => {
+  test('signs in after confirmation while an admin has not approved them, to the waiting page', async () => {
     const app = buildApp();
     await register(app);
     await request(app).get(`/api/auth/verify-email?token=${tokenFromEmail()}`);
 
     const res = await request(app).post('/api/auth/login')
       .send({ email: 'pat@example.com', password: GOOD_PASSWORD });
-    expect(res.status).toBe(403);
-    expect(res.body.code).toBe('pending_approval');
-    expect(app.loggedIn()).toBeUndefined();
+    expect(res.status).toBe(200);
+    expect(res.body.user.role).toBe('pending');
+    // What they may then reach is the site gate's to decide (app.test.js).
+    expect(app.loggedIn().id).toBe(accountFor('pat@example.com').id);
   });
 
   test('signs in once the address is confirmed and an admin has approved', async () => {

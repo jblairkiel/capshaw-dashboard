@@ -145,17 +145,22 @@ compose.noPasswordToReset = ({ name, provider }) => {
   };
 };
 
+const SIGNED_UP_WITH = { google: 'Google', facebook: 'Facebook' };
+
 compose.awaitingApproval = ({ user }) => ({
   subject: `Waiting for approval: ${user.name}`,
   body: [
-    `${user.name} has confirmed their email address and is waiting to be let`,
+    SIGNED_UP_WITH[user.provider]
+      ? `${user.name} has signed in with ${SIGNED_UP_WITH[user.provider]} and is waiting to be let`
+      : `${user.name} has confirmed their email address and is waiting to be let`,
     'into the member portal.',
     '',
     `  Name:  ${user.name}`,
-    `  Email: ${user.email}`,
-    '  Signed up with: an email address and password',
+    `  Email: ${user.email || '(none given)'}`,
+    `  Signed up with: ${SIGNED_UP_WITH[user.provider] || 'an email address and password'}`,
     '',
-    'They cannot sign in at all until somebody approves them. Approving is',
+    'Until somebody approves them they see only a page saying they are',
+    'waiting, with the admins\' names and cellphone numbers. Approving is',
     'also where you say who they are: either pick their existing entry in the',
     'member directory or create one for them, so their household and worship',
     'preferences are theirs to keep up to date.',
@@ -179,7 +184,9 @@ compose.approved = ({ user, personName }) => {
     `Hello ${user.name},`,
     '',
     'Your Capshaw Church of Christ member portal account has been approved.',
-    'You can sign in now with your email address and password:',
+    SIGNED_UP_WITH[user.provider]
+      ? `You can sign in now with ${SIGNED_UP_WITH[user.provider]}:`
+      : 'You can sign in now with your email address and password:',
     '',
     `  ${clientUrl()}`,
     '',

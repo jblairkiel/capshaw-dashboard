@@ -9,7 +9,7 @@ const AUTH_ERROR_MESSAGES = {
 // carrying the outcome, so this is the one place that explains it.
 const VERIFY_MESSAGES = {
   '1':       'Your email address is confirmed and your account is ready. Please sign in.',
-  'pending': 'Thank you — your email address is confirmed. The church office still has to approve your account, and you will get an email from us the moment they do.',
+  'pending': 'Thank you — your email address is confirmed. An admin still has to approve your account, and you will get an email from us the moment they do. You can sign in now to see who to contact if you would like it sooner.',
 };
 
 const VERIFY_ERROR_MESSAGES = {
