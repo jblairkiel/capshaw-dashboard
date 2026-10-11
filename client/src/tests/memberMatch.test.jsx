@@ -13,9 +13,11 @@ function withStableShuffle() {
 }
 
 const ROUNDS = [
-  { photo: 'ray.jpg', members: [{ id: 1, name: 'Ray Harris' }] },
+  { photo: 'ray.jpg', members: [{ id: 1, name: 'Ray Owens' }] },
   { photo: 'harris-family.jpg', members: [{ id: 2, name: 'Jan Harris' }, { id: 3, name: 'Tommy Harris' }] },
+  { photo: 'ann.jpg', members: [{ id: 4, name: 'Ann Lee' }] },
 ];
+const HARRIS = ['Jan Harris', 'Tommy Harris'];
 
 function mockRounds(rounds = ROUNDS) {
   vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({
@@ -23,37 +25,72 @@ function mockRounds(rounds = ROUNDS) {
   })));
 }
 
+// Which name the question on screen is asking for. The order is the game's to
+// choose, so the tests read it off the page: the photo, and for a family
+// photo which of its people (the stable shuffle keeps each family in the
+// order written above).
+function answer(rounds = ROUNDS) {
+  const photo = decodeURIComponent(screen.getByRole('img').getAttribute('src').split('/').pop());
+  const round = rounds.find(r => r.photo === photo);
+  const nth = screen.queryByText(/person \d+ of \d+/)?.textContent.match(/person (\d+)/)[1];
+  return round.members[nth ? Number(nth) - 1 : 0].name;
+}
+const choiceNames = () => screen.getAllByRole('button')
+  .map(b => b.textContent).filter(t => !/^(Next|See results|Play again)$/.test(t));
+
 beforeEach(() => { withStableShuffle(); });
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+async function play(rounds = ROUNDS) {
+  render(<MemberMatchView />);
+  const seen = [];
+  for (let i = 0; i < rounds.reduce((n, r) => n + r.members.length, 0); i++) {
+    await screen.findByRole('img');
+    await waitFor(() => expect(choiceNames().length).toBeGreaterThan(1));
+    const target = answer(rounds);
+    seen.push({ photo: screen.getByRole('img').getAttribute('src'), target, choices: choiceNames() });
+    fireEvent.click(screen.getByRole('button', { name: target }));
+    fireEvent.click(screen.getByRole('button', { name: /Next|See results/ }));
+  }
+  return seen;
+}
 
 describe('MemberMatchView — getting going', () => {
   test('a single photo asks "Who is this?", a family photo counts the person', async () => {
     mockRounds();
     render(<MemberMatchView />);
-
-    expect(await screen.findByText('Who is this?')).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Who is this?' })).toHaveAttribute('src', '/api/member-match/photo/ray.jpg');
-    // The choices are set by an effect after the question renders, so wait for
-    // them rather than assuming they arrived with it.
-    fireEvent.click(await screen.findByRole('button', { name: 'Ray Harris' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-
-    expect(await screen.findByText(/person 1 of 2 in this photo/)).toBeInTheDocument();
+    await screen.findByRole('img', { name: 'Who is this?' });
+    const prompts = [];
+    for (let i = 0; i < 4; i++) {
+      await waitFor(() => expect(choiceNames().length).toBeGreaterThan(1));
+      prompts.push(screen.getByText(/^Who is this/).textContent);
+      fireEvent.click(screen.getByRole('button', { name: answer() }));
+      fireEvent.click(screen.getByRole('button', { name: /Next|See results/ }));
+    }
+    expect(prompts.filter(p => p === 'Who is this?')).toHaveLength(2);
+    expect(prompts.filter(p => /person 1 of 2 in this photo/.test(p))).toHaveLength(1);
+    expect(prompts.filter(p => /person 2 of 2 in this photo/.test(p))).toHaveLength(1);
   });
 
-  test('a family photo is asked about one member at a time, same photo throughout', async () => {
+  test('a family is spread through the game, never asked back to back', async () => {
     mockRounds();
-    render(<MemberMatchView />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Ray Harris' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    const seen = await play();
+    expect(seen.map(q => q.target).sort()).toEqual(['Ann Lee', 'Jan Harris', 'Ray Owens', 'Tommy Harris']);
+    const photos = seen.map(q => q.photo);
+    expect(photos.some((p, i) => i > 0 && p === photos[i - 1])).toBe(false);
+    // And a family's own people still come in turn: person 1, then person 2.
+    expect(seen.filter(q => q.photo.endsWith('harris-family.jpg')).map(q => q.target)).toEqual(HARRIS);
+  });
 
-    expect(await screen.findByText(/person 1 of 2/)).toBeInTheDocument();
-    expect(screen.getByRole('img')).toHaveAttribute('src', '/api/member-match/photo/harris-family.jpg');
-    fireEvent.click(screen.getByRole('button', { name: 'Jan Harris' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
-
-    expect(await screen.findByText(/person 2 of 2/)).toBeInTheDocument();
-    expect(screen.getByRole('img')).toHaveAttribute('src', '/api/member-match/photo/harris-family.jpg');
+  test('no question offers two names from one family, nor a relative of the person asked about', async () => {
+    mockRounds();
+    const seen = await play();
+    for (const q of seen) {
+      expect(q.choices).toContain(q.target);
+      expect(q.choices.filter(n => HARRIS.includes(n)).length).toBeLessThanOrEqual(1);
+      if (HARRIS.includes(q.target)) expect(q.choices.filter(n => HARRIS.includes(n))).toEqual([q.target]);
+      expect(new Set(q.choices).size).toBe(q.choices.length);
+    }
   });
 
   test('an empty library says so rather than showing a broken game', async () => {
@@ -72,64 +109,50 @@ describe('MemberMatchView — getting going', () => {
 });
 
 describe('MemberMatchView — answering', () => {
-  test('the right choice is marked correct and the score moves', async () => {
+  async function ready() {
     mockRounds();
     render(<MemberMatchView />);
+    await screen.findByRole('img');
+    await waitFor(() => expect(choiceNames().length).toBeGreaterThan(1));
+    const target = answer();
+    return { target, wrong: choiceNames().find(n => n !== target) };
+  }
 
-    expect(await screen.findByText('0 / 0 correct')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Ray Harris' }));
-
-    expect(screen.getByRole('button', { name: 'Ray Harris' })).toHaveClass('bg-emerald-50');
+  test('the right choice is marked correct and the score moves', async () => {
+    const { target } = await ready();
+    expect(screen.getByText('0 / 0 correct')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: target }));
+    expect(screen.getByRole('button', { name: target })).toHaveClass('bg-emerald-50');
     expect(screen.getByText('1 / 1 correct')).toBeInTheDocument();
   });
 
   test('a wrong choice is marked wrong, and the real answer is shown', async () => {
-    mockRounds();
-    render(<MemberMatchView />);
-
-    await screen.findByText('Who is this?');
-    fireEvent.click(screen.getByRole('button', { name: 'Jan Harris' }));
-
-    expect(screen.getByRole('button', { name: 'Jan Harris' })).toHaveClass('bg-red-50');
-    expect(screen.getByRole('button', { name: 'Ray Harris' })).toHaveClass('bg-emerald-50');
+    const { target, wrong } = await ready();
+    fireEvent.click(screen.getByRole('button', { name: wrong }));
+    expect(screen.getByRole('button', { name: wrong })).toHaveClass('bg-red-50');
+    expect(screen.getByRole('button', { name: target })).toHaveClass('bg-emerald-50');
     expect(screen.getByText('0 / 1 correct')).toBeInTheDocument();
   });
 
   test('once answered, the choices lock and only Next moves you on', async () => {
-    mockRounds();
-    render(<MemberMatchView />);
-    await screen.findByText('Who is this?');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Ray Harris' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Jan Harris' }));
-
+    const { target, wrong } = await ready();
+    fireEvent.click(screen.getByRole('button', { name: target }));
+    fireEvent.click(screen.getByRole('button', { name: wrong }));
     // The second click did nothing: still counted as one answer, one correct.
     expect(screen.getByText('1 / 1 correct')).toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: /Harris/ }).every(b => b.disabled)).toBe(true);
+    expect(choiceNames().every(n => screen.getByRole('button', { name: n }).disabled)).toBe(true);
   });
 });
 
 describe('MemberMatchView — finishing and playing again', () => {
-  async function finishGame() {
-    render(<MemberMatchView />);
-    for (const round of ROUNDS) {
-      for (const member of round.members) {
-        await screen.findByRole('img');
-        fireEvent.click(screen.getByRole('button', { name: member.name }));
-        fireEvent.click(screen.getByRole('button', { name: /Next|See results/ }));
-      }
-    }
-  }
-
   test('finishing shows a final score and offers to play again', async () => {
     mockRounds();
-    await finishGame();
+    await play();
 
-    expect(await screen.findByText('You matched 3 of 3!')).toBeInTheDocument();
-    const playAgain = screen.getByRole('button', { name: 'Play again' });
-    fireEvent.click(playAgain);
+    expect(await screen.findByText('You matched 4 of 4!')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Play again' }));
 
-    await waitFor(() => expect(screen.getByText('Question 1 of 3')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Question 1 of 4')).toBeInTheDocument());
     expect(screen.getByText('0 / 0 correct')).toBeInTheDocument();
   });
 });

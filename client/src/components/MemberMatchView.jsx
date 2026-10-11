@@ -1,50 +1,15 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { call } from '../lib/groups';
+import { buildQuestions, choicesFor, familiesByName } from '../lib/memberMatch';
 
 // ─── Member Match ───────────────────────────────────────────────────────────
 //
 // A photo, and a name to put to it. A photo held by one directory row is a
 // single question; held by several — a family portrait — the same photo comes
-// back once per person in it, asked one at a time rather than all at once,
-// since nothing on file says which face in the picture is which name.
+// back once per person in it, spread through the game rather than one after
+// another, and no question offers two names from the same family
+// (lib/memberMatch.js).
 const API = '/api/member-match';
-const OPTIONS_PER_QUESTION = 4;
-
-function shuffled(list) {
-  const copy = [...list];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
-  }
-  return copy;
-}
-
-// One round per photo becomes one question per person in it, in a shuffled
-// order of photos but with a family's own members kept back to back — the
-// point is "another face from the same picture", not a random reshuffle of
-// everybody at once.
-function buildQuestions(rounds) {
-  return shuffled(rounds).flatMap(round => {
-    const members = shuffled(round.members);
-    return members.map((member, i) => ({
-      photo:       round.photo,
-      targetId:    member.id,
-      targetName:  member.name,
-      familySize:  members.length,
-      indexInFamily: i + 1,
-    }));
-  });
-}
-
-// The correct name plus a few names drawn at random from everybody else with
-// a photo on file. Another person from the very same family photo can turn up
-// as a wrong choice here — that is still just a wrong choice, since grading
-// only ever checks against this one question's own target.
-function choicesFor(question, allNames) {
-  const pool = allNames.filter(n => n !== question.targetName);
-  const distractors = shuffled(pool).slice(0, OPTIONS_PER_QUESTION - 1);
-  return shuffled([question.targetName, ...distractors]);
-}
 
 export default function MemberMatchView() {
   const [rounds,   setRounds]   = useState(null);
@@ -56,10 +21,7 @@ export default function MemberMatchView() {
   const [correct,  setCorrect]  = useState(0);
   const [answered, setAnswered] = useState(0);
 
-  const allNames = useMemo(
-    () => [...new Set((rounds || []).flatMap(r => r.members.map(m => m.name)))],
-    [rounds]
-  );
+  const families = useMemo(() => familiesByName(rounds || []), [rounds]);
 
   const startGame = useCallback(list => {
     const built = buildQuestions(list);
@@ -85,9 +47,9 @@ export default function MemberMatchView() {
   // recomputed on every render, or the options would reshuffle under a click.
   useEffect(() => {
     if (!question) return;
-    setChoices(choicesFor(question, allNames));
+    setChoices(choicesFor(question, families));
     setPicked(null);
-  }, [question, allNames]);
+  }, [question, families]);
 
   function choose(name) {
     if (picked) return;
