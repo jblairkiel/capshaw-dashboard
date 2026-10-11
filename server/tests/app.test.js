@@ -245,8 +245,10 @@ describe('createApp — an account still waiting for approval', () => {
   });
 
   test('signs in, but reaches nothing except who to contact', async () => {
-    await addLocal('Ada Admin', 'ada@example.com', 'admin');
-    db.prepare("INSERT INTO users (provider, provider_id, email, name, role) VALUES ('google', 'bo-id', NULL, 'Bo Admin', 'admin')").run();
+    const ada = await addLocal('Ada Admin', 'ada@example.com', 'admin');
+    const { lastInsertRowid: adaEntry } = db.prepare("INSERT INTO directory (name, email, phone, cell) VALUES ('Ada Admin', 'ada@example.com', '256-555-0100', '256-555-0142')").run();
+    db.prepare('UPDATE users SET directory_id = ? WHERE id = ?').run(adaEntry, ada.id);
+    db.prepare("INSERT INTO users (provider, provider_id, email, name, role) VALUES ('google', 'bo-id', 'bo@example.com', 'Bo Admin', 'admin')").run();
     await addLocal('Mel Member', 'mel@example.com', 'approved');
     const pat = await addLocal('Pat New', 'pat@example.com', 'pending');
     const agent = await signIn('pat@example.com');
@@ -255,10 +257,11 @@ describe('createApp — an account still waiting for approval', () => {
     const contacts = await agent.get('/api/welcome/contacts');
     expect(contacts.status).toBe(200);
     expect(contacts.body).toMatchObject({ approved: false, you: { name: 'Pat New', email: 'pat@example.com' } });
-    // Only the admins, and only a name and an address.
+    // Only the admins, and only a name and a cellphone number — not their
+    // email, nor any other number.
     expect(contacts.body.admins).toEqual([
-      { name: 'Ada Admin', email: 'ada@example.com' },
-      { name: 'Bo Admin', email: null },
+      { name: 'Ada Admin', cell: '256-555-0142' },
+      { name: 'Bo Admin', cell: null },
     ]);
 
     for (const path of ['/api/announcements', '/api/signups', '/api/members/data', '/api/directory', '/api/how-it-works']) {

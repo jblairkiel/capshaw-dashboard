@@ -160,7 +160,7 @@ compose.awaitingApproval = ({ user }) => ({
     `  Signed up with: ${SIGNED_UP_WITH[user.provider] || 'an email address and password'}`,
     '',
     'Until somebody approves them they see only a page saying they are',
-    'waiting, with the admins\' names to contact. Approving is',
+    'waiting, with the admins\' names and cellphone numbers. Approving is',
     'also where you say who they are: either pick their existing entry in the',
     'member directory or create one for them, so their household and worship',
     'preferences are theirs to keep up to date.',

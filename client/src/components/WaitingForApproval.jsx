@@ -69,7 +69,7 @@ export default function WaitingForApproval({ user, onApproved, onLogout }) {
                 : ' Sign in again after that to see the portal.'}
             </p>
             <p className="text-sm text-gray-700 mt-2">
-              You don&apos;t need to do anything else, but if you would like to speed things up, you could reach out to one of them:
+              You don&apos;t need to do anything else, but if you would like to speed things up, you could call or text one of them:
             </p>
           </div>
 
@@ -81,11 +81,11 @@ export default function WaitingForApproval({ user, onApproved, onLogout }) {
               : (
                 <ul className="divide-y divide-gray-100 border border-gray-100 rounded-lg" aria-label="Admins you can contact">
                   {data.admins.map(a => (
-                    <li key={`${a.name}-${a.email}`} className="px-3 py-2.5 flex items-center justify-between gap-3 flex-wrap">
+                    <li key={`${a.name}-${a.cell}`} className="px-3 py-2.5 flex items-center justify-between gap-3 flex-wrap">
                       <span className="font-medium text-church-navy">{a.name}</span>
-                      {a.email
-                        ? <a href={`mailto:${a.email}?subject=${encodeURIComponent('Member portal account')}`} className="text-sm text-church-gold hover:text-church-navy underline break-all">{a.email}</a>
-                        : <span className="text-xs text-gray-400">No email on file</span>}
+                      {a.cell
+                        ? <a href={`tel:${a.cell.replace(/[^\d+]/g, '')}`} aria-label={`Call or text ${a.name} at ${a.cell}`} className="text-sm text-church-gold hover:text-church-navy underline whitespace-nowrap">{a.cell}</a>
+                        : <span className="text-xs text-gray-400">No cellphone on file</span>}
                     </li>
                   ))}
                 </ul>
