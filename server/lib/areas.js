@@ -43,6 +43,12 @@ const AREAS = [
     description: 'Start each year\'s communion preparation sign-up list, and put anybody\'s name against a month or take it off.',
   },
   {
+    id:    'signups',
+    label: 'Sign-Up Manager',
+    page:  'Sign-Ups',
+    description: 'Edit, close or delete anybody\'s sign-up list, add or take off anybody\'s name, email a distribution group about a list, and see the sign-up analytics.',
+  },
+  {
     id:    'attendance',
     label: 'Attendance',
     page:  'Attendance',

@@ -1305,6 +1305,58 @@ function initSchema(db) {
     );
   `);
 
+  // ─── Sign-up lists ────────────────────────────────────────────────────────────
+  // Anything the congregation needs people for — a meal train, a work day, a
+  // nursery rota — made by any member (lib/signupLists.js). A list has one
+  // date or several, and either set items with how many are needed of each,
+  // or free sign-ups where people write what they will bring, or both. Each
+  // entry is one person against one date (and item, unless it is free).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS signup_lists (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      title           TEXT    NOT NULL,
+      description     TEXT    NOT NULL DEFAULT '',
+      kind            TEXT    NOT NULL DEFAULT 'one-date',   -- one-date | multi-date
+      allow_free      INTEGER NOT NULL DEFAULT 0,
+      free_label      TEXT    NOT NULL DEFAULT '',
+      closed          INTEGER NOT NULL DEFAULT 0,
+      created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_by_name TEXT    NOT NULL DEFAULT '',
+      created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS signup_dates (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      list_id    INTEGER NOT NULL REFERENCES signup_lists(id) ON DELETE CASCADE,
+      date       TEXT    NOT NULL,
+      time       TEXT    NOT NULL DEFAULT '',
+      note       TEXT    NOT NULL DEFAULT '',
+      position   INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_signup_dates_list ON signup_dates(list_id);
+    CREATE TABLE IF NOT EXISTS signup_items (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      list_id    INTEGER NOT NULL REFERENCES signup_lists(id) ON DELETE CASCADE,
+      label      TEXT    NOT NULL,
+      needed     INTEGER,                                    -- NULL: as many as like
+      position   INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_signup_items_list ON signup_items(list_id);
+    CREATE TABLE IF NOT EXISTS signup_entries (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      list_id      INTEGER NOT NULL REFERENCES signup_lists(id) ON DELETE CASCADE,
+      date_id      INTEGER NOT NULL REFERENCES signup_dates(id) ON DELETE CASCADE,
+      item_id      INTEGER REFERENCES signup_items(id) ON DELETE CASCADE,   -- NULL: a free sign-up
+      name         TEXT    NOT NULL,
+      note         TEXT    NOT NULL DEFAULT '',
+      directory_id INTEGER REFERENCES directory(id) ON DELETE SET NULL,
+      user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      added_by     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_signup_entries_list ON signup_entries(list_id);
+  `);
+
   // ─── Seed the distribution groups ─────────────────────────────────────────────
   // Created empty; an admin fills in who is in each from Admin → Email Groups.
 
