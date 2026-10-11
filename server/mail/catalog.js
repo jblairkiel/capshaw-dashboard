@@ -15,10 +15,11 @@ const recordsReminder = require('./records');
 const leaderReminders = require('./worshipReminders');
 const communionPrep = require('./communionPrep');
 const signupMail = require('./signups');
+const guestMail = require('./guests');
 
 const CATEGORIES = [
   { id: 'notifications', label: 'Notifications', description: 'Messages to one person about their own account or something waiting on them.' },
-  { id: 'bulletin',      label: 'Bulletin',      description: 'The weekly newsletter, sent to a mailing list.' },
+  { id: 'bulletin',      label: 'Bulletin',      description: 'The weekly newsletter, and other news for the congregation, sent to a mailing list.' },
   { id: 'groups',        label: 'Groups',        description: 'Church group meetings: posted, called off, or changed.' },
   { id: 'reports',       label: 'Reports',       description: 'Schedules and summaries sent out on a regular rhythm.' },
 ];
@@ -219,6 +220,21 @@ const EMAILS = [
           items: [{ itemId: 1, taken: 3, needed: 4, full: false }, { itemId: 2, taken: 3, needed: 3, full: true }] }],
       },
       message: 'We still need one more main dish — can you help?', from: SAMPLE.user.name,
+    }),
+  },
+
+  {
+    id: 'guests-recorded', category: 'bulletin',
+    name: 'Our guests',
+    audience: 'The mailing list chosen when it is sent (Announcements, unless somebody picks another)',
+    trigger: "Whoever looks after guests presses Save & email after recording a service's guests. Each name links to that guest's page, and the email links to the whole guest list.",
+    like: ['guests:%:email'],
+    preview: () => guestMail.compose.guestsRecorded({
+      date: '10/11/26', service: 'Sun AM', from: SAMPLE.user.name,
+      guests: [
+        { id: 1, name: 'Sample Guest', invited_by: 'Sample Member', city: 'Harvest', state: 'AL', visits: [{}] },
+        { id: 2, name: 'Another Guest', visits: [{}, {}, {}] },
+      ],
     }),
   },
 

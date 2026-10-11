@@ -830,6 +830,10 @@ function initSchema(db) {
   // Files to send with a queued message, as JSON: [{ file, filename, contentType }],
   // where `file` names a file in the mail-attachments directory (server/lib/paths.js).
   addColumn('mail_outbox', 'attachments', "TEXT NOT NULL DEFAULT '[]'");
+  // A formatted copy of the body, for the few messages worth laying out —
+  // headings, real links. Empty means plain text only; `body` is always kept
+  // as the plain version for mail clients that will not show HTML.
+  addColumn('mail_outbox', 'html', "TEXT NOT NULL DEFAULT ''");
   // How many came to a group's meeting, written by its leader afterwards. NULL
   // until then — which is what the Record Keeping report looks for — and 0 is
   // a real answer.

@@ -12,6 +12,8 @@ const router  = express.Router();
 const db      = require('../db');
 const { requireAuth, requireApproved, requireArea, holdsArea } = require('../middleware/auth');
 const actionLog = require('../lib/actionLog');
+const guestMail = require('../mail/guests');
+const mailGroups = require('../mail/groups');
 
 const AREA = 'visitors';
 const manageOnly = requireArea(AREA);
@@ -134,6 +136,16 @@ function cleanFields(body) {
 
 // ─── GET /api/visitors ────────────────────────────────────────────────────────
 
+// GET /api/visitors/mail-lists — where the guests at a service can be emailed,
+// with how many on each list can be reached. Before /:id, which would take it
+// for a guest.
+router.get('/mail-lists', requireApproved, manageOnly, (req, res) => {
+  const lists = mailGroups.listGroups().map(g => ({
+    key: g.key, name: g.name, reachable: mailGroups.recipientsFor(g.key).recipients.length,
+  }));
+  res.json({ success: true, lists, defaultList: guestMail.DEFAULT_LIST });
+});
+
 router.get('/', (req, res) => {
   const search = String(req.query.search || '').trim();
   const rows = search
@@ -230,7 +242,11 @@ router.delete('/:id', requireApproved, manageOnly, (req, res) => {
 // one with their contact details — so the whole service goes in or none of it
 // does.
 //
-// { date, service, guests: [{ id?, name, phone, email, … }] }
+// { date, service, guests: [{ id?, name, phone, email, … }], email?: { list } }
+//
+// With `email`, the congregation is told who came once they are saved
+// (server/mail/guests.js). The guests are saved whether or not the email can
+// go, and the answer says which.
 
 router.post('/record', requireApproved, manageOnly, (req, res) => {
   const date    = String(req.body?.date || '').trim();
@@ -303,12 +319,31 @@ router.post('/record', requireApproved, manageOnly, (req, res) => {
     return { id: before.id, isNew: false };
   }))();
 
+  const visitors = recorded.map(r => withVisits(visitorRow(r.id)));
+
+  let emailed = null;
+  if (req.body?.email) {
+    const listKey = String(req.body.email.list || guestMail.DEFAULT_LIST);
+    const result  = guestMail.sendGuestsRecorded({ date, service, guests: visitors, listKey, from: req.user?.name || '' });
+    if (result.error) {
+      emailed = { error: result.error };
+    } else {
+      emailed = result;
+      actionLog.record(req.user, {
+        area: AREA, action: 'other', entity: 'guest email', entityId: date,
+        summary: `Emailed the guests at ${when} to the ${result.list.name} list (${result.queued})`,
+        details: { list: result.list.key, queued: result.queued, missing: result.missing, guests: visitors.map(v => v.id) },
+      });
+    }
+  }
+
   res.json({
     success:  true,
     date, service,
     added:    recorded.filter(r => r.isNew).length,
     returning: recorded.filter(r => !r.isNew).length,
-    visitors: recorded.map(r => withVisits(visitorRow(r.id))),
+    visitors,
+    emailed,
   });
 });
 

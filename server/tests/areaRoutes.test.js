@@ -386,6 +386,65 @@ describe('/api/visitors', () => {
       expect(db.prepare('SELECT COUNT(*) n FROM visitors').get().n).toBe(0);
     });
 
+    describe('and emailing the congregation', () => {
+      function announcementsWith(...emails) {
+        db.prepare('DELETE FROM mail_outbox').run();
+        const list = db.prepare("SELECT id FROM mail_groups WHERE key = 'announcements'").get();
+        db.prepare('DELETE FROM mail_group_members WHERE group_id = ?').run(list.id);
+        for (const email of emails) db.prepare('INSERT INTO mail_group_members (group_id, email) VALUES (?, ?)').run(list.id, email);
+      }
+
+      test('sends a formatted email linking to each guest and to the guest list', async () => {
+        announcementsWith('ann@example.com', 'bob@example.com');
+        const pat = (await request(buildApp(GUESTS)).post('/api/visitors').send({ name: 'Pat Lane', phone: '555-0100' })).body.visitor;
+        await request(buildApp(GUESTS)).post(`/api/visitors/${pat.id}/visits`).send({ date: '10/04/26', service: 'Sun AM' });
+
+        const res = await request(buildApp(GUESTS)).post('/api/visitors/record').send({
+          date: '10/11/26', service: 'Sun AM', email: { list: 'announcements' },
+          guests: [{ id: pat.id }, { name: 'Jo <Reed>', invited_by: 'The Carters', city: 'Harvest', state: 'AL', phone: '555-0177' }],
+        });
+
+        expect(res.body.emailed).toMatchObject({ queued: 2, list: { key: 'announcements' } });
+        const jo = res.body.visitors[1];
+        const [row] = db.prepare('SELECT * FROM mail_outbox ORDER BY id').all();
+        expect(row.subject).toBe('Our guests — Sun AM, Sunday, October 11, 2026');
+        expect(row.context).toBe('guests:10/11/26:Sun AM:email');
+
+        // Both versions link to each guest and to the list
+        for (const [text, amp] of [[row.body, '&'], [row.html, '&amp;']]) {
+          expect(text).toContain(`page=visitors${amp}guest=${pat.id}`);
+          expect(text).toContain(`page=visitors${amp}guest=${jo.id}`);
+          expect(text).toMatch(/\?page=visitors(?!&)/);
+        }
+        expect(row.html).toContain(`<a href="http://localhost:5173/?page=visitors&amp;guest=${pat.id}"`);
+        expect(row.html).toContain('Jo &lt;Reed&gt;');
+        expect(row.body).toContain('Visit number 2');
+        expect(row.body).toContain('First time with us · invited by The Carters · from Harvest, AL');
+        // Contact details stay on the portal
+        expect(row.body).not.toContain('555-01');
+        expect(row.html).not.toContain('555-01');
+
+        expect(history()[0].summary).toMatch(/Emailed the guests at 10\/11\/26 \(Sun AM\) to the Announcements list \(2\)/);
+      });
+
+      test('the guests are still saved when nobody on the list can be reached', async () => {
+        announcementsWith();
+        const res = await request(buildApp(GUESTS)).post('/api/visitors/record')
+          .send({ date: '10/11/26', guests: [{ name: 'Jo Reed' }], email: { list: 'announcements' } });
+        expect(res.status).toBe(200);
+        expect(res.body.emailed.error).toMatch(/Nobody on the Announcements list/);
+        expect(db.prepare('SELECT COUNT(*) n FROM visitors').get().n).toBe(1);
+      });
+
+      test('lists where it can go, for the guest area only', async () => {
+        announcementsWith('ann@example.com');
+        const res = await request(buildApp(GUESTS)).get('/api/visitors/mail-lists');
+        expect(res.body.defaultList).toBe('announcements');
+        expect(res.body.lists.find(l => l.key === 'announcements').reachable).toBe(1);
+        expect((await request(buildApp(MEMBER)).get('/api/visitors/mail-lists')).status).toBe(403);
+      });
+    });
+
     test('needs a date, a guest, and the area', async () => {
       expect((await request(buildApp(GUESTS)).post('/api/visitors/record').send({ guests: [{ name: 'Jo' }] })).status).toBe(400);
       expect((await request(buildApp(GUESTS)).post('/api/visitors/record').send({ date: '10/11/26', guests: [] })).status).toBe(400);

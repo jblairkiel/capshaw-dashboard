@@ -278,11 +278,16 @@ describe('VisitorTracker', () => {
     return call && JSON.parse(call[1].body);
   }
 
-  function mockRecording() {
+  const LISTS = [{ key: 'announcements', name: 'Announcements', reachable: 120 }, { key: 'elders', name: 'Elders', reachable: 4 }];
+
+  function mockRecording(recorded = {}) {
     const fetchMock = vi.fn((url) => Promise.resolve({
-      json: () => Promise.resolve(String(url).endsWith('/record')
-        ? { success: true, date: '10/11/26', service: 'Sun AM', added: 1, returning: 1, visitors: [] }
-        : { success: true, visitors: GUESTS, canManage: true }),
+      json: () => Promise.resolve(
+        String(url).endsWith('/record')
+          ? { success: true, date: '10/11/26', service: 'Sun AM', added: 1, returning: 1, visitors: [], emailed: null, ...recorded }
+          : String(url).endsWith('/mail-lists')
+            ? { success: true, lists: LISTS, defaultList: 'announcements' }
+            : { success: true, visitors: GUESTS, canManage: true }),
     }));
     vi.stubGlobal('fetch', fetchMock);
     return fetchMock;
@@ -320,6 +325,47 @@ describe('VisitorTracker', () => {
     expect(body.guests[1]).not.toHaveProperty('id');
 
     expect(await screen.findByRole('status')).toHaveTextContent('Recorded 1 new guest and 1 returning for 10/11/26 (Sun AM).');
+  });
+
+  test('Save & email records them and emails the chosen list', async () => {
+    const fetchMock = mockRecording({ emailed: { queued: 4, list: { key: 'elders', name: 'Elders' }, missing: [] } });
+    render(<VisitorTracker />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Record guests' }));
+    const dialog = screen.getByRole('dialog');
+
+    // The congregation's list is chosen until somebody picks another
+    const list = await within(dialog).findByLabelText(/^Email the congregation/);
+    expect(list).toHaveValue('announcements');
+    fireEvent.change(list, { target: { value: 'elders' } });
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '+ New guest' }));
+    type(within(dialog).getByLabelText(/^Name/), 'Jo Reed');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save & email' }));
+
+    await waitFor(() => expect(recordBody(fetchMock)?.email).toEqual({ list: 'elders' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Emailed to the Elders list (4).');
+  });
+
+  test('plain Record does not email anybody', async () => {
+    const fetchMock = mockRecording();
+    render(<VisitorTracker />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Record guests' }));
+    const dialog = screen.getByRole('dialog');
+    await within(dialog).findByLabelText(/^Email the congregation/);
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '+ New guest' }));
+    type(within(dialog).getByLabelText(/^Name/), 'Jo Reed');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Record 1 guest' }));
+
+    await waitFor(() => expect(recordBody(fetchMock)).toBeTruthy());
+    expect(recordBody(fetchMock)).not.toHaveProperty('email');
+  });
+
+  test("a guest's permanent link opens them straight away", async () => {
+    mockGuests();
+    render(<VisitorTracker initialGuestId={2} />);
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Sam Ford')).toBeInTheDocument();
   });
 
   test('a guest already picked is not offered again', async () => {

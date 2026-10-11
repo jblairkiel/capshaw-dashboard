@@ -469,6 +469,21 @@ function RecordGuests({ guests, onClose, onSaved }) {
   const [search, setSearch]   = useState('');
   const [busy, setBusy]       = useState(false);
   const [error, setError]     = useState('');
+  // Where Save & email sends to: the congregation's list unless another is picked.
+  const [lists, setLists]     = useState([]);
+  const [listKey, setListKey] = useState('');
+
+  useEffect(() => {
+    let live = true;
+    send(`${API}/mail-lists`)
+      .then(json => {
+        if (!live) return;
+        setLists(json.lists || []);
+        setListKey(k => k || json.defaultList || json.lists?.[0]?.key || '');
+      })
+      .catch(() => {});   // No lists, no email; recording still works.
+    return () => { live = false; };
+  }, []);
 
   // The services already used, so the same one is spelled the same way each
   // week — the record-keeping check matches on the name.
@@ -512,7 +527,7 @@ function RecordGuests({ guests, onClose, onSaved }) {
     });
   }
 
-  async function submit(e) {
+  async function submit(e, withEmail = false) {
     e.preventDefault();
     if (!date.trim()) return setError('Choose the date of the service');
     if (!entries.length) return setError('Add at least one guest');
@@ -530,7 +545,9 @@ function RecordGuests({ guests, onClose, onSaved }) {
 
     setBusy(true); setError('');
     try {
-      const json = await send(`${API}/record`, { method: 'POST', ...jsonBody({ date, service, guests: body }) });
+      const payload = { date, service, guests: body };
+      if (withEmail) payload.email = { list: listKey };
+      const json = await send(`${API}/record`, { method: 'POST', ...jsonBody(payload) });
       onSaved(json);
     } catch (err) {
       setError(err.message);
@@ -651,8 +668,38 @@ function RecordGuests({ guests, onClose, onSaved }) {
 
         {error && <p className="text-sm text-red-600">{error}</p>}
 
-        <div className="flex justify-end gap-2 pt-1">
+        {/* Telling the congregation who came, from the same save */}
+        {lists.length > 0 && (
+          <div className="rounded-xl bg-church-cream/60 border border-gray-200 px-4 py-3 space-y-2">
+            <label className="block">
+              <span className={label}>Email the congregation</span>
+              <select value={listKey} onChange={e => setListKey(e.target.value)} className={`${field} bg-white`}>
+                {lists.map(l => (
+                  <option key={l.key} value={l.key}>
+                    {l.name} ({l.reachable} {l.reachable === 1 ? 'address' : 'addresses'})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="text-xs text-gray-500">
+              Save &amp; email sends each guest&apos;s name, whether it was their first visit, who invited them and their town,
+              with a link to their page and to the guest list. Phone numbers, emails and addresses stay on the portal.
+            </p>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-1 flex-wrap">
           <button type="button" onClick={onClose} className="text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600">Cancel</button>
+          {lists.length > 0 && (
+            <button
+              type="button"
+              onClick={e => submit(e, true)}
+              disabled={busy || !count || !listKey}
+              className="text-sm px-3 py-2 rounded-lg border border-church-navy text-church-navy hover:bg-church-navy hover:text-white transition-colors disabled:opacity-50"
+            >
+              {busy ? 'Saving…' : 'Save & email'}
+            </button>
+          )}
           <button type="submit" disabled={busy || !count} className="btn-primary text-sm disabled:opacity-50">
             {busy ? 'Saving…' : count ? `Record ${count} guest${count === 1 ? '' : 's'}` : 'Record guests'}
           </button>
@@ -1016,13 +1063,14 @@ function FollowUpBoard({ guests, user, onOpen, onFollowUpDone }) {
 
 // ─── The page ─────────────────────────────────────────────────────────────────
 
-export default function VisitorTracker({ user }) {
+export default function VisitorTracker({ user, initialGuestId = null }) {
   const [guests, setGuests]   = useState([]);
   const [canManage, setCanManage] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
   const [search, setSearch]   = useState('');
-  const [openId, setOpenId]   = useState(null);
+  // A guest's permanent link (?page=visitors&guest=12) opens them straight away.
+  const [openId, setOpenId]   = useState(initialGuestId);
   const [view, setView]       = useState('guests');   // guests | follow-ups
   // Seven columns of guest details do not fit a phone, so it gets a card each.
   const onPhone = useIsNarrow();
@@ -1269,13 +1317,16 @@ export default function VisitorTracker({ user }) {
         <RecordGuests
           guests={guests}
           onClose={() => setRecording(false)}
-          onSaved={({ date, service, added, returning }) => {
+          onSaved={({ date, service, added, returning, emailed }) => {
             setRecording(false);
             const parts = [
               added && `${added} new guest${added === 1 ? '' : 's'}`,
               returning && `${returning} returning`,
             ].filter(Boolean).join(' and ');
-            setNotice(`Recorded ${parts} for ${date}${service ? ` (${service})` : ''}.`);
+            const mail = !emailed ? ''
+              : emailed.error ? ` The email was not sent: ${emailed.error}.`
+                : ` Emailed to the ${emailed.list.name} list (${emailed.queued}).`;
+            setNotice(`Recorded ${parts} for ${date}${service ? ` (${service})` : ''}.${mail}`);
             load();
           }}
         />
