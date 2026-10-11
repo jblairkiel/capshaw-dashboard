@@ -34,6 +34,7 @@ import ContributionsView from './components/ContributionsView';
 import MemberAttendanceView from './components/MemberAttendanceView';
 import MailDeliveryView from './components/MailDeliveryView';
 import CommunionPrepView from './components/CommunionPrepView';
+import SignupsView from './components/SignupsView';
 import { hasWriteAccess, isAdmin, hasArea } from './lib/roles';
 
 const API = '/api/members';
@@ -65,6 +66,7 @@ const BASE_GROUPS = [
       { id: 'announcements', label: 'Announcements' },
       { id: 'calendar',      label: 'Church Calendar' },
       { id: 'groups',        label: 'Church Groups' },
+      { id: 'signups',       label: 'Sign-Ups' },
       { id: 'visitors',      label: 'Guests' },
       { id: 'anniversaries', label: 'Birthdays & Anniversaries' },
       { id: 'leadership',    label: 'Elders & Deacons' },
@@ -173,6 +175,8 @@ function deepLinkFromUrl() {
     eventId:    toId(params.get('event')),
     workflowId: toId(params.get('workflow')),
     planId:     toId(params.get('plan')),
+    // A sign-up list's permanent link.
+    list:       toId(params.get('list')),
     // A service by its day and name (the song leader's reminder links here).
     // Only a real date and a short name are kept; the page looks the service
     // up, so anything else simply finds nothing.
@@ -193,7 +197,7 @@ const STANDALONE_TABS = new Set([
   'directory', 'profile', 'inbox', 'mail-groups', 'emails', 'record-keeping', 'livestreams',
   'visitors', 'leadership', 'action-history','service-roster', 'bulletin',
   'groups', 'bug-reports', 'how-it-works', 'member-match', 'contributions', 'member-attendance', 'mail-delivery',
-  'communion-prep',
+  'communion-prep', 'signups',
 ]);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
@@ -274,7 +278,8 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
   const [siteData,    setSiteData]    = useState(null);
 
   useEffect(() => {
-    if (deepLink) window.history.replaceState(null, '', window.location.pathname);
+    // The sign-ups page keeps its own permanent link in the address bar.
+    if (deepLink && deepLink.page !== 'signups') window.history.replaceState(null, '', window.location.pathname);
   }, [deepLink]);
   const [updating,    setUpdating]    = useState(false);
   const [updateError,    setUpdateError]    = useState('');
@@ -482,6 +487,11 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       {!updating && activeTab === 'communion-prep' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           <CommunionPrepView initialYear={deepLink?.page === 'communion-prep' ? deepLink.year : null} />
+        </main>
+      )}
+      {!updating && activeTab === 'signups' && (
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <SignupsView initialListId={deepLink?.page === 'signups' ? deepLink.list : null} />
         </main>
       )}
       {!updating && activeTab === 'livestreams' && (

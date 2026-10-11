@@ -14,6 +14,7 @@ const newsletter = require('./newsletter');
 const recordsReminder = require('./records');
 const leaderReminders = require('./worshipReminders');
 const communionPrep = require('./communionPrep');
+const signupMail = require('./signups');
 
 const CATEGORIES = [
   { id: 'notifications', label: 'Notifications', description: 'Messages to one person about their own account or something waiting on them.' },
@@ -202,6 +203,23 @@ const EMAILS = [
     trigger: "A group leader changes a posted meeting's time or place.",
     like: ['group-event:%:changed'],
     preview: () => notify.compose.groupEventChanged({ group: SAMPLE.group, event: SAMPLE.event, what: 'Now starts at 6:30.' }),
+  },
+
+  {
+    id: 'signup-email', category: 'groups',
+    name: 'About a sign-up list',
+    audience: 'Everyone signed up for a list, or (sent by the sign-up manager) a whole distribution group',
+    trigger: 'Whoever made a sign-up list writes about it from the list. Their own words come first, then the list as it stands — when, what for, what is still needed — and its link.',
+    like: ['signup:%:email'],
+    preview: () => signupMail.compose.signupEmail({
+      list: {
+        id: 5, title: 'Fellowship meal', description: 'After morning worship, in the fellowship hall.', allowFree: true, freeLabel: 'Something else to share',
+        items: [{ id: 1, label: 'Main dish', needed: 4 }, { id: 2, label: 'Dessert', needed: 3 }],
+        dates: [{ id: 1, date: '2026-11-15', time: '12:00', note: '', past: false, free: [],
+          items: [{ itemId: 1, taken: 3, needed: 4, full: false }, { itemId: 2, taken: 3, needed: 3, full: true }] }],
+      },
+      message: 'We still need one more main dish — can you help?', from: SAMPLE.user.name,
+    }),
   },
 
   // ── Reports ────────────────────────────────────────────────────────────────

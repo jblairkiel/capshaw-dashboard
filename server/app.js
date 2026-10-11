@@ -40,6 +40,7 @@ const contributionRoutes         = require('./routes/contributions');
 const memberAttendanceRoutes     = require('./routes/memberAttendance');
 const participationRoutes        = require('./routes/participation');
 const mailDeliveryRoutes         = require('./routes/mailDelivery');
+const signupRoutes               = require('./routes/signups');
 const communionPrepRoutes        = require('./routes/communionPrep');
 const paths                      = require('./lib/paths');
 const { requireSiteAuth }        = require('./middleware/auth');
@@ -157,6 +158,7 @@ function createApp() {
   app.use('/api/member-attendance', memberAttendanceRoutes);
   app.use('/api/participation',   participationRoutes);
   app.use('/api/mail-delivery',   mailDeliveryRoutes);
+  app.use('/api/signups',         signupRoutes);
   app.use('/api/communion-prep',  communionPrepRoutes);
 
   app.get('/api/health', (req, res) => {

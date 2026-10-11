@@ -77,6 +77,13 @@ export const AREAS = [
     tone:        'bg-red-100 text-red-800',
   },
   {
+    id:          'signups',
+    label:       'Sign-Up Manager',
+    page:        'Sign-Ups',
+    description: 'Edit, close or delete anybody\'s sign-up list, add or take off anybody\'s name, email a distribution group about a list, and see the sign-up analytics.',
+    tone:        'bg-stone-200 text-stone-800',
+  },
+  {
     id:          'attendance',
     label:       'Attendance',
     page:        'Attendance',

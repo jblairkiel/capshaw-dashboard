@@ -204,6 +204,16 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'signups', title: 'Sign-ups', audience: 'everyone',
+    blocks: [
+      { p: '**Our Church Family → Sign-Ups** is for anything the church needs people for — a fellowship meal, a meal train, a work day. Anybody can make one with **New sign-up**: a title, a description, and either **one date** (everything happens that day) or **several dates** (the same sign-up each day). Then say **what is needed** and how many of each — or leave the number blank for as many as like — and, if you like, allow **free sign-ups**, where people write what they will bring.' },
+      { p: 'Every sign-up has its own link — **Copy link** — to send to anyone. Choose **Sign up** beside what you will do; **Take my name off** if you cannot. A full item, a date that has passed, and a closed sign-up take no more names.' },
+      { p: 'Whoever made a sign-up keeps it: they can change it, close or delete it, put somebody else down or take a name off, and **Email** the people on it. The email starts with their own words, then the sign-up as it stands — when, what for, what is still needed — and its link, so nothing has to be typed twice. They see it before it goes.' },
+      { p: 'Whoever holds **Sign-Up Manager** can do the same to every sign-up, email a whole distribution group about one, and see **Analytics**: how many sign-ups and names there have been, how full the lists are, who signs up most, sign-ups by month, and the lists coming up that are still short.' },
+      { chart: flow('A sign-up, start to finish', ['A member makes the sign-up', 'They email about it', 'People sign up', 'The day comes']) },
+    ],
+  },
+  {
     id: 'other-pages', title: 'Everything else', audience: 'everyone',
     blocks: [
       { table: { head: ['Page', 'What it is'], rows: [
