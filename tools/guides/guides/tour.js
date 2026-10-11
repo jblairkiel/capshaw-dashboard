@@ -139,7 +139,7 @@ module.exports = {
         await d.sleep(400);
 
         d.mark('serving');
-        await d.nav('Our Church Family', 'Serving Schedule');
+        await d.nav('Worship', 'Service Roster');
         await d.caption({ chip: 'SERVING SCHEDULE', title: 'Who is serving when', text: 'Next month\'s worship jobs, week by week — built automatically and filled in by the schedule keeper.' });
         await d.hold(1600);
         await d.click(page.getByRole('button', { name: /Time away/ }));
@@ -280,7 +280,7 @@ module.exports = {
         await d.clear();
 
         d.mark('display');
-        await d.nav('Worship', 'Announcements');
+        await d.nav('Our Church Family', 'Announcements');
         await d.caption({ chip: 'ANNOUNCEMENTS', title: 'On the foyer TV', text: 'One button turns the announcements into a full-screen slideshow for the screen in the foyer.' });
         await d.hold(900);
         await d.click(page.getByRole('button', { name: /Fullscreen Display/ }));
