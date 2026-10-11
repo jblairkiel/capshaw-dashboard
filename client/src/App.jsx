@@ -40,27 +40,32 @@ const API = '/api/members';
 // The wording is for the whole church family rather than an internal staff
 // tool. "This Sunday" and "Songs We Sing" are now tabs of Upcoming Service
 // (see PAGE_ALIASES below, which keeps their old ids working).
+//
+//   Worship            — the services themselves: what is planned, who is
+//                        serving, and watching them
+//   Our Church Family  — what is going on and who is who
+//   Grow               — learning together, and how the congregation is
+//                        growing: attendance, giving, getting to know names
 const BASE_GROUPS = [
   {
     id: 'worship',
     label: 'Worship',
     items: [
-      { id: 'upcoming',      label: 'Upcoming Service' },
-      { id: 'announcements', label: 'Announcements' },
+      { id: 'upcoming',       label: 'Upcoming Service' },
+      { id: 'service-roster', label: 'Service Roster' },
+      { id: 'livestreams',    label: 'Livestreams' },
     ],
   },
   {
     id: 'congregation',
     label: 'Our Church Family',
     items: [
-      { id: 'service-roster', label: 'Service Roster' },
-      { id: 'attendance',    label: 'Attendance' },
-      { id: 'contributions', label: 'Contributions' },
-      { id: 'visitors',      label: 'Guests' },
+      { id: 'announcements', label: 'Announcements' },
+      { id: 'calendar',      label: 'Church Calendar' },
       { id: 'groups',        label: 'Church Groups' },
+      { id: 'visitors',      label: 'Guests' },
       { id: 'anniversaries', label: 'Birthdays & Anniversaries' },
       { id: 'leadership',    label: 'Elders & Deacons' },
-      { id: 'livestreams',   label: 'Livestreams' },
     ],
   },
   {
@@ -68,8 +73,9 @@ const BASE_GROUPS = [
     label: 'Grow',
     items: [
       { id: 'bible-class',   label: 'Bible Class' },
-      { id: 'calendar',      label: 'Church Calendar' },
       { id: 'member-match',  label: 'Member Match' },
+      { id: 'attendance',    label: 'Attendance' },
+      { id: 'contributions', label: 'Contributions' },
     ],
   },
 ];
@@ -91,9 +97,9 @@ const PROFILE_GROUP = {
 // checks the same thing on every request — this only decides what is worth
 // showing.
 const OFFICE_ITEMS = [
-  { id: 'record-keeping',    label: 'Record Keeping',    when: user => hasArea(user, 'records') },
-  { id: 'member-attendance', label: 'Member Attendance', when: user => hasArea(user, 'member-attendance') },
   { id: 'directory',         label: 'Member Directory',  when: user => hasArea(user, 'directory') },
+  { id: 'member-attendance', label: 'Member Attendance', when: user => hasArea(user, 'member-attendance') },
+  { id: 'record-keeping',    label: 'Record Keeping',    when: user => hasArea(user, 'records') },
   { id: 'bulletin',          label: 'Weekly Newsletter', when: user => hasArea(user, 'bulletin') },
   { id: 'mail-groups',       label: 'Email Groups',      when: user => hasArea(user, 'mail-groups') },
   { id: 'emails',            label: 'Emails',            when: user => hasArea(user, 'mail-groups') },
@@ -104,10 +110,10 @@ const OFFICE_ITEMS = [
 // so they are never mixed in with work that can be handed to a member.
 const ADMIN_ITEMS = [
   { id: 'users',          label: 'Members & Access' },
+  { id: 'mail-delivery',  label: 'Email Delivery' },
   { id: 'database',       label: 'Church Records' },
   { id: 'action-history', label: 'Action History' },
   { id: 'bug-reports',    label: 'Bug Reports' },
-  { id: 'mail-delivery',  label: 'Email Delivery' },
 ];
 
 function officeGroupsFor(user) {

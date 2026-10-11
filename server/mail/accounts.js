@@ -160,7 +160,7 @@ compose.awaitingApproval = ({ user }) => ({
     'member directory or create one for them, so their household and worship',
     'preferences are theirs to keep up to date.',
     '',
-    `Approve them here: ${clientUrl()} → Church Office → Members & Access`,
+    `Approve them here: ${clientUrl()} → Admin → Members & Access`,
     SIGNATURE,
   ].join('\n'),
 });

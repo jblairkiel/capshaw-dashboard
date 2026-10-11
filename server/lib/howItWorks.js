@@ -106,7 +106,7 @@ const SECTIONS = [
   {
     id: 'serving-schedule', title: 'The Serving Schedule', audience: 'everyone',
     blocks: [
-      { p: '**Our Church Family → Service Roster**, on its **Scheduled** tab, shows who leads singing, prays, reads scripture and serves the Lord\'s Supper at each service. The month is shown a card per service, and every service has its own link — **Copy link** on its card — that opens the schedule straight on it, the same as each service\'s link on Submit a Service. A month is filled from what everyone has said on **My Household & Preferences** — glad to, willing, or would rather not — and the days people are away.' },
+      { p: '**Worship → Service Roster**, on its **Scheduled** tab, shows who leads singing, prays, reads scripture and serves the Lord\'s Supper at each service. The month is shown a card per service, and every service has its own link — **Copy link** on its card — that opens the schedule straight on it, the same as each service\'s link on Submit a Service. A month is filled from what everyone has said on **My Household & Preferences** — glad to, willing, or would rather not — and the days people are away.' },
       { chart: { title: 'What feeds the roster', start: 'prefs', nodes: [
         { id: 'prefs', kind: 'step', label: 'Everyone sets their preferences' },
         { id: 'away', kind: 'step', label: 'Everyone marks their time away' },
@@ -167,14 +167,14 @@ const SECTIONS = [
   {
     id: 'announcements', title: 'Announcements, calendar and the foyer screen', audience: 'everyone',
     blocks: [
-      { p: '**Worship → Announcements** and **Grow → Church Calendar** share their events, so nothing is typed twice. Anyone can reply under an announcement.' },
+      { p: '**Our Church Family → Announcements** and **Our Church Family → Church Calendar** share their events, so nothing is typed twice. Anyone can reply under an announcement.' },
       { p: '**Fullscreen Display** on the Announcements page turns the current announcements into a slideshow for the screen in the foyer.' },
     ],
   },
   {
     id: 'giving-attendance', title: 'Attendance and contributions', audience: 'everyone',
     blocks: [
-      { p: '**Our Church Family → Attendance** and **Contributions** show the counts and weekly totals, with trends over time.' },
+      { p: '**Grow → Attendance** and **Contributions** show the counts and weekly totals, with trends over time.' },
       { note: 'Contributions are one total per week. Nobody\'s individual giving is recorded anywhere in the portal. Only the counters (and admins) can enter a week\'s total.' },
     ],
   },
@@ -202,7 +202,7 @@ const SECTIONS = [
         ['Grow → Bible Class', 'Class questions and lesson planning'],
         ['Our Church Family → Birthdays & Anniversaries', 'Whose are coming up, from the church website'],
         ['Our Church Family → Elders & Deacons', 'Who they are and what each looks after'],
-        ['Our Church Family → Livestreams', 'The church\'s YouTube channel, newest first'],
+        ['Worship → Livestreams', 'The church\'s YouTube channel, newest first'],
       ] } },
     ],
   },
