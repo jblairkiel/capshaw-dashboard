@@ -85,9 +85,18 @@ function upsertUser(provider, profileId, email, name, photo) {
   return created;
 }
 
+// ─── Which providers are set up ───────────────────────────────────────────────
+
+// A provider is only offered when both of its credentials are configured. The
+// sign-in page asks for this list (GET /providers) and shows just those buttons.
+const PROVIDERS = [
+  process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && 'google',
+  process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET && 'facebook',
+].filter(Boolean);
+
 // ─── Google strategy ──────────────────────────────────────────────────────────
 
-if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+if (PROVIDERS.includes('google')) {
   passport.use(new GoogleStrategy(
     {
       clientID:     process.env.GOOGLE_CLIENT_ID,
@@ -109,7 +118,7 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
 
 // ─── Facebook strategy ────────────────────────────────────────────────────────
 
-if (process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET) {
+if (PROVIDERS.includes('facebook')) {
   passport.use(new FacebookStrategy(
     {
       clientID:     process.env.FACEBOOK_APP_ID,
@@ -525,11 +534,21 @@ router.get('/password-policy', (req, res) => {
 
 // ─── Auth routes ──────────────────────────────────────────────────────────────
 
-router.get('/google',
+router.get('/providers', (req, res) => {
+  res.json({ success: true, providers: PROVIDERS });
+});
+
+// An old link or bookmark to a provider that is not set up goes back to the
+// sign-in page with that provider's error, rather than ending in passport's
+// "Unknown authentication strategy".
+const ifConfigured = provider => (req, res, next) =>
+  PROVIDERS.includes(provider) ? next() : res.redirect(`${CLIENT_URL}/?auth_error=${provider}`);
+
+router.get('/google', ifConfigured('google'),
   passport.authenticate('google', { scope: ['profile', 'email'] })
 );
 
-router.get('/google/callback', (req, res, next) => {
+router.get('/google/callback', ifConfigured('google'), (req, res, next) => {
   passport.authenticate('google', (err, user, info) => {
     if (err) {
       console.error('[auth] Google error:', err.message);
@@ -550,11 +569,11 @@ router.get('/google/callback', (req, res, next) => {
   })(req, res, next);
 });
 
-router.get('/facebook',
+router.get('/facebook', ifConfigured('facebook'),
   passport.authenticate('facebook', { scope: ['email'] })
 );
 
-router.get('/facebook/callback', (req, res, next) => {
+router.get('/facebook/callback', ifConfigured('facebook'), (req, res, next) => {
   passport.authenticate('facebook', (err, user, info) => {
     if (err) {
       console.error('[auth] Facebook error:', err.message);
