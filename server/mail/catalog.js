@@ -13,6 +13,7 @@ const accounts = require('./accounts');
 const newsletter = require('./newsletter');
 const recordsReminder = require('./records');
 const leaderReminders = require('./worshipReminders');
+const communionPrep = require('./communionPrep');
 
 const CATEGORIES = [
   { id: 'notifications', label: 'Notifications', description: 'Messages to one person about their own account or something waiting on them.' },
@@ -166,6 +167,15 @@ const EMAILS = [
       kind: 'first', date: SAMPLE.plan.date, service: SAMPLE.plan.service, time: '09:50', leader: SAMPLE.user.name,
       plan: null, requests: [{ song: { title: 'Just As I Am' }, forDate: '' }],
     }),
+  },
+
+  {
+    id: 'communion-prep-reminder', category: 'notifications',
+    name: 'You are preparing communion',
+    audience: 'Whoever is down on the communion preparation list for that month',
+    trigger: 'A week before the month they signed up for — or as soon as they are put down, if that is less than a week before it begins.',
+    like: ['communion-prep:%:reminder'],
+    preview: () => communionPrep.compose.reminder({ name: SAMPLE.user.name, year: 2026, month: 11 }),
   },
 
   // ── Groups ─────────────────────────────────────────────────────────────────

@@ -37,6 +37,12 @@ const AREAS = [
     description: 'Build next month\'s worship jobs, fill or clear any slot, record what each man will volunteer for and the days he is away, and see who has served and what each man has said he will do.',
   },
   {
+    id:    'communion-prep',
+    label: 'Communion Preparation',
+    page:  'Communion Preparation',
+    description: 'Start each year\'s communion preparation sign-up list, and put anybody\'s name against a month or take it off.',
+  },
+  {
     id:    'attendance',
     label: 'Attendance',
     page:  'Attendance',

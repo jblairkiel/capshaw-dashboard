@@ -61,4 +61,15 @@ app.listen(PORT, () => {
   };
   remindLeaders();
   setInterval(remindLeaders, REMINDER_TICK_MS);
+
+  // A week before the month somebody signed up to prepare communion. Each is
+  // claimed on its sign-up before it is sent, so ticking often is safe.
+  const communionReminders = require('./mail/communionPrep');
+  const remindCommunion = () => {
+    try {
+      for (const r of communionReminders.tick()) console.log(`[communion-prep] reminder to ${r.name} for ${r.month}/${r.year}`);
+    } catch (err) { console.error('[communion-prep] reminder failed:', err.message); }
+  };
+  remindCommunion();
+  setInterval(remindCommunion, REMINDER_TICK_MS);
 });
