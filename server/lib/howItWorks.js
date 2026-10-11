@@ -124,6 +124,15 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'communion-prep', title: 'Communion preparation', audience: 'everyone',
+    blocks: [
+      { p: '**Worship → Communion Preparation** is the sign-up list for preparing the Lord\'s Supper: one name for each month of the year. Choose **Sign up** on an open month to put your name down, and **Take my name off** if you can no longer do it. A month that has already begun cannot be changed from here.' },
+      { p: 'A week before your month begins you are emailed a reminder. If you sign up (or are put down) less than a week before, the reminder comes straight away.' },
+      { p: 'Whoever holds **Communion Preparation** starts each year\'s list with **Start the list** — this year\'s or up to two years ahead — and can put anybody\'s name against a month, or clear one, when somebody says so in person. A name that matches the member directory is reminded at the address the directory has.' },
+      { chart: flow('A month of communion preparation', ['The keeper starts the year', 'You sign up for a month', 'A reminder a week before', 'You prepare that month']) },
+    ],
+  },
+  {
     id: 'worship-participation', title: 'The Service Roster', audience: 'everyone',
     blocks: [
       { p: 'Whoever keeps the serving schedule (and admins) sees two more tabs on the **Service Roster**, **Preferences** and **Analysis**; nobody else does. Opening a man\'s name on **Preferences** is where the schedule keeper writes down what he will do and the days he is away, when he says so in the foyer rather than on **My Household & Preferences**. Both tabs show worship participation. Nothing has to be entered for those: the serving schedule, as it was last left, is taken to be what happened. When somebody swaps or drops out, change the schedule and the record follows.' },

@@ -33,6 +33,7 @@ import MemberMatchView from './components/MemberMatchView';
 import ContributionsView from './components/ContributionsView';
 import MemberAttendanceView from './components/MemberAttendanceView';
 import MailDeliveryView from './components/MailDeliveryView';
+import CommunionPrepView from './components/CommunionPrepView';
 import { hasWriteAccess, isAdmin, hasArea } from './lib/roles';
 
 const API = '/api/members';
@@ -53,6 +54,7 @@ const BASE_GROUPS = [
     items: [
       { id: 'upcoming',       label: 'Upcoming Service' },
       { id: 'service-roster', label: 'Service Roster' },
+      { id: 'communion-prep', label: 'Communion Preparation' },
       { id: 'livestreams',    label: 'Livestreams' },
     ],
   },
@@ -177,6 +179,8 @@ function deepLinkFromUrl() {
     service:    /^\d{4}-\d{2}-\d{2}$/.test(params.get('date') || '') && /^[\w .,&'()/-]{1,80}$/.test(params.get('service') || '')
       ? { date: params.get('date'), service: params.get('service') }
       : null,
+    // A year, for the communion preparation list (its reminder links here).
+    year:       /^\d{4}$/.test(params.get('year') || '') ? Number(params.get('year')) : null,
     // Only a known tab name is kept; anything else opens the page's first.
     tab:        alias ? alias.tab : (/^[a-z-]{1,20}$/.test(params.get('tab') || '') ? params.get('tab') : null),
   };
@@ -189,6 +193,7 @@ const STANDALONE_TABS = new Set([
   'directory', 'profile', 'inbox', 'mail-groups', 'emails', 'record-keeping', 'livestreams',
   'visitors', 'leadership', 'action-history','service-roster', 'bulletin',
   'groups', 'bug-reports', 'how-it-works', 'member-match', 'contributions', 'member-attendance', 'mail-delivery',
+  'communion-prep',
 ]);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
@@ -472,6 +477,11 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       {!updating && activeTab === 'groups' && (
         <main className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
           <GroupsView user={user} initialGroupId={deepLink?.groupId} initialEventId={deepLink?.eventId} />
+        </main>
+      )}
+      {!updating && activeTab === 'communion-prep' && (
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <CommunionPrepView initialYear={deepLink?.page === 'communion-prep' ? deepLink.year : null} />
         </main>
       )}
       {!updating && activeTab === 'livestreams' && (

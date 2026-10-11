@@ -1279,6 +1279,32 @@ function initSchema(db) {
     );
   `);
 
+  // ─── Communion preparation ────────────────────────────────────────────────────
+  // Who prepares the Lord's Supper each month: a list for the year, started by
+  // whoever holds the communion-prep area, with one sign-up per month. Members
+  // put their own name down; the keeper can write anybody in. `reminded_at`
+  // marks the reminder email a week before the month (mail/communionPrep.js),
+  // and is cleared whenever the name on the month changes.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS communion_prep_years (
+      year            INTEGER PRIMARY KEY,
+      created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_by_name TEXT    NOT NULL DEFAULT '',
+      created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS communion_prep_signups (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      year         INTEGER NOT NULL REFERENCES communion_prep_years(year) ON DELETE CASCADE,
+      month        INTEGER NOT NULL CHECK (month BETWEEN 1 AND 12),
+      name         TEXT    NOT NULL,
+      directory_id INTEGER REFERENCES directory(id) ON DELETE SET NULL,
+      signed_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      signed_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+      reminded_at  TEXT,
+      UNIQUE (year, month)
+    );
+  `);
+
   // ─── Seed the distribution groups ─────────────────────────────────────────────
   // Created empty; an admin fills in who is in each from Admin → Email Groups.
 

@@ -70,6 +70,13 @@ export const AREAS = [
     tone:        'bg-violet-100 text-violet-800',
   },
   {
+    id:          'communion-prep',
+    label:       'Communion Preparation',
+    page:        'Communion Preparation',
+    description: 'Start each year\'s communion preparation sign-up list, and put anybody\'s name against a month or take it off.',
+    tone:        'bg-red-100 text-red-800',
+  },
+  {
     id:          'attendance',
     label:       'Attendance',
     page:        'Attendance',
