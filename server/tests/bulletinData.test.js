@@ -220,6 +220,24 @@ describe('gathering a week', () => {
     expect(dutyRoster.sunday.jobs.find(j => j.job === 'Song Leader').names[0]).toBe('Morning');
   });
 
+  test('the schedule\'s own job names land on the printed rows', () => {
+    const ins = db.prepare('INSERT INTO job_assignments (month,date,service,job,name) VALUES (?,?,?,?,?)');
+    ins.run('June 2025', 'June 8', 'Sunday Worship', 'Communion', 'Al Adams');
+    ins.run('June 2025', 'June 8', 'Sunday Worship', 'Communion Assist', 'Ben Brown');
+    ins.run('June 2025', 'June 8', 'Sunday Worship', 'Communion Assist', 'Cal Cole');
+    ins.run('June 2025', 'June 8', 'Sunday Worship', 'Speaker', 'Dan Dale');
+    ins.run('June 2025', 'June 11', 'Wednesday', 'Speaker', 'Mid Week');
+
+    const { dutyRoster } = bulletin.gather({ sunday: SUNDAY });
+    const row = job => dutyRoster.sunday.jobs.find(j => j.job === job)?.names[0];
+    expect(row('Communion Leader')).toBe('Al Adams');
+    expect(row('Communion Assists')).toBe('Ben Brown, Cal Cole');
+    expect(row('Sermon')).toBe('Dan Dale');
+    expect(dutyRoster.sunday.jobs.map(j => j.job)).not.toContain('Communion Assist');
+    // Wednesday prints Speaker under its own name.
+    expect(dutyRoster.wednesday.jobs.find(j => j.job === 'Speaker').names[0]).toBe('Mid Week');
+  });
+
   test('several people against one job in a week are listed together', () => {
     const ins = db.prepare('INSERT INTO job_assignments (month,date,service,job,name) VALUES (?,?,?,?,?)');
     ins.run('June 2025', 'June 8', 'Sunday Worship', 'Ushers', 'Chris Black');

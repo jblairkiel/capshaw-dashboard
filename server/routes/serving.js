@@ -209,17 +209,20 @@ router.post('/months', requireApproved, manageOnly, (req, res) => {
   const occasions = servicesIn(parsed, wanted, serviceJobs.rolesByService());
   if (!occasions.length) return res.status(400).json({ success: false, error: `No services fall in ${parsed.label}` });
 
-  const existing = new Set(
-    assignmentsIn(parsed.label).map(a => `${a.date}|${a.service}|${a.job}`)
-  );
+  // How many of each job each service already has, so building again adds
+  // only what is missing — a second communion assist, say.
+  const have = new Map();
+  for (const a of assignmentsIn(parsed.label)) {
+    const key = `${a.date}|${a.service}`;
+    if (!have.has(key)) have.set(key, new Map());
+    have.get(key).set(a.job, (have.get(key).get(a.job) || 0) + 1);
+  }
 
   const insert = db.prepare('INSERT INTO job_assignments (month, date, service, job, name) VALUES (?, ?, ?, ?, ?)');
   const created = db.transaction(() => {
     let n = 0;
     for (const occasion of occasions) {
-      for (const job of occasion.roles) {
-        const key = `${occasion.dateLabel}|${occasion.service}|${job}`;
-        if (existing.has(key)) continue;
+      for (const job of serviceJobs.missing(occasion.roles, have.get(`${occasion.dateLabel}|${occasion.service}`))) {
         insert.run(parsed.label, occasion.dateLabel, occasion.service, job, '');
         n++;
       }
@@ -346,18 +349,19 @@ router.post('/special', requireApproved, manageOnly, (req, res) => {
   }
 
   const asked = Array.isArray(req.body?.jobs) ? req.body.jobs : serviceJobs.jobsFor(type.name);
-  const jobs = WORSHIP_ROLES.filter(j => asked.includes(j));
+  // In the order of the worship jobs; a job asked for twice is two slots.
+  const jobs = WORSHIP_ROLES.flatMap(j => Array(Math.min(asked.filter(a => a === j).length, serviceJobs.MAX_OF_ONE_JOB)).fill(j));
   if (!jobs.length) return res.status(400).json({ success: false, error: 'Choose at least one job it needs' });
 
   const label = d => ({ month: `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`, date: `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}` });
-  const exists = db.prepare('SELECT 1 FROM job_assignments WHERE month = ? AND date = ? AND lower(service) = lower(?) AND job = ?');
+  const already = db.prepare('SELECT job, COUNT(*) AS n FROM job_assignments WHERE month = ? AND date = ? AND lower(service) = lower(?) GROUP BY job');
   const insert = db.prepare('INSERT INTO job_assignments (month, date, service, job, name) VALUES (?, ?, ?, ?, ?)');
   const created = db.transaction(() => {
     let n = 0;
     for (const night of nights) {
       const { month, date } = label(night);
-      for (const job of jobs) {
-        if (exists.get(month, date, type.name, job)) continue;
+      const have = new Map(already.all(month, date, type.name).map(r => [r.job, r.n]));
+      for (const job of serviceJobs.missing(jobs, have)) {
         insert.run(month, date, type.name, job, '');
         n++;
       }
@@ -471,6 +475,74 @@ router.delete('/assignments/:id', requireApproved, manageOnly, (req, res) => {
   });
   settleReplacement(before.id, '', req.user);
   res.json({ success: true });
+});
+
+// ─── DELETE /api/serving/occasions  { month, date, service } ──────────────────
+// Takes one service off the schedule — a cancelled Wednesday, one night of a
+// gospel meeting — with every slot it had. Anybody who was down for it is told
+// on their bell, and a replacement still being asked about is closed.
+
+function usersNamed(names) {
+  const keys = new Set(names.map(n => n.trim().toLowerCase()).filter(Boolean));
+  if (!keys.size) return [];
+  return db.prepare(`
+    SELECT u.id, lower(trim(d.name)) AS key FROM users u JOIN directory d ON d.id = u.directory_id
+     WHERE u.role IN ('approved', 'admin')
+  `).all().filter(r => keys.has(r.key)).map(r => r.id);
+}
+
+router.delete('/occasions', requireApproved, manageOnly, (req, res) => {
+  const month   = String(req.body?.month || '').trim();
+  const date    = String(req.body?.date || '').trim();
+  const service = String(req.body?.service || '').trim();
+  if (!month || !date || !service) return res.status(400).json({ success: false, error: 'Which service?' });
+
+  const slots = db.prepare('SELECT * FROM job_assignments WHERE month = ? AND date = ? AND lower(service) = lower(?) ORDER BY id')
+    .all(month, date, service);
+  if (!slots.length) return res.status(404).json({ success: false, error: 'That service is not on the schedule' });
+
+  for (const slot of slots) settleReplacement(slot.id, '', req.user);
+  const named = slots.map(s => s.name).filter(n => n.trim());
+  db.prepare('DELETE FROM job_assignments WHERE month = ? AND date = ? AND lower(service) = lower(?)').run(month, date, service);
+
+  notifications.notify({
+    users: usersNamed(named), actor: req.user, kind: 'serving-service-removed', page: 'service-roster',
+    title: `${service}, ${date} is off the serving schedule — you are no longer down for it`,
+  });
+  actionLog.record(req.user, {
+    area: AREA, action: 'delete', entity: 'serving schedule', entityId: `${service}:${month}:${date}`,
+    summary: `Removed ${service}, ${date} from the schedule — ${slots.length} slot${slots.length === 1 ? '' : 's'}${named.length ? ` (${named.join(', ')})` : ''}`,
+    before: slots,
+  });
+  res.json({ success: true, removed: slots.length, assignments: assignmentsWithConflicts(month) });
+});
+
+// ─── DELETE /api/serving/service-kinds/:name ──────────────────────────────────
+// Takes a kind of special service off the list. It is retired rather than
+// erased, so attendance already recorded under it still has its name; it
+// simply stops being offered. One still on the schedule ahead has to come off
+// first, so nothing is left behind that Upcoming Service no longer shows.
+
+router.delete('/service-kinds/:name', requireApproved, manageOnly, (req, res) => {
+  const type = plans.serviceType(req.params.name);
+  if (!type || !type.active || !specialChoices().includes(type.name)) {
+    return res.status(400).json({ success: false, error: 'Only a special service can be taken off the list here' });
+  }
+  const today = new Date();
+  const todayIso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const ahead = new Set(db.prepare('SELECT month, date FROM job_assignments WHERE lower(service) = lower(?)').all(type.name)
+    .map(r => blackouts.dateOf(r.month, r.date))
+    .filter(d => d && d >= todayIso));
+  if (ahead.size) {
+    return res.status(400).json({ success: false, error: `${type.name} is still on the schedule for ${ahead.size} day${ahead.size === 1 ? '' : 's'} ahead — remove ${ahead.size === 1 ? 'it' : 'them'} from the schedule first` });
+  }
+  db.prepare('UPDATE service_types SET active = 0 WHERE id = ?').run(type.id);
+  actionLog.record(req.user, {
+    area: AREA, action: 'update', entity: 'service type', entityId: type.id,
+    summary: `Took ${type.name} off the list of special services`,
+    before: type, after: { ...type, active: 0 },
+  });
+  res.json({ success: true, specialServices: specialChoices(), serviceJobs: serviceJobs.list(specialChoices()) });
 });
 
 // ─── Asking to be replaced ────────────────────────────────────────────────────

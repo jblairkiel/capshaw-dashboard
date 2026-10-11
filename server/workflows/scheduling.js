@@ -26,7 +26,7 @@ const MONTHS = [
 // set; the other services are lighter, which matches how these rosters are
 // usually built. Every service ends with a closing prayer.
 const SERVICE_ROLES = {
-  'Sunday Worship':  ['Song Leader', 'Opening Prayer', 'Scripture Reading', 'Communion', 'Speaker', 'Announcements', 'Closing Prayer', 'Usher'],
+  'Sunday Worship':  ['Song Leader', 'Opening Prayer', 'Scripture Reading', 'Communion', 'Communion Assist', 'Communion Assist', 'Speaker', 'Announcements', 'Closing Prayer', 'Usher'],
   'Sunday Evening':  ['Song Leader', 'Opening Prayer', 'Closing Prayer'],
   'Wednesday':       ['Song Leader', 'Opening Prayer', 'Closing Prayer'],
 };
