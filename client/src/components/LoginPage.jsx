@@ -3,7 +3,16 @@ import { useState } from 'react';
 const AUTH_ERROR_MESSAGES = {
   google:   'Google sign-in failed. Please try again.',
   facebook: 'Facebook sign-in failed. Please try again.',
+  // A Google or Facebook sign-in whose address an account here already has.
+  // It is joined to that account only once an admin confirms it is the same
+  // person, so nothing went wrong — it is waiting.
+  link_pending:
+    'You already have an account with this email address. To keep it safe, an admin will confirm this sign-in is you before it can be used — we have emailed you about it. Until then, please sign in the way you did before.',
+  link_declined:
+    'This sign-in was not joined to the account with its email address. Please sign in the way you did before, or contact the church office.',
 };
+
+const AUTH_ERROR_TONES = { link_pending: 'warn' };
 
 // Where the confirmation link in the email lands. The API redirects back here
 // carrying the outcome, so this is the one place that explains it.
@@ -435,7 +444,9 @@ export default function LoginPage({ authError, verified, verifyError, resetToken
         </div>
 
         {authError && (
-          <Banner tone="error">{AUTH_ERROR_MESSAGES[authError] ?? 'Sign-in failed. Please try again.'}</Banner>
+          <Banner tone={Object.hasOwn(AUTH_ERROR_TONES, authError) ? AUTH_ERROR_TONES[authError] : 'error'}>
+            {Object.hasOwn(AUTH_ERROR_MESSAGES, authError) ? AUTH_ERROR_MESSAGES[authError] : 'Sign-in failed. Please try again.'}
+          </Banner>
         )}
         {verified && VERIFY_MESSAGES[verified] && (
           <Banner tone="success">{VERIFY_MESSAGES[verified]}</Banner>
