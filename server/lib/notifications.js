@@ -35,6 +35,7 @@ const KINDS = {
   'song-request-planned':   'A song you asked for is going to be sung',
   'bible-quiz-flagged':     'Somebody flagged a Bible Quiz question',
   'bible-quiz-flag-answered': 'A Bible Quiz question you flagged was looked at',
+  'rotation-next-up':       'You are next up on a rotation',
 };
 
 const KIND_IDS = Object.keys(KINDS);
@@ -48,6 +49,7 @@ const PAGE_FOR_SUBJECT = {
   'serving-slot': 'service-roster',
   'song-request': 'upcoming',
   'bible-quiz-flag': 'bible-class',
+  'rotation':     'rotations',
 };
 
 function pageForSubject(subjectType) {

@@ -133,6 +133,22 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'rotations', title: 'Rotations', audience: 'everyone',
+    blocks: [
+      { p: '**Our Church Family → Rotations** keeps track of anything the church takes in turns — teaching a class, hosting a baby shower — so nobody has to remember who went last. Each rotation is a line of people, and the first one in line is **next up**. If you are next, the rotation says so, and you will have had an email and a notification.' },
+      { p: 'A rotation\'s **coordinators** run it. When a turn comes round they **give the turn** to whoever is next (with a date and a note if they like), and that person goes to the back of the line. If she cannot do it this time and somebody else steps in, the turn is given to the one who stepped in, and she keeps her place at the front. A turn with a date still to come is shown as **upcoming**; cancelling it puts that person back at the front.' },
+      { list: [
+        '**Send to the back** — somebody passes this time without taking a turn.',
+        '**Sitting out** — somebody keeps their place but is passed over until they are back (a new baby, a busy season).',
+        '**Move up / Move down** — change the order. Changing the order tells nobody.',
+        '**Let them know** — email whoever is next up straight away.',
+      ] },
+      { p: 'Whoever is next up is told automatically whenever the rotation moves on — when a turn is given or somebody is sent to the back — and only once for each time they come to the front.' },
+      { p: 'Whoever holds **Rotations** starts a rotation, chooses its coordinators from the member directory, and can retire one (it is hidden but kept) or delete it.' },
+      { chart: flow('A turn on a rotation', ['You come to the front', 'You are emailed', 'Coordinator gives turn', 'You go to the back']) },
+    ],
+  },
+  {
     id: 'worship-participation', title: 'The Service Roster', audience: 'everyone',
     blocks: [
       { p: 'Whoever keeps the serving schedule (and admins) sees two more tabs on the **Service Roster**, **Preferences** and **Analysis**; nobody else does. Opening a man\'s name on **Preferences** is where the schedule keeper writes down what he will do and the days he is away, when he says so in the foyer rather than on **My Household & Preferences**. Both tabs show worship participation. Nothing has to be entered for those: the serving schedule, as it was last left, is taken to be what happened. When somebody swaps or drops out, change the schedule and the record follows.' },
