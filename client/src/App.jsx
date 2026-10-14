@@ -35,6 +35,7 @@ import ContributionsView from './components/ContributionsView';
 import MemberAttendanceView from './components/MemberAttendanceView';
 import MailDeliveryView from './components/MailDeliveryView';
 import CommunionPrepView from './components/CommunionPrepView';
+import RotationsView from './components/RotationsView';
 import SignupsView from './components/SignupsView';
 import { hasWriteAccess, isAdmin, hasArea } from './lib/roles';
 
@@ -68,6 +69,7 @@ const BASE_GROUPS = [
       { id: 'calendar',      label: 'Church Calendar' },
       { id: 'groups',        label: 'Church Groups' },
       { id: 'signups',       label: 'Sign-Ups' },
+      { id: 'rotations',     label: 'Rotations' },
       { id: 'visitors',      label: 'Guests' },
       { id: 'anniversaries', label: 'Birthdays & Anniversaries' },
       { id: 'leadership',    label: 'Elders & Deacons' },
@@ -178,6 +180,8 @@ function deepLinkFromUrl() {
     planId:     toId(params.get('plan')),
     // A sign-up list's permanent link.
     list:       toId(params.get('list')),
+    // A rotation (the "you are next up" email links here).
+    rotation:   toId(params.get('rotation')),
     // A service by its day and name (the song leader's reminder links here).
     // Only a real date and a short name are kept; the page looks the service
     // up, so anything else simply finds nothing.
@@ -198,7 +202,7 @@ const STANDALONE_TABS = new Set([
   'directory', 'profile', 'inbox', 'mail-groups', 'emails', 'record-keeping', 'livestreams',
   'visitors', 'leadership', 'action-history','service-roster', 'bulletin',
   'groups', 'bug-reports', 'how-it-works', 'member-match', 'contributions', 'member-attendance', 'mail-delivery',
-  'communion-prep', 'signups',
+  'communion-prep', 'signups', 'rotations',
 ]);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
@@ -271,6 +275,8 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
   // Which sign-up the Sign-Ups page opens on: its permanent link, or one
   // clicked on the calendar. Moving between pages any other way clears it.
   const [signupFocus, setSignupFocus] = useState(deepLink?.page === 'signups' ? deepLink.list : null);
+  // Likewise the rotation the Rotations page opens on: its permanent link.
+  const [rotationFocus, setRotationFocus] = useState(deepLink?.page === 'rotations' ? deepLink.rotation : null);
   // Every way of moving between pages goes through here, so a page that became
   // a tab ("songs", "order") still arrives where it should.
   const goTo = useCallback(id => {
@@ -279,13 +285,15 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
     if (alias?.page === 'service-roster') setRosterTab(alias.tab);
     setActiveTab(alias ? alias.page : id);
     setSignupFocus(null);
+    setRotationFocus(null);
   }, []);
   const openSignup = useCallback(id => { setActiveTab('signups'); setSignupFocus(id); }, []);
   const [siteData,    setSiteData]    = useState(null);
 
   useEffect(() => {
-    // The sign-ups page keeps its own permanent link in the address bar.
-    if (deepLink && deepLink.page !== 'signups') window.history.replaceState(null, '', window.location.pathname);
+    // The sign-ups and rotations pages keep their own permanent links in the
+    // address bar.
+    if (deepLink && !['signups', 'rotations'].includes(deepLink.page)) window.history.replaceState(null, '', window.location.pathname);
   }, [deepLink]);
   const [updating,    setUpdating]    = useState(false);
   const [updateError,    setUpdateError]    = useState('');
@@ -483,6 +491,12 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
           <CommunionPrepView initialYear={deepLink?.page === 'communion-prep' ? deepLink.year : null} />
         </main>
       )}
+      {!updating && activeTab === 'rotations' && (
+        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
+          <RotationsView key={rotationFocus || 'index'} initialRotationId={rotationFocus} />
+        </main>
+      )}
+
       {!updating && activeTab === 'signups' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           <SignupsView key={signupFocus || 'index'} initialListId={signupFocus} />

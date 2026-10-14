@@ -252,6 +252,7 @@ implicitly, and nobody else holds one until an admin grants it.
 | `calendar` | Church Calendar | Add and edit dated events |
 | `directory` | Member Directory | Edit anybody's directory entry, and add people who are not in it yet |
 | `church-groups` | Church Groups | Create the congregation's small groups (or generate a whole set at once), retire them, and appoint each group's leader |
+| `rotations` | Rotations | Start a rotation for anything taken in turns, choose its coordinators, and retire or delete it — see [Rotations](#rotations) |
 | `mail-groups` | Email Groups | Decide who is in each distribution group, and send to them |
 | `bulletin` | Weekly Newsletter | Write each week's prayer lists and offering, and export the newsletter as Word or PDF |
 | `contributions` | Contributions | Record each week's contribution total, correct earlier weeks, and import them from a CSV — see [Contributions](#contributions) |
@@ -754,6 +755,72 @@ Cancelling a posted meeting tells the group; cancelling a draft tells nobody,
 because nobody ever heard of it.
 
 ---
+
+## Rotations
+
+**Our Church Family → Rotations** is for anything the church takes in turns —
+teaching the ladies' class, hosting a baby shower — so nobody has to remember
+who went last (`server/lib/rotations.js`, `server/routes/rotations.js`).
+
+Each rotation is an ordered line of people from the member directory
+(`rotation_members.position`):
+
+| | |
+|---|---|
+| **Next up** | The first person in the line who is not sitting out |
+| **Give a turn** | Writes it to `rotation_turns` (date and note optional) and sends that person to the back. Usually whoever is next up; when somebody else steps in, *they* go to the back and next up keeps their place |
+| **Upcoming / History** | A turn dated after today is upcoming. Cancelling an upcoming turn puts that person back at the front; removing an old one only takes it out of the history |
+| **Send to the back** | Passing without a turn — nothing is written down |
+| **Sitting out** | Keeps their place, but is passed over until they are back in |
+| **Reorder** | Move up / down. Tells nobody |
+
+A turn keeps the name it was given under, so the history still reads properly
+after somebody leaves the directory.
+
+**Who does what.** Everybody signed in sees every active rotation. Whoever holds
+the `rotations` area starts one, chooses its **coordinators** (directory people,
+matched to an account by `users.directory_id`, as group leaders are), and can
+retire it (hidden but kept) or delete it with its history. A coordinator runs
+only their own: the line, its order, its turns, and its name and description.
+
+**Telling whoever is next.** When a rotation moves on — a turn is given, or
+somebody is sent to the back — whoever is next up then is emailed
+(`server/mail/rotations.js`, context `rotation:<id>:next-up`) and gets a
+notification in the bell. `rotations.notified_directory_id` remembers who was
+last told, so one wait is one email however often the rotation is touched.
+Setting a rotation up, reordering it and sitting somebody out tell nobody; a
+coordinator's **Let them know** tells whoever is next up straight away. The
+address is the directory entry's, else a linked account's; somebody with
+neither is shown as *No email* to the coordinators.
+
+**Telling somebody about their turn.** Two more messages, each an email and a
+bell notification:
+
+- **Given a turn** (`rotation:<id>:turn:<turnId>:given`) — sent when a
+  coordinator gives somebody a turn dated today or later: what, when and the
+  note. A turn written down after the fact (no date, or a past one) tells
+  nobody, and nor does a coordinator giving themselves a turn.
+- **Reminder** (`rotation:<id>:turn:<turnId>:reminder`) — a week before a dated
+  turn, from the same 15-minute timer as the other reminders
+  (`server/mail/rotations.js` → `tick`). Each is claimed on the turn
+  (`rotation_turns.reminded_at`) before it is sent, so a restart never sends it
+  twice. A turn given less than a week ahead is claimed when it is given, since
+  the first message already said when. A cancelled turn, a turn on a retired
+  rotation, and a turn whose day has come get none; somebody with no address
+  or account is tried again on the next tick.
+
+**Permanent links.** Each rotation has its own address,
+`/?page=rotations&rotation=<id>`. The address bar holds it while the rotation
+is open (as Sign-Ups does), **Copy link** on the rotation copies it, and every
+rotation email links to it. A link to a rotation that has since been deleted
+says so and offers the list instead.
+
+The endpoints, under `/api/rotations`: `GET /`, `GET /people`, `GET /:id`;
+for the area, `POST /`, `DELETE /:id` and `PUT /:id/coordinators`; for a
+coordinator, `PATCH /:id`, `POST /:id/members`, `DELETE /:id/members/:directoryId`,
+`PATCH /:id/members/:directoryId` (sitting out), `POST /:id/members/:directoryId/back`,
+`PUT /:id/order`, `POST /:id/turns`, `DELETE /:id/turns/:turnId[?requeue=1]` and
+`POST /:id/remind`. Every change is in the action history under **Rotations**.
 
 ## Comments & Notifications
 

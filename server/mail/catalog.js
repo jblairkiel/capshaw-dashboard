@@ -15,6 +15,7 @@ const recordsReminder = require('./records');
 const leaderReminders = require('./worshipReminders');
 const communionPrep = require('./communionPrep');
 const signupMail = require('./signups');
+const rotationMail = require('./rotations');
 
 const CATEGORIES = [
   { id: 'notifications', label: 'Notifications', description: 'Messages to one person about their own account or something waiting on them.' },
@@ -217,6 +218,44 @@ const EMAILS = [
     trigger: 'A week before the month they signed up for — or as soon as they are put down, if that is less than a week before it begins.',
     like: ['communion-prep:%:reminder'],
     preview: () => communionPrep.compose.reminder({ name: SAMPLE.user.name, year: 2026, month: 11 }),
+  },
+  {
+    id: 'rotation-next-up', category: 'notifications',
+    name: 'You are next up on a rotation',
+    audience: 'Whoever is now next up on a rotation (teaching a class, hosting a shower…)',
+    trigger: 'The rotation moves on — somebody takes a turn or is sent to the back — or a coordinator chooses "Let them know".',
+    like: ['rotation:%:next-up'],
+    preview: () => rotationMail.compose.nextUp({
+      name: SAMPLE.user.name,
+      rotation: { id: 1, name: 'Ladies\' class teachers', description: 'Teaching the Wednesday evening ladies\' class for a quarter.' },
+      coordinators: [{ name: 'Ruth Hale' }],
+    }),
+  },
+  {
+    id: 'rotation-turn-given', category: 'notifications',
+    name: 'You have been given a turn',
+    audience: 'Whoever a coordinator gives a turn on a rotation',
+    trigger: 'A coordinator gives somebody a turn dated today or later (not one written down after the fact).',
+    like: ['rotation:%:turn:%:given'],
+    preview: () => rotationMail.compose.turnGiven({
+      name: SAMPLE.user.name,
+      rotation: { id: 1, name: 'Baby shower hosts', description: 'Hosting the next baby shower in the fellowship hall.' },
+      turn: { date: '2026-11-08', note: 'For the Hale family, 2pm' },
+      coordinators: [{ name: 'Ruth Hale' }],
+    }),
+  },
+  {
+    id: 'rotation-turn-reminder', category: 'notifications',
+    name: 'Your turn is coming up',
+    audience: 'Whoever has a dated turn on a rotation',
+    trigger: 'A week before the turn. A turn given less than a week ahead gets no separate reminder: the "given a turn" email says when.',
+    like: ['rotation:%:turn:%:reminder'],
+    preview: () => rotationMail.compose.turnReminder({
+      name: SAMPLE.user.name,
+      rotation: { id: 1, name: 'Ladies\' class teachers', description: '' },
+      turn: { date: '2026-11-04', note: 'Lesson 4 of the quarter' },
+      coordinators: [{ name: 'Ruth Hale' }],
+    }),
   },
 
   // ── Groups ─────────────────────────────────────────────────────────────────
