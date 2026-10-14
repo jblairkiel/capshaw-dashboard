@@ -529,6 +529,8 @@ export default function LoginPage({ authError, verified, verifyError, resetToken
         </p>
         <p className="text-center text-xs mt-2">
           <a href="/privacy.html" className="text-gray-400 underline hover:text-church-navy">Privacy policy</a>
+          <span className="text-gray-400">{' '}&bull;{' '}</span>
+          <a href="/terms.html" className="text-gray-400 underline hover:text-church-navy">Terms of service</a>
         </p>
       </div>
     </div>

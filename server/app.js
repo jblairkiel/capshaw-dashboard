@@ -187,11 +187,14 @@ function createApp() {
       message: { success: false, error: 'Too many requests. Please wait a few minutes and try again.' },
     });
     app.use(staticRateLimit, express.static(clientDist));
-    // The privacy policy (client/public/privacy.html), at the short address
-    // given to Google and Facebook. It is public, like every static file.
-    app.get('/privacy', staticRateLimit, (req, res) => {
-      res.sendFile(path.join(clientDist, 'privacy.html'));
-    });
+    // The privacy policy and terms of service (client/public/*.html), at the
+    // short addresses given to Google and Facebook. They are public, like
+    // every static file.
+    for (const page of ['privacy', 'terms']) {
+      app.get(`/${page}`, staticRateLimit, (req, res) => {
+        res.sendFile(path.join(clientDist, `${page}.html`));
+      });
+    }
     app.get('*', staticRateLimit, (req, res) => {
       res.sendFile(path.join(clientDist, 'index.html'));
     });

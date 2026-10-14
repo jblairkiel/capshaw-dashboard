@@ -598,9 +598,11 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
         <p className="text-xs text-gray-400 mt-1">
           8941 Wall Triana Hwy &bull; Harvest, AL &mdash; for our church family
         </p>
-        <a href="/privacy.html" className="block text-xs text-gray-400 underline hover:text-church-navy mt-2">
-          Privacy policy
-        </a>
+        <p className="text-xs text-gray-400 mt-2">
+          <a href="/privacy.html" className="underline hover:text-church-navy">Privacy policy</a>
+          {' '}&bull;{' '}
+          <a href="/terms.html" className="underline hover:text-church-navy">Terms of service</a>
+        </p>
         <button
           onClick={() => setReportingBug(true)}
           className="text-xs text-gray-400 underline hover:text-church-navy mt-2"
