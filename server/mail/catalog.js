@@ -91,6 +91,22 @@ const EMAILS = [
     preview: () => accounts.compose.addressAlreadyRegistered({ name: SAMPLE.user.name, provider: 'local' }),
   },
   {
+    id: 'account-add-email', category: 'notifications',
+    name: 'Confirm an added email address',
+    audience: 'Somebody whose Google or Facebook sign-in came without an email address',
+    trigger: 'They add an address on the waiting page.',
+    like: ['account:add-email'],
+    preview: () => accounts.compose.confirmAddedAddress({ name: SAMPLE.user.name, token: 'sample-token', via: 'facebook' }),
+  },
+  {
+    id: 'account-add-email-in-use', category: 'notifications',
+    name: 'Address already has an account',
+    audience: 'The owner of an address somebody tried to add to another account',
+    trigger: 'Somebody adds an address on the waiting page that already belongs to an account.',
+    like: ['account:add-email-in-use'],
+    preview: () => accounts.compose.addressAlreadyInUse({ name: SAMPLE.user.name, provider: 'google', via: 'facebook' }),
+  },
+  {
     id: 'account-reset', category: 'notifications',
     name: 'Choose a new password',
     audience: 'The person who asked to reset their password',

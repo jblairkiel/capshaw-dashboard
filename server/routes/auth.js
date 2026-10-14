@@ -371,7 +371,11 @@ function publicUser(user) {
   const { id, name, email, photo, role, provider, created_at, last_login, directory_id } = user;
   // `areas` is what the client shows Add/Edit buttons from. The server checks
   // it again on every write — this is only what the screen is allowed to offer.
-  return { id, name, email, photo, role, provider, created_at, last_login, directory_id, areas: effectiveAreas(user) };
+  return {
+    id, name, email, photo, role, provider, created_at, last_login, directory_id, areas: effectiveAreas(user),
+    // An address they asked to add, still waiting on its confirmation link.
+    pending_email: user.pending_email || '',
+  };
 }
 
 // Issues a fresh confirmation token, stores only its digest, and mails the
@@ -474,7 +478,7 @@ router.get('/verify-email', (req, res) => {
 
   const user = db.prepare(`
     SELECT * FROM users
-     WHERE provider = 'local' AND email_verify_hash <> '' AND email_verify_hash = ?
+     WHERE email_verify_hash <> '' AND email_verify_hash = ?
   `).get(hashToken(token));
 
   if (!user) {
@@ -485,6 +489,8 @@ router.get('/verify-email', (req, res) => {
 
   const expired = db.prepare("SELECT datetime('now') > ? AS expired").get(user.email_verify_expires_at).expired;
   if (expired) return back('verify_error=expired');
+
+  if (user.provider !== 'local') return addConfirmedAddress(user, back);
 
   // On a brand-new install the owner has no one to approve them, so the
   // address named by ADMIN_EMAIL is let straight in — exactly as it is on the
@@ -527,6 +533,86 @@ router.post('/resend-verification', limitResend, (req, res) => {
 
   res.json({ success: true, message: CHECK_YOUR_EMAIL });
 });
+
+// ─── Adding an address to a Google or Facebook account ────────────────────────
+//
+// Facebook gives no email address for somebody who joined it with a phone
+// number, or who declined to share it. Such an account cannot be matched to the
+// directory or told when it is approved, so the waiting page asks for one. It
+// only becomes the account's address once its owner opens the link we mail to
+// it — the same confirmation an email-and-password account goes through.
+
+const ADDRESS_LINK_SENT = email =>
+  `We have sent a link to ${email}. Open it to add the address to your account.`;
+
+router.post('/add-email', requireAuth, limitResend, (req, res) => {
+  const user  = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  const email = normalizeEmail(req.body?.email);
+
+  // The address has to be the member's own, so an admin viewing the portal as
+  // them cannot add one on their behalf.
+  if (req.impersonator) {
+    return res.status(403).json({ success: false, error: 'Only they can add an email address to their account.' });
+  }
+  if (user.provider === 'local' || user.email) {
+    return res.status(400).json({ success: false, error: 'Your account already has an email address.' });
+  }
+  if (!isEmailAddress(email)) {
+    return res.status(400).json({ success: false, error: 'Please enter a valid email address.' });
+  }
+  // Asking again for the same address within a couple of minutes changes
+  // nothing, so the button cannot be used to fill somebody's mailbox.
+  if (email === user.pending_email && sentTooRecently(user)) {
+    return res.json({ success: true, pending_email: email, message: ADDRESS_LINK_SENT(email) });
+  }
+
+  // An address another account already has is never added to this one. Its
+  // owner alone is told, so the answer here is the same either way and the form
+  // cannot be used to find out who has an account.
+  const other = anyAccountFor(email);
+  if (other && other.id !== user.id) {
+    accountMail.addressAlreadyInUse({ email, name: other.name, provider: other.provider, via: user.provider });
+  } else {
+    const { token, hash } = createToken();
+    db.prepare(`
+      UPDATE users
+         SET pending_email = ?,
+             email_verify_hash = ?,
+             email_verify_expires_at = datetime('now', ?),
+             email_verify_sent_at = datetime('now')
+       WHERE id = ?
+    `).run(email, hash, `+${VERIFY_TTL_HOURS} hours`, user.id);
+    accountMail.confirmAddedAddress({ name: user.name, email, token, via: user.provider });
+  }
+  res.json({ success: true, pending_email: email, message: ADDRESS_LINK_SENT(email) });
+});
+
+// The link in that email, opened: the address becomes the account's own, and
+// the account is matched to the directory by it if it is not linked already.
+// Somebody else may have taken the address since the link was sent, in which
+// case nothing is added.
+function addConfirmedAddress(user, back) {
+  const email = user.pending_email;
+  const other = email && anyAccountFor(email);
+  if (!email || (other && other.id !== user.id)) {
+    db.prepare(`
+      UPDATE users SET pending_email = '', email_verify_hash = '', email_verify_expires_at = NULL WHERE id = ?
+    `).run(user.id);
+    return back(email ? 'verify_error=taken' : 'verify_error=invalid');
+  }
+
+  db.prepare(`
+    UPDATE users
+       SET email = ?,
+           pending_email = '',
+           email_verified_at = datetime('now'),
+           email_verify_hash = '',
+           email_verify_expires_at = NULL,
+           directory_id = coalesce(directory_id, ?)
+     WHERE id = ?
+  `).run(email, findPersonByEmail(email), user.id);
+  return back('verified=added');
+}
 
 // ─── POST /forgot-password ────────────────────────────────────────────────────
 //
@@ -725,8 +811,10 @@ router.get('/google/callback', ifConfigured('google'), (req, res, next) => {
   })(req, res, next);
 });
 
+// `rerequest` asks again for the email permission if somebody declined it last
+// time; without an address their account cannot be matched to the directory.
 router.get('/facebook', ifConfigured('facebook'),
-  passport.authenticate('facebook', { scope: ['email'] })
+  passport.authenticate('facebook', { scope: ['email'], authType: 'rerequest' })
 );
 
 router.get('/facebook/callback', ifConfigured('facebook'), (req, res, next) => {

@@ -98,6 +98,20 @@ function SignInBadges({ user }) {
 
 const PROVIDER_NAMES = { google: 'Google', facebook: 'Facebook', local: 'email and password' };
 
+// A Google or Facebook sign-in that came without an address (Facebook gives
+// none for somebody who joined it with a phone number). Such an account
+// cannot be emailed or matched to the directory until they add one.
+function NoEmailBadge() {
+  return (
+    <span
+      className="inline-block text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200"
+      title="Their sign-in gave no email address. They have been asked to add one; until then they cannot be emailed or matched to the directory."
+    >
+      No email
+    </span>
+  );
+}
+
 // Google or Facebook sign-ins that share an address with an existing account.
 // Each one waits here until an admin says it is the same person: approving
 // lets that sign-in into the account, with everything it can see and do. The
@@ -298,8 +312,8 @@ const COLUMNS = [
     key:    'email',
     label:  'Email',
     filter: { type: 'text' },
-    text:   u => u.email || '',
-    render: u => u.email ? <span className="text-gray-600">{u.email}</span> : <Dash />,
+    text:   u => u.email || 'No email',
+    render: u => u.email ? <span className="text-gray-600">{u.email}</span> : <NoEmailBadge />,
   },
   {
     key:    'role',
@@ -746,6 +760,13 @@ function UserDetail({ user, currentUserId, people, busy, onSetRole, onSetAreas, 
                   ? 'They have not opened the confirmation email yet, so they cannot sign in even once you approve them. You can still approve now — it will be waiting for them.'
                   : 'Until you approve them they see only a page saying they are waiting, with the admins\' cellphone numbers to call. Approving is also where you say who they are in the member directory.'}
               </p>
+              {!user.email && user.provider !== 'local' && (
+                <p className="text-xs text-orange-800 mt-1">
+                  Their {PROVIDER_NAMES[user.provider] || 'sign-in'} gave no email address, so they could not be matched to the
+                  directory and will not be emailed when you approve them. They have been asked to add one. You can
+                  still approve them now and pick their directory entry yourself; let them know in person.
+                </p>
+              )}
               <button
                 type="button"
                 onClick={() => onApproveRequest(user.id)}

@@ -693,6 +693,8 @@ export default function App() {
         <WaitingForApproval
           key={`${user.id}:${impersonatedBy?.id ?? ''}`}
           user={user}
+          verified={verified}
+          verifyError={verifyError}
           onApproved={setUser}
           onLogout={() => { setUser(null); setImpersonatedBy(null); }}
         />

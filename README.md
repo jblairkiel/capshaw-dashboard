@@ -198,6 +198,29 @@ The endpoints, all admin-only: `GET /api/auth/link-requests[?status=pending|appr
 `PATCH /api/auth/link-requests/:id/approve`, `PATCH /api/auth/link-requests/:id/decline`
 and `DELETE /api/auth/link-requests/:id`.
 
+### A Google or Facebook sign-in with no email address
+
+Facebook gives no address for somebody who joined it with a phone number, or
+who declines to share it. (Signing in with Facebook asks again for the email
+permission each time — `auth_type=rerequest` — in case it was declined.) Such
+an account cannot be matched to the directory or emailed, so:
+
+- **The waiting page asks for one.** `POST /api/auth/add-email` mails a
+  confirmation link to it (the same 48-hour link, and the same
+  `GET /api/auth/verify-email`, as a password account). Until it is opened the
+  address sits in `users.pending_email` and is not the account's.
+- **Opening the link** makes it the account's confirmed address and, if the
+  account is not linked to the directory yet, links it to the one entry with
+  that address.
+- **An address another account already has** is never added. The answer is the
+  same, so the form cannot be used to find out who has an account; the owner of
+  that address is emailed instead, and told the church office can join the two
+  sign-ins. The same check runs again when the link is opened.
+- **An admin viewing the portal as them** cannot add one on their behalf.
+- **Admins** see a *No email* badge in **Admin → Members & Access**, with a note
+  on the account explaining it. Approving still works; pick their directory
+  entry by hand and let them know in person, since there is nowhere to email.
+
 ---
 
 ## Roles & Areas

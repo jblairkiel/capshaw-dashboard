@@ -878,6 +878,11 @@ function initSchema(db) {
   addColumn('users', 'approved_at', 'TEXT');
   addColumn('users', 'approved_by', 'INTEGER REFERENCES users(id) ON DELETE SET NULL');
 
+  // An address somebody asked to add to a Google or Facebook account that came
+  // without one, kept here until they open the confirmation link (which uses
+  // the email_verify_* columns above). Only then does it become their email.
+  addColumn('users', 'pending_email', "TEXT NOT NULL DEFAULT ''");
+
   // Whether this person may be rostered for the men's worship jobs. Chosen on
   // My Info (or by the directory area on their behalf) — not guessed from a
   // name. '' means nobody has said.

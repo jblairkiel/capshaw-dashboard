@@ -7,7 +7,79 @@ import { useState, useEffect } from 'react';
 // saying why there is none: the admins have already been told, and here is
 // who they are, for anyone who would rather not wait.
 
-export default function WaitingForApproval({ user, onApproved, onLogout }) {
+// Where the link in the "confirm the address you added" email lands, when it
+// is opened in a browser that is still signed in here.
+const LINK_OUTCOMES = {
+  added:   { tone: 'success', text: 'Thank you — your email address is confirmed and added to your account.' },
+  taken:   { tone: 'error',   text: 'That email address now belongs to another account here, so it was not added. You can add a different one below, or ask an admin.' },
+  expired: { tone: 'error',   text: 'That link has expired. Add your address again below and we will send a new one.' },
+  invalid: { tone: 'error',   text: 'That link is no longer valid. If your address is not on your account yet, add it again below.' },
+  missing: { tone: 'error',   text: 'That link was incomplete. Please open the link in the email again.' },
+};
+
+const TONES = {
+  success: 'bg-green-50 border-green-200 text-green-800',
+  error:   'bg-red-50 border-red-200 text-red-700',
+};
+
+const PROVIDER_NAMES = { google: 'Google', facebook: 'Facebook' };
+
+// Facebook gives no email address for somebody who joined it with a phone
+// number, or who chose not to share it. Without one the account cannot be
+// told when it is approved or matched to the member directory, so ask. The
+// address is only added once they open the link we mail to it.
+function AddEmail({ provider, pendingEmail }) {
+  const [email, setEmail] = useState(pendingEmail || '');
+  const [busy, setBusy]   = useState(false);
+  const [error, setError] = useState('');
+  const [sent, setSent]   = useState(pendingEmail ? `We have sent a link to ${pendingEmail}. Open it to add the address to your account.` : '');
+
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true); setError(''); setSent('');
+    try {
+      const res  = await fetch('/api/auth/add-email', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (json.success) setSent(json.message);
+      else setError(json.error || 'We could not send the link. Please try again.');
+    } catch {
+      setError('We could not reach the portal just now. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} noValidate className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 space-y-3" aria-labelledby="add-email-heading">
+      <div>
+        <h3 id="add-email-heading" className="text-sm font-semibold text-amber-900">Add your email address</h3>
+        <p className="text-xs text-amber-900 mt-1">
+          {PROVIDER_NAMES[provider] || 'Your sign-in'} did not give us an email address. Add one so we can tell you
+          when you are approved and connect you to the member directory. We will send a link to confirm it is yours.
+        </p>
+      </div>
+      <div className="flex gap-2 flex-wrap">
+        <label htmlFor="add-email" className="sr-only">Email address</label>
+        <input
+          id="add-email" type="email" autoComplete="email" required value={email}
+          onChange={e => setEmail(e.target.value)}
+          className="flex-1 min-w-[12rem] px-3 py-2 rounded-lg border border-amber-200 bg-white text-sm focus:outline-none focus:ring-1 focus:ring-church-gold"
+        />
+        <button type="submit" disabled={busy || !email.trim()} className="btn-primary text-sm disabled:opacity-50">
+          {busy ? 'Sending…' : sent ? 'Send it again' : 'Send me a link'}
+        </button>
+      </div>
+      {error && <p role="alert" className="text-xs text-red-700">{error}</p>}
+      {sent && <p role="status" className="text-xs text-green-800">{sent}</p>}
+    </form>
+  );
+}
+
+export default function WaitingForApproval({ user, verified, verifyError, onApproved, onLogout }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [checking, setChecking] = useState(false);
@@ -40,6 +112,7 @@ export default function WaitingForApproval({ user, onApproved, onLogout }) {
 
   const email = data?.you?.email ?? user.email;
   const first = String(user.name || '').split(/\s+/)[0];
+  const outcome = LINK_OUTCOMES[verified === 'added' ? 'added' : verifyError];
 
   return (
     <div className="min-h-screen bg-church-cream flex flex-col items-center justify-center px-4 py-10">
@@ -57,6 +130,12 @@ export default function WaitingForApproval({ user, onApproved, onLogout }) {
           <p className="text-gray-500 text-sm mt-1">Member Portal</p>
         </div>
 
+        {outcome && (
+          <div role="status" className={`mb-4 rounded-xl border px-4 py-3 text-sm text-center ${TONES[outcome.tone]}`}>
+            {outcome.text}
+          </div>
+        )}
+
         <section className="card space-y-4" aria-labelledby="waiting-heading">
           <div>
             <h2 id="waiting-heading" className="text-lg font-semibold text-church-navy">
@@ -72,6 +151,10 @@ export default function WaitingForApproval({ user, onApproved, onLogout }) {
               You don&apos;t need to do anything else, but if you would like to speed things up, you could call or text one of them:
             </p>
           </div>
+
+          {!email && user.provider !== 'local' && (
+            <AddEmail provider={user.provider} pendingEmail={user.pending_email} />
+          )}
 
           {error && <p className="text-sm text-red-600">{error}</p>}
           {!data && !error && <p className="text-sm text-gray-400">Loading…</p>}
