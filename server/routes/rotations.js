@@ -10,7 +10,7 @@ const db      = require('../db');
 const { requireAuth, requireApproved, requireArea } = require('../middleware/auth');
 const actionLog = require('../lib/actionLog');
 const rotations = require('../lib/rotations');
-const { tellNextUp } = require('../mail/rotations');
+const { tellNextUp, tellTurnGiven } = require('../mail/rotations');
 // Read through the module, so a test can say what day it is.
 const recordKeeping = require('../lib/recordKeeping');
 const churchToday = () => recordKeeping.churchToday();
@@ -38,10 +38,11 @@ function log(req, entry) {
   actionLog.record(req.user, { area: AREA, entity: 'rotation', entityId: req.rotation?.id ?? entry.entityId, ...entry });
 }
 
-// Whoever is now next up is told, and the answer says so, so the page can too.
-function respond(req, res, { status = 200, tell = false } = {}) {
+// Whoever is now next up is told, and the answer says so, so the page can too
+// (and, for a turn just given, whether its person was told about it).
+function respond(req, res, { status = 200, tell = false, given = null } = {}) {
   const told = tell ? tellNextUp(req.rotation.id, { actor: req.user }) : null;
-  res.status(status).json({ success: true, rotation: full(req, req.rotation.id), told });
+  res.status(status).json({ success: true, rotation: full(req, req.rotation.id), told, given });
 }
 
 // GET /api/rotations[?retired=1] — every rotation, and whether this person may start one.
@@ -170,7 +171,7 @@ router.post('/:id/turns', requireApproved, runOnly, (req, res) => {
     summary: `Gave ${turn.name} a turn on the "${req.rotation.name}" rotation${turn.date ? ` on ${turn.date}` : ''}`,
     after: turn,
   });
-  respond(req, res, { status: 201, tell: true });
+  respond(req, res, { status: 201, tell: true, given: tellTurnGiven(turn, { actor: req.user }) });
 });
 
 // DELETE /api/rotations/:id/turns/:turnId[?requeue=1] — requeue puts them back at the front.

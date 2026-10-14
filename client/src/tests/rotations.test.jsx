@@ -243,3 +243,77 @@ describe('one rotation, as whoever holds Rotations', () => {
     expect(JSON.parse(calls(fetchMock, 'PATCH', '/api/rotations/7')[0][1].body)).toEqual({ active: false });
   });
 });
+
+describe('permanent links', () => {
+  afterEach(() => window.history.replaceState(null, '', '/'));
+
+  function api() {
+    return mockApi(url => {
+      if (url === '/api/rotations/7') return { success: true, rotation: detail() };
+      if (url === '/api/rotations/99') return { success: false, error: 'No such rotation' };
+      return { success: true, canManage: false, rotations: [card()] };
+    });
+  }
+
+  test('the address bar holds the link to the open rotation, and to the list again on the way back', async () => {
+    api();
+    render(<RotationsView />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Baby showers' }));
+    await screen.findByRole('heading', { name: 'Baby showers' });
+    expect(window.location.search).toBe('?page=rotations&rotation=7');
+
+    fireEvent.click(screen.getByRole('button', { name: '← All rotations' }));
+    await screen.findByRole('list', { name: 'Rotations' });
+    expect(window.location.search).toBe('?page=rotations');
+  });
+
+  test('a link opens straight on its rotation, and leaving the page takes the link back out', async () => {
+    api();
+    const { unmount } = render(<RotationsView initialRotationId={7} />);
+    expect(await screen.findByRole('heading', { name: 'Baby showers' })).toBeInTheDocument();
+    expect(window.location.search).toBe('?page=rotations&rotation=7');
+    unmount();
+    expect(window.location.search).toBe('');
+  });
+
+  test('Copy link copies the rotation\'s full address', async () => {
+    api();
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    render(<RotationsView initialRotationId={7} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy link' }));
+    expect(await screen.findByRole('button', { name: 'Link copied' })).toBeInTheDocument();
+    expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/?page=rotations&rotation=7`);
+  });
+
+  test('a link to a rotation that has been deleted says so, with a way back', async () => {
+    api();
+    render(<RotationsView initialRotationId={99} />);
+    expect(await screen.findByRole('alert')).toHaveTextContent('That rotation is not here any more');
+    fireEvent.click(screen.getByRole('button', { name: '← All rotations' }));
+    expect(await screen.findByRole('list', { name: 'Rotations' })).toBeInTheDocument();
+  });
+});
+
+describe('after giving a dated turn', () => {
+  test('says who was told about their turn, and who is next up now', async () => {
+    let current = detail({ canRun: true });
+    mockApi((url, opts) => {
+      if (url === '/api/rotations/7/turns' && opts.method === 'POST') {
+        current = detail({ canRun: true, nextUp: { directoryId: 2, name: 'Beth Cole' } });
+        return { success: true, rotation: current,
+          given: { directoryId: 1, name: 'Ann Bell', emailed: true, notified: true },
+          told: { directoryId: 2, name: 'Beth Cole', emailed: false, notified: false } };
+      }
+      if (url === '/api/rotations/people') return { success: true, people: PEOPLE };
+      if (url === '/api/rotations/7') return { success: true, rotation: current };
+      return { success: true, canManage: false, rotations: [card({ canRun: true })] };
+    });
+    render(<RotationsView initialRotationId={7} />);
+    const form = await screen.findByRole('form', { name: 'Give a turn' });
+    fireEvent.click(within(form).getByRole('button', { name: 'Give the turn to Ann Bell' }));
+    expect(await screen.findByText(
+      'Ann Bell has been emailed about their turn. Beth Cole is next up, but has no email address or account here — please let them know in person.',
+    )).toBeInTheDocument();
+  });
+});

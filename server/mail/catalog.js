@@ -231,6 +231,32 @@ const EMAILS = [
       coordinators: [{ name: 'Ruth Hale' }],
     }),
   },
+  {
+    id: 'rotation-turn-given', category: 'notifications',
+    name: 'You have been given a turn',
+    audience: 'Whoever a coordinator gives a turn on a rotation',
+    trigger: 'A coordinator gives somebody a turn dated today or later (not one written down after the fact).',
+    like: ['rotation:%:turn:%:given'],
+    preview: () => rotationMail.compose.turnGiven({
+      name: SAMPLE.user.name,
+      rotation: { id: 1, name: 'Baby shower hosts', description: 'Hosting the next baby shower in the fellowship hall.' },
+      turn: { date: '2026-11-08', note: 'For the Hale family, 2pm' },
+      coordinators: [{ name: 'Ruth Hale' }],
+    }),
+  },
+  {
+    id: 'rotation-turn-reminder', category: 'notifications',
+    name: 'Your turn is coming up',
+    audience: 'Whoever has a dated turn on a rotation',
+    trigger: 'A week before the turn. A turn given less than a week ahead gets no separate reminder: the "given a turn" email says when.',
+    like: ['rotation:%:turn:%:reminder'],
+    preview: () => rotationMail.compose.turnReminder({
+      name: SAMPLE.user.name,
+      rotation: { id: 1, name: 'Ladies\' class teachers', description: '' },
+      turn: { date: '2026-11-04', note: 'Lesson 4 of the quarter' },
+      coordinators: [{ name: 'Ruth Hale' }],
+    }),
+  },
 
   // ── Groups ─────────────────────────────────────────────────────────────────
   {

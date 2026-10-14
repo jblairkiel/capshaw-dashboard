@@ -34,12 +34,43 @@ function today() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// Who was told about a turn just given, said plainly.
+function givenMessage(given) {
+  if (!given) return '';
+  if (given.emailed) return `${given.name} has been emailed about their turn.`;
+  if (given.notified) return `${given.name} has been told about their turn in the portal (there is no email address on file).`;
+  return `${given.name} has no email address or account here — please tell them about their turn in person.`;
+}
+
 // What happened when the rotation moved on, said plainly.
 function toldMessage(told) {
   if (!told) return '';
   if (told.emailed) return `${told.name} is next up and has been emailed to say so.`;
   if (told.notified) return `${told.name} is next up and has been told in the portal (there is no email address on file).`;
   return `${told.name} is next up, but has no email address or account here — please let them know in person.`;
+}
+
+// Each rotation's permanent link: what the address bar holds while it is open,
+// and what the "you are next up" and reminder emails point to.
+const rotationLink = id => `${window.location.origin}/?page=rotations&rotation=${id}`;
+
+function CopyLink({ id }) {
+  const [state, setState] = useState('');
+  async function copy() {
+    try { await navigator.clipboard.writeText(rotationLink(id)); setState('copied'); setTimeout(() => setState(''), 2500); }
+    catch { setState('shown'); }
+  }
+  return (
+    <span className="inline-flex items-center gap-2 flex-wrap">
+      <button type="button" onClick={copy} className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:border-church-navy">
+        {state === 'copied' ? 'Link copied' : 'Copy link'}
+      </button>
+      {state === 'shown' && (
+        <input readOnly value={rotationLink(id)} onFocus={e => e.target.select()} aria-label="Link to this rotation"
+          className="text-xs border border-gray-200 rounded px-2 py-1 w-64" />
+      )}
+    </span>
+  );
 }
 
 const Pill = ({ tone, children }) => (
@@ -402,15 +433,19 @@ function RotationDetail({ id, people, onBack, onChanged }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [missing, setMissing] = useState(false);
 
   useEffect(() => {
-    send(`${API}/${id}`).then(j => setRotation(j.rotation)).catch(err => setError(err.message));
+    send(`${API}/${id}`).then(j => setRotation(j.rotation)).catch(err => {
+      if (/no such rotation/i.test(err.message)) setMissing(true);
+      else setError(err.message);
+    });
   }, [id]);
 
   // Every change answers with the whole rotation, and says who was told.
   const apply = useCallback(json => {
     setRotation(json.rotation);
-    setNotice(toldMessage(json.told));
+    setNotice([givenMessage(json.given), toldMessage(json.told)].filter(Boolean).join(' '));
     onChanged();
   }, [onChanged]);
 
@@ -428,9 +463,17 @@ function RotationDetail({ id, people, onBack, onChanged }) {
   }, [apply]);
 
   if (!rotation) {
-    return error
-      ? <div className="card text-sm text-red-600">{error}</div>
-      : <div className="flex items-center justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-church-gold" /></div>;
+    if (!missing && !error) {
+      return <div className="flex items-center justify-center py-16"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-church-gold" /></div>;
+    }
+    return (
+      <div className="space-y-4">
+        <button type="button" onClick={onBack} className="text-sm text-church-gold hover:text-church-navy">← All rotations</button>
+        <div role="alert" className={`card text-sm ${missing ? 'text-gray-600' : 'text-red-600'}`}>
+          {missing ? 'That rotation is not here any more — it may have been deleted. Choose All rotations to see the ones there are.' : error}
+        </div>
+      </div>
+    );
   }
 
   const next = rotation.members.find(m => m.next);
@@ -440,9 +483,12 @@ function RotationDetail({ id, people, onBack, onChanged }) {
       <button type="button" onClick={onBack} className="text-sm text-church-gold hover:text-church-navy">← All rotations</button>
 
       <div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <h2 className="section-heading mb-0">{rotation.name}</h2>
-          {!rotation.active && <Pill tone="bg-gray-100 text-gray-600">Retired</Pill>}
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="section-heading mb-0">{rotation.name}</h2>
+            {!rotation.active && <Pill tone="bg-gray-100 text-gray-600">Retired</Pill>}
+          </div>
+          <CopyLink id={rotation.id} />
         </div>
         {rotation.description && <p className="text-sm text-gray-600 mt-1 whitespace-pre-line">{rotation.description}</p>}
         <p className="text-xs text-gray-500 mt-1">
@@ -509,6 +555,17 @@ export default function RotationsView({ initialRotationId = null }) {
   }, [showRetired]);
 
   useEffect(() => { load(); }, [load]);
+
+  // The address bar always holds the link to what is showing, so a rotation
+  // can be copied, bookmarked, or opened again.
+  useEffect(() => {
+    const url = openId ? `/?page=rotations&rotation=${openId}` : '/?page=rotations';
+    try { window.history.replaceState(null, '', url); } catch { /* not in a browser */ }
+  }, [openId]);
+  // Leaving the page takes its link back out, so a reload does not return here.
+  useEffect(() => () => {
+    try { window.history.replaceState(null, '', window.location.pathname); } catch { /* not in a browser */ }
+  }, []);
 
   // The directory, for choosing people — only fetched for somebody who can
   // choose them.

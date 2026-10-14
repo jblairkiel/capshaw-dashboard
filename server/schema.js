@@ -1423,7 +1423,8 @@ function initSchema(db) {
   // holds the rotations area, and run by the coordinators it appoints (directory
   // people, matched to an account the same way group leaders are).
   // `notified_directory_id` is who was last told they are next, so the same
-  // person is not emailed twice for one wait.
+  // person is not emailed twice for one wait. A turn's `reminded_at` claims its
+  // reminder a week before (mail/rotations.js), so it is sent once.
   db.exec(`
     CREATE TABLE IF NOT EXISTS rotations (
       id                    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1459,7 +1460,8 @@ function initSchema(db) {
       date         TEXT,                          -- YYYY-MM-DD, when it is or was
       note         TEXT    NOT NULL DEFAULT '',
       recorded_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
-      recorded_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+      recorded_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+      reminded_at  TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_rotation_turns_rotation ON rotation_turns(rotation_id);
   `);

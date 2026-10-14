@@ -144,6 +144,8 @@ const SECTIONS = [
         '**Let them know** — email whoever is next up straight away.',
       ] },
       { p: 'Whoever is next up is told automatically whenever the rotation moves on — when a turn is given or somebody is sent to the back — and only once for each time they come to the front.' },
+      { p: 'When a coordinator gives you a turn with a date, you are emailed straight away with the date and any note, and again a week before as a reminder (a turn less than a week away gets just the first email).' },
+      { p: 'Every rotation has its own link. Choose **Copy link** on a rotation to share it or bookmark it; it opens straight on that rotation for anyone signed in.' },
       { p: 'Whoever holds **Rotations** starts a rotation, chooses its coordinators from the member directory, and can retire one (it is hidden but kept) or delete it.' },
       { chart: flow('A turn on a rotation', ['You come to the front', 'You are emailed', 'Coordinator gives turn', 'You go to the back']) },
     ],

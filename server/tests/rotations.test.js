@@ -9,6 +9,7 @@ const express = require('express');
 const db = require('../db');
 const recordKeeping = require('../lib/recordKeeping');
 const router = require('../routes/rotations');
+const rotationMail = require('../mail/rotations');
 
 function buildApp(user) {
   const app = express();
@@ -281,5 +282,98 @@ describe('telling whoever is next', () => {
     const empty = await startShowers({ members: [] });
     expect((await as(RUTH_USER).post(`/api/rotations/${empty}/remind`)).body.error).toMatch(/nobody/);
     expect((await as(ANN_USER).post(`/api/rotations/${id}/remind`)).status).toBe(403);
+  });
+});
+
+describe('telling somebody about their turn', () => {
+  const contexts = () => outbox().map(m => m.context.replace(/\d+/g, 'N'));
+  const turnMail = kind => outbox().filter(m => m.context.endsWith(`:${kind}`));
+  const turnId = res => (res.body.rotation.upcoming[0] || res.body.rotation.history[0]).id;
+
+  test('a turn given for a date to come tells its person what and when, in email and the bell', async () => {
+    const id = await startShowers();
+    const res = await as(RUTH_USER).post(`/api/rotations/${id}/turns`).send({ date: '2026-11-08', note: 'For the Hale family, 2pm' });
+    expect(res.body.given).toMatchObject({ name: 'Ann Bell', emailed: true, notified: true });
+
+    const [mail] = turnMail('given');
+    expect(mail).toMatchObject({ to_email: 'ann@example.com', subject: 'Baby showers: you are down for Sunday, November 8, 2026' });
+    const body = db.prepare('SELECT body FROM mail_outbox WHERE context LIKE ?').get('%:given').body;
+    expect(body).toMatch(/Note: For the Hale family, 2pm/);
+    expect(body).toMatch(/let Ruth Hale know/);
+    expect(body).toMatch(/We will send you a reminder a week before/);
+    expect(body).toContain(`page=rotations&rotation=${id}`);
+    expect(db.prepare("SELECT title FROM notifications WHERE user_id = ? AND kind = 'rotation-turn-given'").get(ANN_USER.id).title)
+      .toBe('Baby showers: you are down for Sunday, November 8, 2026');
+    // Beth, now next up, has no address, so that is the only email.
+    expect(contexts()).toEqual(['rotation:N:turn:N:given']);
+    expect(res.body.told).toMatchObject({ name: 'Beth Cole', emailed: false });
+  });
+
+  test('a turn today counts; one written down afterwards, or with no date, tells nobody about it', async () => {
+    const id = await startShowers();
+    expect((await as(RUTH_USER).post(`/api/rotations/${id}/turns`).send({ date: '2026-10-14' })).body.given).toMatchObject({ name: 'Ann Bell' });
+    expect((await as(RUTH_USER).post(`/api/rotations/${id}/turns`).send({ date: '2026-10-01' })).body.given).toBeNull();
+    expect((await as(RUTH_USER).post(`/api/rotations/${id}/turns`).send({})).body.given).toBeNull();
+    expect(turnMail('given')).toHaveLength(1);
+  });
+
+  test('a coordinator giving themselves a turn is not told about it', async () => {
+    const id = await startShowers({ members: [ruth, ann] });
+    const res = await as(RUTH_USER).post(`/api/rotations/${id}/turns`).send({ date: '2026-11-08' });
+    expect(res.body.given).toBeNull();
+    expect(turnMail('given')).toHaveLength(0);
+  });
+
+  test('a week before a dated turn, its person is reminded once', async () => {
+    const id = await startShowers();
+    const res = await as(RUTH_USER).post(`/api/rotations/${id}/turns`).send({ date: '2026-11-08', note: 'Bring the punch bowl' });
+    const turn = turnId(res);
+
+    expect(rotationMail.tick()).toEqual([]);                       // 25 days ahead: not yet
+    recordKeeping.churchToday.mockReturnValue('2026-11-01');        // a week before
+    expect(rotationMail.tick()).toEqual([{ name: 'Ann Bell', rotation: 'Baby showers', date: '2026-11-08' }]);
+    expect(rotationMail.tick()).toEqual([]);                       // once
+    recordKeeping.churchToday.mockReturnValue('2026-11-05');
+    expect(rotationMail.tick()).toEqual([]);
+
+    const [mail] = turnMail('reminder');
+    expect(mail).toMatchObject({ to_email: 'ann@example.com', subject: 'Reminder: Baby showers on Sunday, November 8, 2026', context: `rotation:${id}:turn:${turn}:reminder` });
+    expect(db.prepare('SELECT body FROM mail_outbox WHERE context = ?').get(mail.context).body).toMatch(/Note: Bring the punch bowl/);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM notifications WHERE user_id = ? AND kind = 'rotation-turn-reminder'").get(ANN_USER.id).n).toBe(1);
+  });
+
+  test('a turn given inside that week gets no separate reminder', async () => {
+    const id = await startShowers();
+    const res = await as(RUTH_USER).post(`/api/rotations/${id}/turns`).send({ date: '2026-10-18' });
+    expect(rotationMail.tick()).toEqual([]);
+    expect(turnMail('given')).toHaveLength(1);
+    expect(turnMail('reminder')).toHaveLength(0);
+    const body = db.prepare('SELECT body FROM mail_outbox WHERE context LIKE ?').get('%:given').body;
+    expect(body).not.toMatch(/reminder a week before/);
+    expect(turnId(res)).toBeTruthy();
+  });
+
+  test('no reminder for a cancelled turn, a turn already past, or a retired rotation', async () => {
+    const id = await startShowers();
+    const first = await as(RUTH_USER).post(`/api/rotations/${id}/turns`).send({ date: '2026-11-08' });
+    await as(RUTH_USER).delete(`/api/rotations/${id}/turns/${turnId(first)}?requeue=1`);
+
+    const other = await startShowers();
+    await as(RUTH_USER).post(`/api/rotations/${other}/turns`).send({ date: '2026-11-08' });
+    await as(KEEPER).patch(`/api/rotations/${other}`).send({ active: false });
+
+    recordKeeping.churchToday.mockReturnValue('2026-11-03');
+    expect(rotationMail.tick()).toEqual([]);
+    recordKeeping.churchToday.mockReturnValue('2026-11-08');       // the day itself: too late to remind
+    expect(rotationMail.due('2026-11-08')).toEqual([]);
+  });
+
+  test('somebody with no address or account waits until there is one', async () => {
+    const id = await startShowers({ members: [beth, ann] });
+    await as(RUTH_USER).post(`/api/rotations/${id}/turns`).send({ date: '2026-11-08' });
+    recordKeeping.churchToday.mockReturnValue('2026-11-02');
+    expect(rotationMail.tick()).toEqual([]);
+    db.prepare("UPDATE directory SET email = 'beth@example.com' WHERE id = ?").run(beth);
+    expect(rotationMail.tick()).toEqual([expect.objectContaining({ name: 'Beth Cole' })]);
   });
 });

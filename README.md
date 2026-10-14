@@ -793,6 +793,28 @@ coordinator's **Let them know** tells whoever is next up straight away. The
 address is the directory entry's, else a linked account's; somebody with
 neither is shown as *No email* to the coordinators.
 
+**Telling somebody about their turn.** Two more messages, each an email and a
+bell notification:
+
+- **Given a turn** (`rotation:<id>:turn:<turnId>:given`) — sent when a
+  coordinator gives somebody a turn dated today or later: what, when and the
+  note. A turn written down after the fact (no date, or a past one) tells
+  nobody, and nor does a coordinator giving themselves a turn.
+- **Reminder** (`rotation:<id>:turn:<turnId>:reminder`) — a week before a dated
+  turn, from the same 15-minute timer as the other reminders
+  (`server/mail/rotations.js` → `tick`). Each is claimed on the turn
+  (`rotation_turns.reminded_at`) before it is sent, so a restart never sends it
+  twice. A turn given less than a week ahead is claimed when it is given, since
+  the first message already said when. A cancelled turn, a turn on a retired
+  rotation, and a turn whose day has come get none; somebody with no address
+  or account is tried again on the next tick.
+
+**Permanent links.** Each rotation has its own address,
+`/?page=rotations&rotation=<id>`. The address bar holds it while the rotation
+is open (as Sign-Ups does), **Copy link** on the rotation copies it, and every
+rotation email links to it. A link to a rotation that has since been deleted
+says so and offers the list instead.
+
 The endpoints, under `/api/rotations`: `GET /`, `GET /people`, `GET /:id`;
 for the area, `POST /`, `DELETE /:id` and `PUT /:id/coordinators`; for a
 coordinator, `PATCH /:id`, `POST /:id/members`, `DELETE /:id/members/:directoryId`,

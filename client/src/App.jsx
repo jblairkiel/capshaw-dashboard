@@ -275,6 +275,8 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
   // Which sign-up the Sign-Ups page opens on: its permanent link, or one
   // clicked on the calendar. Moving between pages any other way clears it.
   const [signupFocus, setSignupFocus] = useState(deepLink?.page === 'signups' ? deepLink.list : null);
+  // Likewise the rotation the Rotations page opens on: its permanent link.
+  const [rotationFocus, setRotationFocus] = useState(deepLink?.page === 'rotations' ? deepLink.rotation : null);
   // Every way of moving between pages goes through here, so a page that became
   // a tab ("songs", "order") still arrives where it should.
   const goTo = useCallback(id => {
@@ -283,13 +285,15 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
     if (alias?.page === 'service-roster') setRosterTab(alias.tab);
     setActiveTab(alias ? alias.page : id);
     setSignupFocus(null);
+    setRotationFocus(null);
   }, []);
   const openSignup = useCallback(id => { setActiveTab('signups'); setSignupFocus(id); }, []);
   const [siteData,    setSiteData]    = useState(null);
 
   useEffect(() => {
-    // The sign-ups page keeps its own permanent link in the address bar.
-    if (deepLink && deepLink.page !== 'signups') window.history.replaceState(null, '', window.location.pathname);
+    // The sign-ups and rotations pages keep their own permanent links in the
+    // address bar.
+    if (deepLink && !['signups', 'rotations'].includes(deepLink.page)) window.history.replaceState(null, '', window.location.pathname);
   }, [deepLink]);
   const [updating,    setUpdating]    = useState(false);
   const [updateError,    setUpdateError]    = useState('');
@@ -489,7 +493,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       )}
       {!updating && activeTab === 'rotations' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
-          <RotationsView initialRotationId={deepLink?.page === 'rotations' ? deepLink.rotation : null} />
+          <RotationsView key={rotationFocus || 'index'} initialRotationId={rotationFocus} />
         </main>
       )}
 
