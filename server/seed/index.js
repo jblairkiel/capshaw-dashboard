@@ -54,6 +54,7 @@ const BY_ID      = new Map(GENERATORS.map(g => [g.id, g]));
 
 const NOT_FILLED = {
   users:      'Accounts. Made-up sign-ins are not sample data, they are a way in.',
+  user_identities: 'Other sign-ins joined to an account. Same reason as users.',
   record_checkoffs: 'Somebody saying a service had nothing to record. Made-up ones would hide the gaps the report exists to show.',
   worship_parts: 'The parts a service is made of. Seeded once at start-up and kept by the worship organizer; real services are built from them, so a batch must not take them away.',
   worship_outlines: 'The usual order of each service. Seeded with the parts, and the worship organizer\'s to change.',

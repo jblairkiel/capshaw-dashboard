@@ -181,3 +181,22 @@ describe('UsersView grid — column selector', () => {
     expect(screen.getByLabelText('Filter by Role')).toBeInTheDocument();
   });
 });
+
+describe('UsersView grid — joined sign-ins', () => {
+  beforeEach(() => { deleteCookie(COLUMN_COOKIE); });
+
+  test('an account reached more than one way shows every way in', async () => {
+    const users = USERS.map(u => (u.id === 2 ? { ...u, linked_providers: ['facebook'] } : u));
+    vi.stubGlobal('fetch', vi.fn(() =>
+      Promise.resolve({ json: () => Promise.resolve({ success: true, users }) })
+    ));
+    await renderGrid();
+
+    const mel = screen.getByRole('button', { name: 'Manage Mel' }).closest('tr');
+    expect(within(mel).getByText('Google')).toBeInTheDocument();
+    expect(within(mel).getByText('Facebook')).toBeInTheDocument();
+
+    const ada = screen.getByRole('button', { name: 'Manage Ada' }).closest('tr');
+    expect(within(ada).queryByText('Facebook')).toBeNull();
+  });
+});

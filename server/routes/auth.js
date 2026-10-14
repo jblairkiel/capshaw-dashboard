@@ -49,13 +49,93 @@ function findPersonByEmail(email) {
   return matches.length === 1 ? matches[0].id : null;
 }
 
-function upsertUser(provider, profileId, email, name, photo) {
+// Brings a returning account up to date on a sign-in made through one of its
+// linked identities: the owner promotion and the one-time directory link, as on
+// the account's own provider. The address and name are left alone — they
+// belong to the way the account was made, and for a password account the
+// address is what it signs in with.
+function refreshLinkedUser(user, identity, { email, photo, isAdmin }) {
+  db.prepare("UPDATE user_identities SET email = ?, last_login = datetime('now') WHERE id = ?")
+    .run(email || identity.email, identity.id);
+  db.prepare("UPDATE users SET photo = COALESCE(NULLIF(photo, ''), ?), last_login = datetime('now') WHERE id = ?")
+    .run(photo || null, user.id);
+  if (isAdmin && user.role !== 'admin') {
+    db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(user.id);
+  }
+  if (!user.directory_id) {
+    const personId = findPersonByEmail(user.email || email);
+    if (personId) db.prepare('UPDATE users SET directory_id = ? WHERE id = ?').run(personId, user.id);
+  }
+  return db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
+}
+
+// Joins a first-time Google or Facebook sign-in to the account that already
+// has its address, so one person never ends up with two. The provider has just
+// shown the address is theirs, which is what makes this safe — and it is also
+// why an email-and-password account still waiting on its confirmation email
+// counts as confirmed now. That account's password is cleared, though: anybody
+// could have typed this address into the sign-up form, and only the provider
+// sign-in has proved who owns it. "Forgot your password?" sets a new one.
+function linkIdentity(user, provider, profileId, { email, photo, isAdmin }) {
+  db.prepare(`
+    INSERT INTO user_identities (user_id, provider, provider_id, email, last_login)
+    VALUES (?, ?, ?, ?, datetime('now'))
+  `).run(user.id, provider, profileId, email);
+
+  const unconfirmed = user.provider === 'local' && !user.email_verified_at;
+  if (unconfirmed) {
+    db.prepare(`
+      UPDATE users
+         SET email_verified_at = datetime('now'),
+             email_verify_hash = '',
+             email_verify_expires_at = NULL,
+             password_hash = ''
+       WHERE id = ?
+    `).run(user.id);
+  }
+
+  const identity = db.prepare('SELECT * FROM user_identities WHERE provider = ? AND provider_id = ?').get(provider, profileId);
+  const linked   = refreshLinkedUser(user, identity, { email, photo, isAdmin });
+
+  // A confirmed address is what puts a password account in front of an admin,
+  // so one confirmed by this sign-in goes to them now, as it would have from
+  // the confirmation link.
+  if (unconfirmed && linked.role === 'pending') accountMail.awaitingApproval({ user: linked });
+  return linked;
+}
+
+// Where a Google or Facebook sign-in lands. Together with the address check in
+// POST /register (anyAccountFor), this keeps the same person on the same
+// account however they arrive:
+//
+//   1. the provider identity the account was made with, or
+//   2. one already linked to an account, or
+//   3. an address the provider vouches for that an account here already has —
+//      linked to that account from now on, or
+//   4. a new account, waiting for approval.
+//
+// `emailVerified` is false only when the provider says outright that the
+// address is unconfirmed (Google reports it; Facebook only hands out confirmed
+// addresses). Such an address is never used to find an existing account, since
+// anybody could have typed it.
+function upsertUser(provider, profileId, email, name, photo, { emailVerified = true } = {}) {
   const adminEmail = process.env.ADMIN_EMAIL?.toLowerCase();
   const isAdmin = email && adminEmail && email.toLowerCase() === adminEmail;
 
   const existing = db.prepare(
     'SELECT * FROM users WHERE provider = ? AND provider_id = ?'
   ).get(provider, profileId);
+
+  if (!existing) {
+    const identity = db.prepare(
+      'SELECT * FROM user_identities WHERE provider = ? AND provider_id = ?'
+    ).get(provider, profileId);
+    const owner = identity && db.prepare('SELECT * FROM users WHERE id = ?').get(identity.user_id);
+    if (owner) return refreshLinkedUser(owner, identity, { email, photo, isAdmin });
+
+    const sameAddress = email && emailVerified && anyAccountFor(normalizeEmail(email));
+    if (sameAddress) return linkIdentity(sameAddress, provider, profileId, { email, photo, isAdmin });
+  }
 
   if (existing) {
     db.prepare(
@@ -94,6 +174,13 @@ const PROVIDERS = [
   process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET && 'facebook',
 ].filter(Boolean);
 
+// Google says whether the address on a profile has been confirmed; Facebook
+// only ever hands out confirmed ones, and says nothing.
+function addressConfirmed(profile) {
+  const verified = profile.emails?.[0]?.verified;
+  return verified !== false && verified !== 'false';
+}
+
 // ─── Google strategy ──────────────────────────────────────────────────────────
 
 if (PROVIDERS.includes('google')) {
@@ -107,7 +194,9 @@ if (PROVIDERS.includes('google')) {
       try {
         const email = profile.emails?.[0]?.value || null;
         const photo = profile.photos?.[0]?.value || null;
-        const user  = upsertUser('google', profile.id, email, profile.displayName, photo);
+        const user  = upsertUser('google', profile.id, email, profile.displayName, photo, {
+          emailVerified: addressConfirmed(profile),
+        });
         done(null, user);
       } catch (err) {
         done(err);
@@ -130,7 +219,9 @@ if (PROVIDERS.includes('facebook')) {
       try {
         const email = profile.emails?.[0]?.value || null;
         const photo = profile.photos?.[0]?.value || null;
-        const user  = upsertUser('facebook', profile.id, email, profile.displayName, photo);
+        const user  = upsertUser('facebook', profile.id, email, profile.displayName, photo, {
+          emailVerified: addressConfirmed(profile),
+        });
         done(null, user);
       } catch (err) {
         done(err);
@@ -205,11 +296,19 @@ function cleanName(value) {
   return String(value ?? '').trim().replace(/\s+/g, ' ');
 }
 
-// Any account at all on this address, whichever way it signs in. Used to keep
+// Any account at all on this address, whichever way it signs in — including an
+// address that only a linked Google or Facebook sign-in carries. Used to keep
 // one person from ending up with a Google account and a password account that
-// the directory then cannot tell apart.
+// the directory then cannot tell apart. The oldest wins, should an address
+// already be on two accounts from before they were joined.
 function anyAccountFor(email) {
-  return db.prepare('SELECT * FROM users WHERE lower(trim(email)) = ? ORDER BY id ASC').get(email);
+  if (!email) return undefined;
+  return db.prepare(`
+    SELECT * FROM users
+     WHERE lower(trim(email)) = ?
+        OR id IN (SELECT user_id FROM user_identities WHERE lower(trim(email)) = ?)
+     ORDER BY id ASC
+  `).get(email, email);
 }
 
 function localAccountFor(email) {
@@ -693,14 +792,23 @@ function resolveDirectory(target, body) {
   return { error: APPROVAL_NEEDS_PERSON, status: 400, code: 'directory_required' };
 }
 
+// The other ways an account signs in, beyond the one it was made with — so an
+// admin can see that the Google sign-in and the password account are one person.
+const LINKED_PROVIDERS_SQL =
+  '(SELECT group_concat(provider) FROM (SELECT DISTINCT provider FROM user_identities i WHERE i.user_id = u.id AND i.provider <> u.provider ORDER BY provider)) AS linked_providers';
+
+function withLinkedProviders(row) {
+  return { ...row, linked_providers: row.linked_providers ? row.linked_providers.split(',') : [] };
+}
+
 function userRow(id) {
   const user = db.prepare(`
     SELECT u.id, u.provider, u.email, u.name, u.photo, u.role, u.created_at, u.last_login,
-           u.directory_id, u.email_verified_at, d.name AS directory_name
+           u.directory_id, u.email_verified_at, d.name AS directory_name, ${LINKED_PROVIDERS_SQL}
       FROM users u LEFT JOIN directory d ON d.id = u.directory_id
      WHERE u.id = ?
   `).get(id);
-  return { ...user, is_owner: isOwner(user), areas: effectiveAreas(user) };
+  return { ...withLinkedProviders(user), is_owner: isOwner(user), areas: effectiveAreas(user) };
 }
 
 function approveUser(actor, targetId, body = {}) {
@@ -798,10 +906,11 @@ function changeRole(actor, targetId, role) {
 router.get('/users', requireAuth, requireAdmin, (req, res) => {
   const users = db.prepare(`
     SELECT u.id, u.provider, u.email, u.name, u.photo, u.role, u.created_at, u.last_login,
-           u.directory_id, u.email_verified_at, u.approved_at, d.name AS directory_name
+           u.directory_id, u.email_verified_at, u.approved_at, d.name AS directory_name,
+           ${LINKED_PROVIDERS_SQL}
     FROM users u LEFT JOIN directory d ON d.id = u.directory_id
     ORDER BY u.role ASC, u.created_at ASC
-  `).all().map(u => ({ ...u, is_owner: isOwner(u), areas: effectiveAreas(u) }));
+  `).all().map(u => ({ ...withLinkedProviders(u), is_owner: isOwner(u), areas: effectiveAreas(u) }));
   res.json({ success: true, users, roles: ROLES, areas: AREAS });
 });
 

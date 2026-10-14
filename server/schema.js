@@ -1022,6 +1022,27 @@ function initSchema(db) {
   // UNIQUE(provider, provider_id) already enforces that.
   db.exec(`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);`);
 
+  // ─── One person, several ways in ──────────────────────────────────────────────
+  // An account keeps the way it was first made on users.provider/provider_id.
+  // Any other sign-in that turns out to be the same person — Google after an
+  // email-and-password sign-up, Facebook after Google — is recorded here and
+  // signs in to that same account, rather than making a second one the
+  // directory then cannot tell apart. See upsertUser in server/routes/auth.js.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_identities (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      provider    TEXT    NOT NULL,
+      provider_id TEXT    NOT NULL,
+      email       TEXT,
+      created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+      last_login  TEXT,
+      UNIQUE(provider, provider_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_identities_user  ON user_identities(user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_identities_email ON user_identities(email);
+  `);
+
   // ─── From the old role ladder to areas ────────────────────────────────────────
   // 'worship-coordinator' was a rung above member that existed only to own the
   // worship roster. That is now the Serving Schedule area, so anybody holding

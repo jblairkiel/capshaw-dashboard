@@ -54,10 +54,10 @@ function buildApp(router, user = null) {
 }
 
 // The shape passport-google-oauth20 hands its verify callback.
-const profile = (id, { email, name = 'Ray Harris', photo } = {}) => ({
+const profile = (id, { email, name = 'Ray Harris', photo, verified } = {}) => ({
   id,
   displayName: name,
-  emails: email ? [{ value: email }] : [],
+  emails: email ? [{ value: email, ...(verified === undefined ? {} : { verified }) }] : [],
   photos: photo ? [{ value: photo }] : [],
 });
 
@@ -71,6 +71,7 @@ beforeEach(() => {
   jest.restoreAllMocks();
   db.prepare('DELETE FROM users').run();
   db.prepare('DELETE FROM directory').run();
+  db.prepare('DELETE FROM mail_outbox').run();
 });
 
 afterEach(() => { process.env = ORIGINAL_ENV; });
@@ -138,18 +139,6 @@ describe('signing in through a provider', () => {
     expect(second.photo).toBe('https://cdn/ray.jpg');
   });
 
-  test('the same address on two providers makes two accounts', async () => {
-    const { registered } = loadAuth({
-      GOOGLE_CLIENT_ID: 'gid', GOOGLE_CLIENT_SECRET: 'gsecret',
-      FACEBOOK_APP_ID: 'fid',  FACEBOOK_APP_SECRET: 'fsecret',
-    });
-
-    await verifyWith(registered.google,   profile('g-1', { email: 'ray@example.com' }));
-    await verifyWith(registered.facebook, profile('f-1', { email: 'ray@example.com' }));
-
-    expect(db.prepare('SELECT COUNT(*) AS n FROM users').get().n).toBe(2);
-  });
-
   test('the configured owner address is made an admin on sign-in', async () => {
     const user = await verifyWith(
       google({ ADMIN_EMAIL: 'owner@example.com' }),
@@ -202,6 +191,196 @@ describe('signing in through a provider', () => {
     jest.spyOn(db, 'prepare').mockImplementation(() => { throw new Error('database is locked'); });
     await expect(verifyWith(strategy, profile('g-1', { email: 'ray@example.com' })))
       .rejects.toThrow('database is locked');
+  });
+});
+
+// ─── One person, one account ──────────────────────────────────────────────────
+
+describe('the same address arriving another way', () => {
+  function both(env = {}) {
+    return loadAuth({
+      GOOGLE_CLIENT_ID: 'gid', GOOGLE_CLIENT_SECRET: 'gsecret',
+      FACEBOOK_APP_ID: 'fid',  FACEBOOK_APP_SECRET: 'fsecret',
+      ...env,
+    });
+  }
+
+  const countUsers = () => db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
+  const identitiesOf = userId =>
+    db.prepare('SELECT provider, provider_id, email FROM user_identities WHERE user_id = ? ORDER BY id').all(userId);
+
+  function localAccount(email, { verified = true, role = 'approved' } = {}) {
+    const { lastInsertRowid: id } = db.prepare(`
+      INSERT INTO users (provider, provider_id, email, name, role, password_hash, email_verified_at, email_verify_hash)
+      VALUES ('local', ?, ?, 'Pat Nolan', ?, 'scrypt$1$1$1$c2FsdA==$aGFzaA==', ?, ?)
+    `).run(email, email, role, verified ? '2026-01-01 00:00:00' : null, verified ? '' : 'pending-digest');
+    return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  }
+
+  test('Facebook after Google joins the Google account rather than making a second', async () => {
+    const { registered } = both();
+    const first  = await verifyWith(registered.google,   profile('g-1', { email: 'ray@example.com' }));
+    const second = await verifyWith(registered.facebook, profile('f-1', { email: 'ray@example.com' }));
+
+    expect(second.id).toBe(first.id);
+    expect(countUsers()).toBe(1);
+    expect(identitiesOf(first.id)).toEqual([{ provider: 'facebook', provider_id: 'f-1', email: 'ray@example.com' }]);
+  });
+
+  test('the address is matched without regard to case or stray spaces', async () => {
+    const { registered } = both();
+    const first  = await verifyWith(registered.google,   profile('g-1', { email: 'Ray@Example.com' }));
+    const second = await verifyWith(registered.facebook, profile('f-1', { email: ' ray@example.COM ' }));
+
+    expect(second.id).toBe(first.id);
+    expect(countUsers()).toBe(1);
+  });
+
+  test('a linked sign-in comes back to the same account, and leaves its address and name alone', async () => {
+    const { registered } = both();
+    const first = await verifyWith(registered.google, profile('g-1', { email: 'ray@example.com', name: 'Ray Harris' }));
+    await verifyWith(registered.facebook, profile('f-1', { email: 'ray@example.com', name: 'Ray H' }));
+    const again = await verifyWith(registered.facebook, profile('f-1', { email: 'ray.h@example.com', name: 'R. Harris' }));
+
+    expect(again.id).toBe(first.id);
+    expect(again).toMatchObject({ email: 'ray@example.com', name: 'Ray Harris', provider: 'google' });
+    expect(identitiesOf(first.id)[0].email).toBe('ray.h@example.com');
+    expect(countUsers()).toBe(1);
+  });
+
+  test('a linked sign-in fills in a missing photo but never replaces one', async () => {
+    const { registered } = both();
+    const first = await verifyWith(registered.google, profile('g-1', { email: 'ray@example.com' }));
+    const linked = await verifyWith(registered.facebook, profile('f-1', { email: 'ray@example.com', photo: 'https://fb/ray.jpg' }));
+    expect(linked.photo).toBe('https://fb/ray.jpg');
+
+    db.prepare('UPDATE users SET photo = ? WHERE id = ?').run('https://g/ray.jpg', first.id);
+    const again = await verifyWith(registered.facebook, profile('f-1', { email: 'ray@example.com', photo: 'https://fb/new.jpg' }));
+    expect(again.photo).toBe('https://g/ray.jpg');
+  });
+
+  test('Google after an email-and-password sign-up signs in to that account, password intact', async () => {
+    const local = localAccount('pat@example.com');
+    const { registered } = both();
+
+    const user = await verifyWith(registered.google, profile('g-7', { email: 'pat@example.com' }));
+
+    expect(user.id).toBe(local.id);
+    expect(user).toMatchObject({ provider: 'local', provider_id: 'pat@example.com', role: 'approved' });
+    expect(user.password_hash).toBe(local.password_hash);
+    expect(countUsers()).toBe(1);
+  });
+
+  test('an unconfirmed password account is confirmed by the provider, its password cleared, and sent for approval', async () => {
+    db.prepare("INSERT INTO users (provider, provider_id, email, name, role) VALUES ('google', 'g-admin', 'ada@example.com', 'Ada', 'admin')").run();
+    const local = localAccount('pat@example.com', { verified: false, role: 'pending' });
+    const { registered } = both();
+
+    const user = await verifyWith(registered.facebook, profile('f-7', { email: 'pat@example.com' }));
+
+    expect(user.id).toBe(local.id);
+    expect(user.email_verified_at).toBeTruthy();
+    expect(user.email_verify_hash).toBe('');
+    expect(user.password_hash).toBe('');
+    expect(db.prepare('SELECT COUNT(*) AS n FROM mail_outbox WHERE context = ?')
+      .get(`account:${local.id}:awaiting-approval`).n).toBeGreaterThan(0);
+  });
+
+  test('an address Google says is unconfirmed is never used to find an account', async () => {
+    const local = localAccount('pat@example.com');
+    const { registered } = both();
+
+    const user = await verifyWith(registered.google, profile('g-7', { email: 'pat@example.com', verified: false }));
+
+    expect(user.id).not.toBe(local.id);
+    expect(user.role).toBe('pending');
+    expect(identitiesOf(local.id)).toEqual([]);
+  });
+
+  test('an address Google confirms is used', async () => {
+    const local = localAccount('pat@example.com');
+    const { registered } = both();
+    const user = await verifyWith(registered.google, profile('g-7', { email: 'pat@example.com', verified: true }));
+    expect(user.id).toBe(local.id);
+  });
+
+  test('a profile without an address cannot be matched to anybody', async () => {
+    localAccount('pat@example.com');
+    const { registered } = both();
+    const user = await verifyWith(registered.facebook, profile('f-7', {}));
+    expect(user.provider).toBe('facebook');
+    expect(countUsers()).toBe(2);
+  });
+
+  test('where an address is already on two accounts, the older one is joined', async () => {
+    const older = localAccount('pat@example.com');
+    db.prepare("INSERT INTO users (provider, provider_id, email, name, role) VALUES ('google', 'g-old', 'pat@example.com', 'Pat', 'pending')").run();
+    const { registered } = both();
+
+    const user = await verifyWith(registered.facebook, profile('f-7', { email: 'pat@example.com' }));
+    expect(user.id).toBe(older.id);
+  });
+
+  test('the owner address is still made an admin when it arrives through a linked sign-in', async () => {
+    const local = localAccount('owner@example.com', { role: 'pending' });
+    const { registered } = both({ ADMIN_EMAIL: 'owner@example.com' });
+
+    const user = await verifyWith(registered.google, profile('g-9', { email: 'owner@example.com' }));
+    expect(user.id).toBe(local.id);
+    expect(user.role).toBe('admin');
+  });
+
+  test('a linked sign-in links the account to its directory entry if nothing has yet', async () => {
+    const local = localAccount('pat@example.com');
+    const personId = db.prepare('INSERT INTO directory (name, email) VALUES (?,?)')
+      .run('Pat Nolan', 'pat@example.com').lastInsertRowid;
+    const { registered } = both();
+
+    const user = await verifyWith(registered.google, profile('g-7', { email: 'pat@example.com' }));
+    expect(user.id).toBe(local.id);
+    expect(user.directory_id).toBe(personId);
+  });
+
+  test('registering with a password is turned away for an address only a linked sign-in carries', async () => {
+    const { router, registered } = both();
+    const first = await verifyWith(registered.google, profile('g-1', { email: 'ray@example.com' }));
+    await verifyWith(registered.facebook, profile('f-1', { email: 'ray@example.com' }));
+    // The Google address moves on; the Facebook one still belongs to this person.
+    db.prepare('UPDATE users SET email = ? WHERE id = ?').run('ray.new@example.com', first.id);
+
+    const res = await request(buildApp(router)).post('/api/auth/register')
+      .send({ name: 'Ray Harris', email: 'ray@example.com', password: 'harvest-oak-1963' });
+
+    expect(res.status).toBe(200);
+    expect(countUsers()).toBe(1);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM mail_outbox WHERE context = 'account:duplicate'").get().n).toBe(1);
+  });
+
+  test('removing an account removes the sign-ins joined to it', async () => {
+    const { registered } = both();
+    const first = await verifyWith(registered.google, profile('g-1', { email: 'ray@example.com' }));
+    await verifyWith(registered.facebook, profile('f-1', { email: 'ray@example.com' }));
+
+    db.prepare('DELETE FROM users WHERE id = ?').run(first.id);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM user_identities').get().n).toBe(0);
+
+    // And the next Facebook sign-in starts afresh rather than finding a ghost.
+    const fresh = await verifyWith(registered.facebook, profile('f-1', { email: 'ray@example.com' }));
+    expect(fresh.provider).toBe('facebook');
+  });
+
+  test('the admin list shows the other ways an account signs in', async () => {
+    const { router, registered } = both();
+    const first = await verifyWith(registered.google, profile('g-1', { email: 'ray@example.com' }));
+    await verifyWith(registered.facebook, profile('f-1', { email: 'ray@example.com' }));
+    const admin = db.prepare(
+      "INSERT INTO users (provider, provider_id, email, name, role) VALUES ('google', 'g-admin', 'ada@example.com', 'Ada', 'admin') RETURNING *"
+    ).get();
+
+    const res = await request(buildApp(router, admin)).get('/api/auth/users');
+    const ray = res.body.users.find(u => u.id === first.id);
+    expect(ray.linked_providers).toEqual(['facebook']);
+    expect(res.body.users.find(u => u.id === admin.id).linked_providers).toEqual([]);
   });
 });
 

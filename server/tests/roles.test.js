@@ -405,7 +405,7 @@ describe('a new account from Google or Facebook', () => {
 
   test('tells every admin straight away, once, and says how they signed up', () => {
     db.prepare('DELETE FROM mail_outbox').run();
-    const user = upsertUser('facebook', 'fb-1', 'pat@example.com', 'Pat New', null);
+    const user = upsertUser('facebook', 'fb-1', 'quinn@example.com', 'Pat New', null);
     expect(user.role).toBe('pending');
     const sent = toAdmins();
     expect(sent).toHaveLength(1);
@@ -414,7 +414,7 @@ describe('a new account from Google or Facebook', () => {
     expect(sent[0].body).toMatch(/Signed up with: Facebook/);
 
     // Signing in again is not news.
-    upsertUser('facebook', 'fb-1', 'pat@example.com', 'Pat New', null);
+    upsertUser('facebook', 'fb-1', 'quinn@example.com', 'Pat New', null);
     expect(toAdmins()).toHaveLength(1);
   });
 });

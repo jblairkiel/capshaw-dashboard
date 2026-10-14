@@ -151,6 +151,29 @@ Some smaller guardrails around the same routes:
 The Google and Facebook paths are untouched: those providers vouch for the
 address, so those accounts have nothing to confirm and no password here.
 
+### One person, one account
+
+Whichever way somebody comes in, the same email address is the same account:
+
+- **Registering with a password** for an address that already has an account —
+  made any way, or carried by a joined Google or Facebook sign-in — makes
+  nothing new; the mailbox owner is told how they already sign in.
+- **Google or Facebook for the first time** with an address an account here
+  already has signs in to *that* account, and the sign-in is recorded in
+  `user_identities` so it comes straight back next time. Facebook after Google,
+  Google after a password sign-up — all one account, one directory link, one
+  approval. The address and name stay those of the way the account was made.
+- **An address the provider says is unconfirmed** (Google reports this) is
+  never used to find an account — it gets a new, pending one as before.
+- **A password account still waiting on its confirmation email** is confirmed
+  by the provider sign-in, since that proves the address. Its password is
+  cleared, because anybody could have typed the address into the sign-up form;
+  *Forgot your password?* sets a new one.
+
+Admins see every way an account signs in as badges in the **Sign-in** column.
+Accounts that were already duplicated before this are not merged
+automatically — remove the spare one from **Admin → Members & Access**.
+
 ---
 
 ## Roles & Areas

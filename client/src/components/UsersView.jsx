@@ -83,6 +83,19 @@ function ProviderBadge({ provider }) {
   return <Dash />;
 }
 
+// The way the account was made, then any other sign-in joined to it because it
+// carried the same address — one person, however they come in.
+function SignInBadges({ user }) {
+  const linked = user.linked_providers || [];
+  if (!linked.length) return <ProviderBadge provider={user.provider} />;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1" title="Joined because they share an email address">
+      <ProviderBadge provider={user.provider} />
+      {linked.map(p => <ProviderBadge key={p} provider={p} />)}
+    </span>
+  );
+}
+
 function Avatar({ user, size = 36 }) {
   const [imgError, setImgError] = useState(false);
 
@@ -244,7 +257,7 @@ const COLUMNS = [
     filter: { type: 'select', options: PROVIDERS },
     text:   u => u.provider || '',
     match:  'exact',
-    render: u => <ProviderBadge provider={u.provider} />,
+    render: u => <SignInBadges user={u} />,
   },
   {
     key:    'directory',
@@ -679,7 +692,7 @@ function UserDetail({ user, currentUserId, people, busy, onSetRole, onSetAreas, 
           <dl className="grid grid-cols-2 gap-3 text-xs">
             <div>
               <dt className="text-gray-400 uppercase tracking-wide">Signed in with</dt>
-              <dd className="mt-1"><ProviderBadge provider={user.provider} /></dd>
+              <dd className="mt-1"><SignInBadges user={user} /></dd>
             </div>
             <div>
               <dt className="text-gray-400 uppercase tracking-wide">Joined</dt>
