@@ -260,6 +260,51 @@ compose.linkApproved = ({ name, provider }) => ({
   ].join('\n'),
 });
 
+// ─── Adding an address to a Google or Facebook account ────────────────────────
+
+compose.confirmAddedAddress = ({ name, token, via }) => ({
+  subject: 'Confirm the email address for your Capshaw member portal account',
+  body: [
+    `Hello ${name || 'there'},`,
+    '',
+    `You signed in to the Capshaw Church of Christ member portal with ${PROVIDER_NAME[via] || 'your account'}, which`,
+    'did not give us an email address, and asked to add this one.',
+    '',
+    'Please confirm it by opening this link:',
+    '',
+    `  ${verifyUrl(token)}`,
+    '',
+    'The link is good for 48 hours. Once it is done we can email you about your',
+    'account, including when it is approved, and connect it to your entry in the',
+    'member directory.',
+    '',
+    'If this was not you, simply ignore this message. The address is not added',
+    'to anything unless the link is opened.',
+    SIGNATURE,
+  ].join('\n'),
+});
+
+compose.addressAlreadyInUse = ({ name, provider, via }) => ({
+  subject: 'You already have a Capshaw member portal account',
+  body: [
+    `Hello ${name || 'there'},`,
+    '',
+    `Somebody who signed in to the Capshaw Church of Christ member portal with ${PROVIDER_NAME[via] || 'another account'}`,
+    'asked to add this email address to their account. It already belongs to',
+    `your account, which signs in with ${howAccountSignsIn(provider)}, so it has not been added.`,
+    '',
+    'If it was you, keep signing in the way you always have:',
+    '',
+    `  ${clientUrl()}`,
+    '',
+    `If you would like to sign in with ${PROVIDER_NAME[via] || 'that account'} as well, ask the church office`,
+    'to join the two.',
+    '',
+    'If it was not you, nothing has changed and there is nothing to do.',
+    SIGNATURE,
+  ].join('\n'),
+});
+
 // ─── To the person registering ────────────────────────────────────────────────
 
 function confirmAddress({ name, email, token }) {
@@ -279,6 +324,26 @@ function addressAlreadyRegistered({ email, name, provider }) {
     to: [{ email, name: name || '' }],
     ...compose.addressAlreadyRegistered({ name, provider }),
     context: 'account:duplicate',
+    realRecipient: true,
+  });
+}
+
+// A Google or Facebook account that came without an address, adding one.
+function confirmAddedAddress({ name, email, token, via }) {
+  return mailer.send({
+    to: [{ email, name: name || '' }],
+    ...compose.confirmAddedAddress({ name, token, via }),
+    context: 'account:add-email',
+    realRecipient: true,
+  });
+}
+
+// Sent instead, when the address it asked for already belongs to an account.
+function addressAlreadyInUse({ email, name, provider, via }) {
+  return mailer.send({
+    to: [{ email, name: name || '' }],
+    ...compose.addressAlreadyInUse({ name, provider, via }),
+    context: 'account:add-email-in-use',
     realRecipient: true,
   });
 }
@@ -384,6 +449,8 @@ module.exports = {
   RESET_TTL_MINUTES,
   confirmAddress,
   addressAlreadyRegistered,
+  confirmAddedAddress,
+  addressAlreadyInUse,
   resetPassword,
   noPasswordToReset,
   awaitingApproval,

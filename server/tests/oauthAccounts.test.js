@@ -729,6 +729,19 @@ describe.each(['google', 'facebook'])('GET /api/auth/%s/callback', provider => {
   });
 });
 
+// ─── What Facebook is asked for ───────────────────────────────────────────────
+
+test('Facebook sign-in asks for the email address again if it was declined last time', () => {
+  jest.resetModules();
+  process.env = { ...ORIGINAL_ENV, FACEBOOK_APP_ID: 'fid', FACEBOOK_APP_SECRET: 'fsecret' };
+  const passport = require('passport');
+  jest.spyOn(passport, 'use').mockReturnValue(passport);
+  const authenticate = jest.spyOn(passport, 'authenticate').mockReturnValue((req, res, next) => next());
+  require('../routes/auth');
+
+  expect(authenticate).toHaveBeenCalledWith('facebook', { scope: ['email'], authType: 'rerequest' });
+});
+
 // ─── Which providers the sign-in page offers ──────────────────────────────────
 
 describe('GET /api/auth/providers', () => {

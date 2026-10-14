@@ -18,10 +18,13 @@ const AUTH_ERROR_TONES = { link_pending: 'warn' };
 // carrying the outcome, so this is the one place that explains it.
 const VERIFY_MESSAGES = {
   '1':       'Your email address is confirmed and your account is ready. Please sign in.',
+  // A Google or Facebook account that came without an address, adding one.
+  'added':   'Your email address is confirmed and added to your account. Please sign in.',
   'pending': 'Thank you — your email address is confirmed. An admin still has to approve your account, and you will get an email from us the moment they do. You can sign in now to see who to contact if you would like it sooner.',
 };
 
 const VERIFY_ERROR_MESSAGES = {
+  taken:   'That email address now belongs to another account here, so it was not added. Please sign in and try a different one, or contact the church office.',
   missing: 'That confirmation link was incomplete. Please open the link in the email again, or ask for a new one below.',
   invalid: 'That confirmation link is no longer valid. It may already have been used — try signing in, or ask for a new link below.',
   expired: 'That confirmation link has expired. Ask for a new one below and we will send another.',
