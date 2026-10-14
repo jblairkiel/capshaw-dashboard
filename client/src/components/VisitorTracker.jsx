@@ -3,14 +3,15 @@ import Dialog from './Dialog';
 import WorkflowDialogButton from './WorkflowDialogButton';
 import { useIsNarrow } from '../lib/useMediaQuery';
 import DateInput from './DateInput';
+import { fromIso } from '../lib/dates';
 
 // Our guests: who they are, how to reach them, and when they have been with us.
 //
 // This used to render only what the church website knew — a name from a heading
 // and a list of dates — so the page read as comments and visit history with
 // nobody's details on it. Everything now comes from our own records, and
-// whoever looks after the Guest Tracker can add a guest and keep their details
-// up to date here.
+// whoever looks after the Guest Tracker records the guests at each service and
+// keeps their details up to date here.
 const API = '/api/visitors';
 
 // Visit dates come off the church site as MM/DD/YY. Sorting them as text would
@@ -234,12 +235,10 @@ const BLANK = {
   invited_by: '', status: '', notes: '',
 };
 
-// ─── Adding or editing a guest ────────────────────────────────────────────────
+// ─── Editing a guest ──────────────────────────────────────────────────────────
 
 function GuestForm({ guest, onClose, onSaved, onDeleted }) {
-  const isNew = !guest?.id;
   const [form, setForm]   = useState(() => ({ ...BLANK, ...(guest || {}) }));
-  const [visit, setVisit] = useState({ date: '', service: '' });
   const [busy, setBusy]   = useState(false);
   const [error, setError] = useState('');
 
@@ -252,10 +251,9 @@ function GuestForm({ guest, onClose, onSaved, onDeleted }) {
     try {
       const body = { ...BLANK, ...form };
       delete body.id; delete body.visits; delete body.created_at; delete body.comments;
-      if (isNew && visit.date.trim()) body.visit = visit;
 
-      const json = await send(isNew ? API : `${API}/${guest.id}`, {
-        method: isNew ? 'POST' : 'PATCH',
+      const json = await send(`${API}/${guest.id}`, {
+        method: 'PATCH',
         ...jsonBody(body),
       });
       onSaved(json.visitor);
@@ -281,7 +279,7 @@ function GuestForm({ guest, onClose, onSaved, onDeleted }) {
   const label = 'text-xs font-medium text-gray-500 uppercase tracking-wide';
 
   return (
-    <Dialog title={isNew ? 'Add a guest' : `Edit ${guest.name}`} onClose={onClose} width="max-w-lg">
+    <Dialog title={`Edit ${guest.name}`} onClose={onClose} width="max-w-lg">
       <form onSubmit={submit} className="space-y-3">
         <label className="block">
           <span className={label}>Name <span className="text-red-400" aria-hidden="true">*</span></span>
@@ -314,44 +312,397 @@ function GuestForm({ guest, onClose, onSaved, onDeleted }) {
           )}
         </label>
 
-        {isNew && (
-          <div className="grid grid-cols-2 gap-3">
-            <label className="block">
-              <span className={label}>First visit</span>
-              <DateInput
-                format="mdy"
-                value={visit.date}
-                onChange={date => setVisit(v => ({ ...v, date }))}
-                className={field}
-              />
-            </label>
-            <label className="block">
-              <span className={label}>Service</span>
-              <input
-                value={visit.service}
-                placeholder="Sun AM"
-                onChange={e => setVisit(v => ({ ...v, service: e.target.value }))}
-                className={field}
-              />
-            </label>
-          </div>
-        )}
-
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         <div className="flex items-center justify-between gap-2 pt-1">
-          {!isNew ? (
-            <button type="button" onClick={remove} disabled={busy}
-              className="text-sm px-3 py-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50">
-              Delete
-            </button>
-          ) : <span />}
+          <button type="button" onClick={remove} disabled={busy}
+            className="text-sm px-3 py-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50">
+            Delete
+          </button>
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600">Cancel</button>
             <button type="submit" disabled={busy} className="btn-primary text-sm disabled:opacity-50">
-              {busy ? 'Saving…' : isNew ? 'Add guest' : 'Save'}
+              {busy ? 'Saving…' : 'Save'}
             </button>
           </div>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+// ─── Recording the guests at a service ────────────────────────────────────────
+//
+// Guests come a service at a time, so they are written down that way: pick the
+// day and the service, then go down the cards — somebody who has been before
+// is picked off the list (and their details put right if they have changed),
+// somebody new is typed in with how to reach them. Saving records the visit
+// for every one of them at once.
+
+// What a guest's card asks for, beyond their name.
+const CONTACT_FIELDS = [
+  { key: 'phone',      label: 'Phone',      type: 'tel' },
+  { key: 'email',      label: 'Email',      type: 'email' },
+  { key: 'address',    label: 'Address',    wide: true },
+  { key: 'city',       label: 'City' },
+  { key: 'state',      label: 'State' },
+  { key: 'zip',        label: 'ZIP' },
+  { key: 'invited_by', label: 'Invited by' },
+];
+const ENTRY_FIELDS = ['name', ...CONTACT_FIELDS.map(f => f.key), 'notes'];
+
+function todayMdy() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return fromIso(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`, 'mdy');
+}
+
+function pick(guest) {
+  return Object.fromEntries(ENTRY_FIELDS.map(f => [f, String(guest?.[f] ?? '')]));
+}
+
+let nextKey = 1;
+
+function GuestEntry({ entry, guests, onChange, onRemove, onUseExisting }) {
+  const isNew  = entry.id == null;
+  const open   = isNew || entry.editing;
+  const set    = (key, value) => onChange({ ...entry, values: { ...entry.values, [key]: value } });
+  const field  = 'mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold';
+  const label  = 'text-xs font-medium text-gray-500 uppercase tracking-wide';
+  const name   = entry.values.name.trim();
+
+  // Somebody typed in as new who is already on the list is the commonest way
+  // to end up with the same person twice, so it is caught here.
+  const twin = isNew && name
+    ? guests.find(g => g.name.trim().toLowerCase() === name.toLowerCase())
+    : null;
+
+  const contact = [entry.values.phone, entry.values.email].filter(Boolean).join(' · ');
+
+  return (
+    <li className="rounded-xl border border-gray-200 px-4 py-3" data-testid="guest-entry">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="font-medium text-church-navy truncate">
+            {name || <span className="text-gray-400 font-normal">New guest</span>}
+            <span className={`ml-2 text-xs px-2 py-0.5 rounded-full align-middle ${isNew ? 'bg-emerald-100 text-emerald-800' : 'bg-church-cream text-church-navy'}`}>
+              {isNew ? 'New' : 'Returning'}
+            </span>
+          </p>
+          {!open && (
+            <p className="text-xs text-gray-500 mt-0.5">{contact || 'No contact details yet'}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {!isNew && (
+            <button
+              type="button"
+              onClick={() => onChange({ ...entry, editing: !entry.editing })}
+              className="text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold hover:text-church-navy"
+            >
+              {entry.editing ? 'Done' : 'Edit details'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onRemove}
+            aria-label={`Remove ${name || 'this guest'}`}
+            className="text-xs text-gray-400 hover:text-red-600"
+          >
+            ✕
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <div className="mt-3 space-y-3">
+          <label className="block">
+            <span className={label}>Name <span className="text-red-400" aria-hidden="true">*</span></span>
+            <input
+              autoFocus={isNew}
+              value={entry.values.name}
+              onChange={e => set('name', e.target.value)}
+              className={field}
+            />
+          </label>
+          {twin && (
+            <p className="text-xs text-amber-700">
+              {twin.name} is already on the list.{' '}
+              <button type="button" onClick={() => onUseExisting(twin)} className="underline hover:text-church-navy">
+                Use them instead
+              </button>
+            </p>
+          )}
+          <div className="grid grid-cols-2 gap-3">
+            {CONTACT_FIELDS.map(f => (
+              <label key={f.key} className={f.wide ? 'block col-span-2' : 'block'}>
+                <span className={label}>{f.label}</span>
+                <input
+                  type={f.type || 'text'}
+                  value={entry.values[f.key]}
+                  onChange={e => set(f.key, e.target.value)}
+                  className={field}
+                />
+              </label>
+            ))}
+          </div>
+          <label className="block">
+            <span className={label}>Our notes</span>
+            <textarea
+              rows={2}
+              value={entry.values.notes}
+              onChange={e => set('notes', e.target.value)}
+              placeholder="What was said, who spoke with them, anything worth remembering"
+              className={field}
+            />
+          </label>
+        </div>
+      )}
+    </li>
+  );
+}
+
+function RecordGuests({ guests, onClose, onSaved }) {
+  const [date, setDate]       = useState(todayMdy);
+  const [service, setService] = useState('');
+  const [entries, setEntries] = useState([]);
+  const [search, setSearch]   = useState('');
+  const [busy, setBusy]       = useState(false);
+  const [error, setError]     = useState('');
+  // Where Save & email sends to: the congregation's list unless another is picked.
+  const [lists, setLists]     = useState([]);
+  const [listKey, setListKey] = useState('');
+
+  useEffect(() => {
+    let live = true;
+    send(`${API}/mail-lists`)
+      .then(json => {
+        if (!live) return;
+        setLists(json.lists || []);
+        setListKey(k => k || json.defaultList || json.lists?.[0]?.key || '');
+      })
+      .catch(() => {});   // No lists, no email; recording still works.
+    return () => { live = false; };
+  }, []);
+
+  // The services already used, so the same one is spelled the same way each
+  // week — the record-keeping check matches on the name.
+  const services = useMemo(() => {
+    const names = new Set();
+    for (const g of guests) for (const v of g.visits || []) if (v.service) names.add(v.service);
+    return [...names].sort();
+  }, [guests]);
+
+  const chosen  = new Set(entries.filter(e => e.id != null).map(e => e.id));
+  const q       = search.trim().toLowerCase();
+  const matches = q
+    ? guests
+      .filter(g => !chosen.has(g.id))
+      .filter(g => g.name.toLowerCase().includes(q) ||
+        [g.phone, g.email].some(v => String(v || '').toLowerCase().includes(q)))
+      .slice(0, 6)
+    : [];
+
+  function addExisting(guest) {
+    setEntries(list => [...list, { key: nextKey++, id: guest.id, original: pick(guest), values: pick(guest), editing: false }]);
+    setSearch('');
+  }
+
+  // Starting a new guest from the search box carries over what was typed, since
+  // that is nearly always their name.
+  function addNew(name = '') {
+    setEntries(list => [...list, { key: nextKey++, id: null, values: { ...pick(null), name } }]);
+    setSearch('');
+  }
+
+  const update = changed => setEntries(list => list.map(e => (e.key === changed.key ? changed : e)));
+  const remove = key => setEntries(list => list.filter(e => e.key !== key));
+
+  function swapForExisting(entry, guest) {
+    setEntries(list => {
+      if (list.some(e => e.id === guest.id)) return list.filter(e => e.key !== entry.key);
+      return list.map(e => (e.key === entry.key
+        ? { key: e.key, id: guest.id, original: pick(guest), values: pick(guest), editing: false }
+        : e));
+    });
+  }
+
+  async function submit(e, withEmail = false) {
+    e.preventDefault();
+    if (!date.trim()) return setError('Choose the date of the service');
+    if (!entries.length) return setError('Add at least one guest');
+    if (entries.some(en => !en.values.name.trim())) return setError('Every guest needs a name');
+
+    // A returning guest sends only what was changed, so picking somebody off
+    // the list without touching their details is recorded as just a visit.
+    const body = entries.map(en => {
+      if (en.id == null) return { ...en.values };
+      const changed = Object.fromEntries(
+        Object.entries(en.values).filter(([k, v]) => v.trim() !== en.original[k].trim())
+      );
+      return { id: en.id, ...changed };
+    });
+
+    setBusy(true); setError('');
+    try {
+      const payload = { date, service, guests: body };
+      if (withEmail) payload.email = { list: listKey };
+      const json = await send(`${API}/record`, { method: 'POST', ...jsonBody(payload) });
+      onSaved(json);
+    } catch (err) {
+      setError(err.message);
+      setBusy(false);
+    }
+  }
+
+  const field = 'mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold';
+  const label = 'text-xs font-medium text-gray-500 uppercase tracking-wide';
+  const count = entries.length;
+
+  return (
+    <Dialog
+      title="Record guests"
+      subtitle="Everyone who visited one service: returning guests from the list, new guests with how to reach them."
+      onClose={onClose}
+      width="max-w-2xl"
+    >
+      <form onSubmit={submit} className="space-y-5">
+        {/* The service */}
+        <div className="grid grid-cols-2 gap-3">
+          <label className="block">
+            <span className={label}>Date <span className="text-red-400" aria-hidden="true">*</span></span>
+            <DateInput format="mdy" value={date} onChange={setDate} className={field} />
+          </label>
+          <label className="block">
+            <span className={label}>Service</span>
+            <input
+              value={service}
+              list="guest-services"
+              placeholder="Sun AM"
+              onChange={e => setService(e.target.value)}
+              className={field}
+            />
+            <datalist id="guest-services">
+              {services.map(s => <option key={s} value={s} />)}
+            </datalist>
+          </label>
+        </div>
+
+        {/* Finding somebody who has been before, or starting somebody new */}
+        <div>
+          <label className="block">
+            <span className={label}>Add a guest</span>
+            <input
+              type="search"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              onKeyDown={e => {
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                if (matches.length === 1) addExisting(matches[0]);
+                else if (q && !matches.length) addNew(search.trim());
+              }}
+              placeholder="Search returning guests by name, phone or email…"
+              className={field}
+            />
+          </label>
+          {q && (
+            <ul className="mt-1 rounded-lg border border-gray-200 divide-y divide-gray-100 overflow-hidden">
+              {matches.map(g => (
+                <li key={g.id}>
+                  <button
+                    type="button"
+                    onClick={() => addExisting(g)}
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-church-cream flex items-baseline justify-between gap-3"
+                  >
+                    <span className="font-medium text-church-navy">{g.name}</span>
+                    <span className="text-xs text-gray-400 truncate">
+                      {[g.phone, g.email].filter(Boolean).join(' · ') ||
+                        `${g.count} visit${g.count === 1 ? '' : 's'}`}
+                    </span>
+                  </button>
+                </li>
+              ))}
+              <li>
+                <button
+                  type="button"
+                  onClick={() => addNew(search.trim())}
+                  className="w-full text-left px-3 py-2 text-sm text-church-navy hover:bg-church-cream"
+                >
+                  + Add &ldquo;{search.trim()}&rdquo; as a new guest
+                </button>
+              </li>
+            </ul>
+          )}
+          {!q && (
+            <button
+              type="button"
+              onClick={() => addNew()}
+              className="mt-2 text-sm px-3 py-1.5 rounded-lg border border-dashed border-gray-300 text-gray-600 hover:border-church-gold hover:text-church-navy"
+            >
+              + New guest
+            </button>
+          )}
+        </div>
+
+        {/* Who is being recorded */}
+        <section>
+          <h4 className="text-sm font-semibold text-church-navy mb-2">
+            {count ? `${count} guest${count === 1 ? '' : 's'} at this service` : 'No guests added yet'}
+          </h4>
+          {count > 0 && (
+            <ul className="space-y-2">
+              {entries.map(entry => (
+                <GuestEntry
+                  key={entry.key}
+                  entry={entry}
+                  guests={guests}
+                  onChange={update}
+                  onRemove={() => remove(entry.key)}
+                  onUseExisting={guest => swapForExisting(entry, guest)}
+                />
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {error && <p className="text-sm text-red-600">{error}</p>}
+
+        {/* Telling the congregation who came, from the same save */}
+        {lists.length > 0 && (
+          <div className="rounded-xl bg-church-cream/60 border border-gray-200 px-4 py-3 space-y-2">
+            <label className="block">
+              <span className={label}>Email the congregation</span>
+              <select value={listKey} onChange={e => setListKey(e.target.value)} className={`${field} bg-white`}>
+                {lists.map(l => (
+                  <option key={l.key} value={l.key}>
+                    {l.name} ({l.reachable} {l.reachable === 1 ? 'address' : 'addresses'})
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="text-xs text-gray-500">
+              Save &amp; email sends each guest&apos;s name, whether it was their first visit, who invited them and their town,
+              with a link to their page and to the guest list. Phone numbers, emails and addresses stay on the portal.
+            </p>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2 pt-1 flex-wrap">
+          <button type="button" onClick={onClose} className="text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600">Cancel</button>
+          {lists.length > 0 && (
+            <button
+              type="button"
+              onClick={e => submit(e, true)}
+              disabled={busy || !count || !listKey}
+              className="text-sm px-3 py-2 rounded-lg border border-church-navy text-church-navy hover:bg-church-navy hover:text-white transition-colors disabled:opacity-50"
+            >
+              {busy ? 'Saving…' : 'Save & email'}
+            </button>
+          )}
+          <button type="submit" disabled={busy || !count} className="btn-primary text-sm disabled:opacity-50">
+            {busy ? 'Saving…' : count ? `Record ${count} guest${count === 1 ? '' : 's'}` : 'Record guests'}
+          </button>
         </div>
       </form>
     </Dialog>
@@ -712,17 +1063,20 @@ function FollowUpBoard({ guests, user, onOpen, onFollowUpDone }) {
 
 // ─── The page ─────────────────────────────────────────────────────────────────
 
-export default function VisitorTracker({ user }) {
+export default function VisitorTracker({ user, initialGuestId = null }) {
   const [guests, setGuests]   = useState([]);
   const [canManage, setCanManage] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
   const [search, setSearch]   = useState('');
-  const [openId, setOpenId]   = useState(null);
+  // A guest's permanent link (?page=visitors&guest=12) opens them straight away.
+  const [openId, setOpenId]   = useState(initialGuestId);
   const [view, setView]       = useState('guests');   // guests | follow-ups
   // Seven columns of guest details do not fit a phone, so it gets a card each.
   const onPhone = useIsNarrow();
-  const [editing, setEditing] = useState(null);   // a guest, or {} for a new one
+  const [editing, setEditing] = useState(null);   // a guest being edited
+  const [recording, setRecording] = useState(false);
+  const [notice, setNotice]   = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -786,10 +1140,17 @@ export default function VisitorTracker({ user }) {
         <div className="flex items-center gap-2 flex-wrap">
           <WorkflowDialogButton page="visitors" user={user} label="Follow Up" title="Guest follow-ups" />
           {canManage && (
-            <button onClick={() => setEditing({})} className="btn-primary text-sm">Add a guest</button>
+            <button onClick={() => setRecording(true)} className="btn-primary text-sm">Record guests</button>
           )}
         </div>
       </div>
+
+      {notice && (
+        <div role="status" className="flex items-center justify-between gap-3 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-2 text-sm text-emerald-800">
+          <span>{notice}</span>
+          <button onClick={() => setNotice('')} aria-label="Dismiss" className="text-emerald-700 hover:text-emerald-900">✕</button>
+        </div>
+      )}
 
       {/* The same guests, two ways of reading them */}
       <div role="tablist" aria-label="How to read the guests" className="flex items-center gap-1 border-b border-gray-200">
@@ -952,9 +1313,28 @@ export default function VisitorTracker({ user }) {
         />
       )}
 
+      {recording && (
+        <RecordGuests
+          guests={guests}
+          onClose={() => setRecording(false)}
+          onSaved={({ date, service, added, returning, emailed }) => {
+            setRecording(false);
+            const parts = [
+              added && `${added} new guest${added === 1 ? '' : 's'}`,
+              returning && `${returning} returning`,
+            ].filter(Boolean).join(' and ');
+            const mail = !emailed ? ''
+              : emailed.error ? ` The email was not sent: ${emailed.error}.`
+                : ` Emailed to the ${emailed.list.name} list (${emailed.queued}).`;
+            setNotice(`Recorded ${parts} for ${date}${service ? ` (${service})` : ''}.${mail}`);
+            load();
+          }}
+        />
+      )}
+
       {editing && (
         <GuestForm
-          guest={editing.id ? editing : null}
+          guest={editing}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load(); }}
           onDeleted={() => { setEditing(null); setOpenId(null); load(); }}

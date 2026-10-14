@@ -154,7 +154,7 @@ const ALL_TAB_IDS = new Set([
   ...ADMIN_ITEMS.map(i => i.id),
 ]);
 
-// A generated email points here with ?page=&group=&event=&workflow=&plan=&tab=&date=&service= (see
+// A generated email points here with ?page=&group=&event=&workflow=&plan=&guest=&tab=&date=&service= (see
 // server/mail/notify.js). Read once on load and then the URL is stripped, so
 // a later remount — impersonation starting or stopping, say — does not jump
 // the person back to the same link a second time.
@@ -178,6 +178,8 @@ function deepLinkFromUrl() {
     planId:     toId(params.get('plan')),
     // A sign-up list's permanent link.
     list:       toId(params.get('list')),
+    // A guest's permanent link (the guests email links to each one).
+    guestId:    toId(params.get('guest')),
     // A service by its day and name (the song leader's reminder links here).
     // Only a real date and a short name are kept; the page looks the service
     // up, so anything else simply finds nothing.
@@ -495,7 +497,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       )}
       {!updating && activeTab === 'visitors' && (
         <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
-          <VisitorTracker user={user} />
+          <VisitorTracker user={user} initialGuestId={deepLink?.page === 'visitors' ? deepLink.guestId : null} />
         </main>
       )}
       {!updating && activeTab === 'leadership' && (

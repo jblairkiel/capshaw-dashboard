@@ -94,7 +94,7 @@ function validAddress(email) {
 
 // Queues one message per recipient. Returns the rows created, so a caller (or
 // a test) can see exactly what was queued without touching a mail server.
-function enqueue({ to, subject, body, context = '', attachments = [], realRecipient = false }) {
+function enqueue({ to, subject, body, html = '', context = '', attachments = [], realRecipient = false }) {
   const redirectTo = realRecipient ? '' : config().redirectTo;
   const recipients = (Array.isArray(to) ? to : [to]).filter(r => validAddress(r?.email));
 
@@ -104,8 +104,8 @@ function enqueue({ to, subject, body, context = '', attachments = [], realRecipi
   const rows = [];
 
   const insert = db.prepare(`
-    INSERT INTO mail_outbox (to_email, to_name, intended_for, subject, body, context, attachments)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO mail_outbox (to_email, to_name, intended_for, subject, body, html, context, attachments)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const attached = JSON.stringify(attachments.map(({ file, filename, contentType }) => ({ file, filename, contentType })));
   // Read once for the whole message, not once per recipient.
@@ -120,9 +120,10 @@ function enqueue({ to, subject, body, context = '', attachments = [], realRecipi
     const deliverTo   = redirect ? redirectTo : email;
     const intendedFor = redirect ? email : '';
     const finalBody   = redirect ? redirectNotice(email, recipient.name) + body : body;
+    const finalHtml   = html && redirect ? redirectNoticeHtml(email, recipient.name) + html : html;
 
     const { lastInsertRowid: id } = insert.run(
-      deliverTo, recipient.name || '', intendedFor, subject, finalBody, context, attached
+      deliverTo, recipient.name || '', intendedFor, subject, finalBody, finalHtml, context, attached
     );
     rows.push(db.prepare('SELECT * FROM mail_outbox WHERE id = ?').get(id));
   }
@@ -139,6 +140,17 @@ function redirectNotice(email, name) {
     '─────────────────────────────────────────',
     '',
   ].join('\n');
+}
+
+function escapeHtml(text) {
+  return String(text ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function redirectNoticeHtml(email, name) {
+  const to = escapeHtml(name ? `${name} <${email}>` : email);
+  return '<div style="border:1px solid #f59e0b;background:#fffbeb;color:#92400e;padding:8px 12px;margin-bottom:16px;font:13px sans-serif">' +
+    `<strong>[TEST MODE]</strong> This message was not sent to its real recipient. It was addressed to: ${to}.<br>` +
+    'An admin can let people through to their own address on Admin → Email Delivery.</div>';
 }
 
 // ─── Sending ──────────────────────────────────────────────────────────────────
@@ -201,6 +213,7 @@ async function drainOutbox({ limit = 25 } = {}) {
         to: row.to_email,
         subject: row.subject,
         text: row.body,
+        html: row.html || undefined,
         attachments: attachments.length ? attachments : undefined,
         headers: row.intended_for ? { 'X-Intended-For': row.intended_for } : undefined,
       });
@@ -227,7 +240,7 @@ function send(message) {
 }
 
 module.exports = {
-  config, isConfigured, isRedirecting, validAddress,
+  config, isConfigured, isRedirecting, validAddress, escapeHtml,
   enqueue, send, drainOutbox, resetTransport, MAX_ATTEMPTS,
   saveAttachment, attachmentPath, attachmentsOf,
 };
