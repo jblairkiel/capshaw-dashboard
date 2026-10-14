@@ -69,18 +69,30 @@ function refreshLinkedUser(user, identity, { email, photo, isAdmin }) {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
 }
 
-// Joins a first-time Google or Facebook sign-in to the account that already
-// has its address, so one person never ends up with two. The provider has just
-// shown the address is theirs, which is what makes this safe — and it is also
-// why an email-and-password account still waiting on its confirmation email
-// counts as confirmed now. That account's password is cleared, though: anybody
-// could have typed this address into the sign-up form, and only the provider
-// sign-in has proved who owns it. "Forgot your password?" sets a new one.
-function linkIdentity(user, provider, profileId, { email, photo, isAdmin }) {
+// What a sign-in gets instead of an account when it has to wait for an admin.
+// The strategies hand `refusal` to passport as the reason there is nobody to
+// sign in, and the callback sends it to the sign-in page as auth_error.
+const LINK_REFUSALS = {
+  link_pending:  'This sign-in shares its address with an existing account, and an admin has to confirm it is the same person first.',
+  link_declined: 'An admin declined joining this sign-in to the existing account with its address.',
+};
+const refuse = code => ({ refusal: code, message: LINK_REFUSALS[code] });
+
+// Carries out a join an admin has approved (or the owner's own, below). The
+// provider sign-in has shown the address is theirs, which is why an
+// email-and-password account still waiting on its confirmation email counts
+// as confirmed now. That account's password is cleared, though: anybody could
+// have typed this address into the sign-up form, and only the provider sign-in
+// has proved who owns it. "Forgot your password?" sets a new one.
+function completeLink(identityId, deciderId) {
   db.prepare(`
-    INSERT INTO user_identities (user_id, provider, provider_id, email, last_login)
-    VALUES (?, ?, ?, ?, datetime('now'))
-  `).run(user.id, provider, profileId, email);
+    UPDATE user_identities
+       SET status = 'approved', decided_at = datetime('now'), decided_by = ?
+     WHERE id = ?
+  `).run(deciderId ?? null, identityId);
+
+  const identity = db.prepare('SELECT * FROM user_identities WHERE id = ?').get(identityId);
+  const user     = db.prepare('SELECT * FROM users WHERE id = ?').get(identity.user_id);
 
   const unconfirmed = user.provider === 'local' && !user.email_verified_at;
   if (unconfirmed) {
@@ -93,15 +105,44 @@ function linkIdentity(user, provider, profileId, { email, photo, isAdmin }) {
        WHERE id = ?
     `).run(user.id);
   }
-
-  const identity = db.prepare('SELECT * FROM user_identities WHERE provider = ? AND provider_id = ?').get(provider, profileId);
-  const linked   = refreshLinkedUser(user, identity, { email, photo, isAdmin });
+  const linked = db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
 
   // A confirmed address is what puts a password account in front of an admin,
-  // so one confirmed by this sign-in goes to them now, as it would have from
-  // the confirmation link.
+  // so one confirmed by this join goes to them now, as it would have from the
+  // confirmation link.
   if (unconfirmed && linked.role === 'pending') accountMail.awaitingApproval({ user: linked });
-  return linked;
+  return { identity, user: linked };
+}
+
+// A first-time Google or Facebook sign-in whose address an account here
+// already has. Matching addresses are only a suggestion that it is the same
+// person, so the sign-in is recorded as a request and goes nowhere until an
+// admin approves it. The admins are asked, and the account holder is told —
+// so a sign-in that is not theirs never waits quietly for a yes.
+//
+// The one exception is the owner address (ADMIN_EMAIL), which is let in on any
+// sign-in anyway and may have nobody else to approve it.
+function requestLink(account, provider, profileId, { email, photo, isAdmin }) {
+  try {
+    db.prepare(`
+      INSERT INTO user_identities (user_id, provider, provider_id, email, status)
+      VALUES (?, ?, ?, ?, 'pending')
+    `).run(account.id, provider, profileId, email);
+  } catch (err) {
+    // The same first sign-in, twice at once. The other one has asked already.
+    if (String(err.message).includes('UNIQUE')) return refuse('link_pending');
+    throw err;
+  }
+  const identity = db.prepare('SELECT * FROM user_identities WHERE provider = ? AND provider_id = ?').get(provider, profileId);
+
+  if (isAdmin) {
+    completeLink(identity.id, null);
+    return refreshLinkedUser(account, identity, { email, photo, isAdmin });
+  }
+
+  accountMail.linkAwaitingApproval({ account, provider, email });
+  accountMail.linkRequested({ account, provider });
+  return refuse('link_pending');
 }
 
 // Where a Google or Facebook sign-in lands. Together with the address check in
@@ -109,10 +150,13 @@ function linkIdentity(user, provider, profileId, { email, photo, isAdmin }) {
 // account however they arrive:
 //
 //   1. the provider identity the account was made with, or
-//   2. one already linked to an account, or
+//   2. one joined to an account — once an admin has approved it, or
 //   3. an address the provider vouches for that an account here already has —
-//      linked to that account from now on, or
+//      recorded as a request to join, for an admin to approve, or
 //   4. a new account, waiting for approval.
+//
+// Returns the account to sign in to, or `{ refusal, message }` while a join is
+// waiting on an admin or was declined.
 //
 // `emailVerified` is false only when the provider says outright that the
 // address is unconfirmed (Google reports it; Facebook only hands out confirmed
@@ -131,10 +175,13 @@ function upsertUser(provider, profileId, email, name, photo, { emailVerified = t
       'SELECT * FROM user_identities WHERE provider = ? AND provider_id = ?'
     ).get(provider, profileId);
     const owner = identity && db.prepare('SELECT * FROM users WHERE id = ?').get(identity.user_id);
-    if (owner) return refreshLinkedUser(owner, identity, { email, photo, isAdmin });
+    if (owner) {
+      if (identity.status === 'approved') return refreshLinkedUser(owner, identity, { email, photo, isAdmin });
+      return refuse(identity.status === 'declined' ? 'link_declined' : 'link_pending');
+    }
 
     const sameAddress = email && emailVerified && anyAccountFor(normalizeEmail(email));
-    if (sameAddress) return linkIdentity(sameAddress, provider, profileId, { email, photo, isAdmin });
+    if (sameAddress) return requestLink(sameAddress, provider, profileId, { email, photo, isAdmin });
   }
 
   if (existing) {
@@ -197,6 +244,7 @@ if (PROVIDERS.includes('google')) {
         const user  = upsertUser('google', profile.id, email, profile.displayName, photo, {
           emailVerified: addressConfirmed(profile),
         });
+        if (user.refusal) return done(null, false, { code: user.refusal, message: user.message });
         done(null, user);
       } catch (err) {
         done(err);
@@ -222,6 +270,7 @@ if (PROVIDERS.includes('facebook')) {
         const user  = upsertUser('facebook', profile.id, email, profile.displayName, photo, {
           emailVerified: addressConfirmed(profile),
         });
+        if (user.refusal) return done(null, false, { code: user.refusal, message: user.message });
         done(null, user);
       } catch (err) {
         done(err);
@@ -297,7 +346,8 @@ function cleanName(value) {
 }
 
 // Any account at all on this address, whichever way it signs in — including an
-// address that only a linked Google or Facebook sign-in carries. Used to keep
+// address that only a joined Google or Facebook sign-in carries (or one waiting
+// on an admin to join it). Used to keep
 // one person from ending up with a Google account and a password account that
 // the directory then cannot tell apart. The oldest wins, should an address
 // already be on two accounts from before they were joined.
@@ -306,7 +356,7 @@ function anyAccountFor(email) {
   return db.prepare(`
     SELECT * FROM users
      WHERE lower(trim(email)) = ?
-        OR id IN (SELECT user_id FROM user_identities WHERE lower(trim(email)) = ?)
+        OR id IN (SELECT user_id FROM user_identities WHERE lower(trim(email)) = ? AND status <> 'declined')
      ORDER BY id ASC
   `).get(email, email);
 }
@@ -637,6 +687,13 @@ router.get('/providers', (req, res) => {
   res.json({ success: true, providers: PROVIDERS });
 });
 
+// What the sign-in page is told when a provider sign-in finds nobody: why, if
+// it is a join waiting on (or refused by) an admin, otherwise just which
+// provider failed.
+function authErrorFor(provider, info) {
+  return Object.prototype.hasOwnProperty.call(LINK_REFUSALS, info?.code) ? info.code : provider;
+}
+
 // An old link or bookmark to a provider that is not set up goes back to the
 // sign-in page with that provider's error, rather than ending in passport's
 // "Unknown authentication strategy".
@@ -655,7 +712,7 @@ router.get('/google/callback', ifConfigured('google'), (req, res, next) => {
     }
     if (!user) {
       console.log('[auth] Google: no user —', info?.message ?? 'unknown reason');
-      return res.redirect(`${CLIENT_URL}/?auth_error=google`);
+      return res.redirect(`${CLIENT_URL}/?auth_error=${authErrorFor('google', info)}`);
     }
     req.logIn(user, loginErr => {
       if (loginErr) {
@@ -680,7 +737,7 @@ router.get('/facebook/callback', ifConfigured('facebook'), (req, res, next) => {
     }
     if (!user) {
       console.log('[auth] Facebook: no user —', info?.message ?? 'unknown reason');
-      return res.redirect(`${CLIENT_URL}/?auth_error=facebook`);
+      return res.redirect(`${CLIENT_URL}/?auth_error=${authErrorFor('facebook', info)}`);
     }
     req.logIn(user, loginErr => {
       if (loginErr) {
@@ -795,7 +852,7 @@ function resolveDirectory(target, body) {
 // The other ways an account signs in, beyond the one it was made with — so an
 // admin can see that the Google sign-in and the password account are one person.
 const LINKED_PROVIDERS_SQL =
-  '(SELECT group_concat(provider) FROM (SELECT DISTINCT provider FROM user_identities i WHERE i.user_id = u.id AND i.provider <> u.provider ORDER BY provider)) AS linked_providers';
+  "(SELECT group_concat(provider) FROM (SELECT DISTINCT provider FROM user_identities i WHERE i.user_id = u.id AND i.status = 'approved' AND i.provider <> u.provider ORDER BY provider)) AS linked_providers";
 
 function withLinkedProviders(row) {
   return { ...row, linked_providers: row.linked_providers ? row.linked_providers.split(',') : [] };
@@ -1085,6 +1142,111 @@ router.patch('/users/:id/directory', requireAuth, requireAdmin, (req, res) => {
 
   db.prepare('UPDATE users SET directory_id=? WHERE id=?').run(personId, target.id);
   res.json({ success: true, directory_id: personId, directory_name: person.name });
+});
+
+// ─── Joining a second sign-in to an existing account ──────────────────────────
+//
+// A Google or Facebook sign-in that turns up on an address an account already
+// has waits here until an admin says it is the same person (see requestLink).
+// Approving gives that sign-in everything the account can see and do, so it is
+// a decision for somebody other than the account holder: an admin can decline
+// a request on their own account, but never approve one.
+
+const PROVIDER_LABEL = { google: 'Google', facebook: 'Facebook', local: 'email and password' };
+
+function linkRequestRow(id) {
+  return db.prepare(`
+    SELECT i.id, i.provider, i.email, i.status, i.created_at, i.decided_at,
+           i.user_id, u.name AS account_name, u.email AS account_email,
+           u.provider AS account_provider, u.role AS account_role,
+           d.name AS decided_by_name
+      FROM user_identities i
+      JOIN users u ON u.id = i.user_id
+      LEFT JOIN users d ON d.id = i.decided_by
+     WHERE i.id = ?
+  `).get(id);
+}
+
+router.get('/link-requests', requireAuth, requireAdmin, (req, res) => {
+  const status = ['pending', 'approved', 'declined'].includes(req.query.status) ? req.query.status : 'pending';
+  const ids = db.prepare('SELECT id FROM user_identities WHERE status = ? ORDER BY created_at ASC, id ASC').all(status);
+  res.json({ success: true, requests: ids.map(r => linkRequestRow(r.id)) });
+});
+
+// Looks up a request an admin is about to decide on. Returns { request } or
+// { status, error }.
+function pendingLinkRequest(id) {
+  const request = linkRequestRow(id);
+  if (!request) return { status: 404, error: 'That sign-in request was not found.' };
+  if (request.status !== 'pending') {
+    return { status: 409, error: `That sign-in request has already been ${request.status}.` };
+  }
+  return { request };
+}
+
+router.patch('/link-requests/:id/approve', requireAuth, requireAdmin, (req, res) => {
+  const { request, status, error } = pendingLinkRequest(req.params.id);
+  if (error) return res.status(status).json({ success: false, error });
+
+  if (String(request.user_id) === String(req.user.id)) {
+    return res.status(403).json({
+      success: false,
+      error: 'You cannot approve a sign-in joining your own account. Another admin has to confirm it is you.',
+    });
+  }
+
+  const { user } = completeLink(request.id, req.user.id);
+  actionLog.record(req.user, {
+    area:     'accounts',
+    action:   'update',
+    entity:   'account',
+    entityId: user.id,
+    summary:  `Joined a ${PROVIDER_LABEL[request.provider] || request.provider} sign-in (${request.email}) to ${user.name}'s account`,
+    details:  { identity: request.id, provider: request.provider, email: request.email },
+  });
+  accountMail.linkApproved({ account: user, provider: request.provider });
+
+  res.json({ success: true, request: linkRequestRow(request.id), user: userRow(user.id) });
+});
+
+router.patch('/link-requests/:id/decline', requireAuth, requireAdmin, (req, res) => {
+  const { request, status, error } = pendingLinkRequest(req.params.id);
+  if (error) return res.status(status).json({ success: false, error });
+
+  db.prepare(`
+    UPDATE user_identities
+       SET status = 'declined', decided_at = datetime('now'), decided_by = ?
+     WHERE id = ?
+  `).run(req.user.id, request.id);
+  actionLog.record(req.user, {
+    area:     'accounts',
+    action:   'update',
+    entity:   'account',
+    entityId: request.user_id,
+    summary:  `Declined joining a ${PROVIDER_LABEL[request.provider] || request.provider} sign-in (${request.email}) to ${request.account_name}'s account`,
+    details:  { identity: request.id, provider: request.provider, email: request.email },
+  });
+
+  res.json({ success: true, request: linkRequestRow(request.id) });
+});
+
+// Forgets a request, whatever was decided, so that sign-in starts over next
+// time — asking again if its address still matches. Also how a joined sign-in
+// is taken off an account.
+router.delete('/link-requests/:id', requireAuth, requireAdmin, (req, res) => {
+  const request = linkRequestRow(req.params.id);
+  if (!request) return res.status(404).json({ success: false, error: 'That sign-in request was not found.' });
+
+  db.prepare('DELETE FROM user_identities WHERE id = ?').run(request.id);
+  actionLog.record(req.user, {
+    area:     'accounts',
+    action:   'delete',
+    entity:   'account',
+    entityId: request.user_id,
+    summary:  `Removed the ${PROVIDER_LABEL[request.provider] || request.provider} sign-in (${request.email}) from ${request.account_name}'s account`,
+    details:  { identity: request.id, provider: request.provider, email: request.email, was: request.status },
+  });
+  res.json({ success: true });
 });
 
 router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {

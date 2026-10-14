@@ -153,26 +153,50 @@ address, so those accounts have nothing to confirm and no password here.
 
 ### One person, one account
 
-Whichever way somebody comes in, the same email address is the same account:
+Whichever way somebody comes in, the same email address is the same account —
+but a matching address is only ever a *suggestion* that it is the same person.
+An admin confirms every join.
 
 - **Registering with a password** for an address that already has an account —
-  made any way, or carried by a joined Google or Facebook sign-in — makes
-  nothing new; the mailbox owner is told how they already sign in.
+  made any way, or carried by a Google or Facebook sign-in joined to it (or
+  waiting to be) — makes nothing new; the mailbox owner is told how they
+  already sign in.
 - **Google or Facebook for the first time** with an address an account here
-  already has signs in to *that* account, and the sign-in is recorded in
-  `user_identities` so it comes straight back next time. Facebook after Google,
-  Google after a password sign-up — all one account, one directory link, one
-  approval. The address and name stay those of the way the account was made.
+  already has does **not** sign in, and does not make a second account. It is
+  recorded in `user_identities` as a request, and:
+  - every admin is emailed to confirm it, and
+  - the account holder is emailed too, so a sign-in that is not theirs never
+    waits quietly for somebody to approve it.
+
+  The person is sent back to the sign-in page, told an admin will confirm it,
+  and keeps signing in the way they did before. Trying again changes nothing
+  and sends no more email.
+- **An admin decides** under *Sign-ins waiting to be joined* on **Admin →
+  Members & Access**:
+  - **Approve** — that sign-in reaches the account from then on (same
+    household, same approval; the account keeps the name and address it was
+    made with). The account holder is emailed, and it is kept in the action
+    history. **An admin can never approve a join to their own account**;
+    another admin has to.
+  - **Decline** — that sign-in stays out, and does not get an account of its
+    own either. An admin can remove a declined request to let it ask again.
+- **The owner address** (`ADMIN_EMAIL`) joins straight away, since it is let in
+  on any sign-in anyway and may have nobody else to approve it.
 - **An address the provider says is unconfirmed** (Google reports this) is
   never used to find an account — it gets a new, pending one as before.
-- **A password account still waiting on its confirmation email** is confirmed
-  by the provider sign-in, since that proves the address. Its password is
-  cleared, because anybody could have typed the address into the sign-up form;
-  *Forgot your password?* sets a new one.
+- **A password account still waiting on its confirmation email** is untouched
+  while the request waits. Once approved, it counts as confirmed (the provider
+  proved the address) and its password is cleared, because anybody could have
+  typed the address into the sign-up form; *Forgot your password?* sets a new
+  one.
 
-Admins see every way an account signs in as badges in the **Sign-in** column.
-Accounts that were already duplicated before this are not merged
+Admins see every approved way an account signs in as badges in the **Sign-in**
+column. Accounts that were already duplicated before this are not merged
 automatically — remove the spare one from **Admin → Members & Access**.
+
+The endpoints, all admin-only: `GET /api/auth/link-requests[?status=pending|approved|declined]`,
+`PATCH /api/auth/link-requests/:id/approve`, `PATCH /api/auth/link-requests/:id/decline`
+and `DELETE /api/auth/link-requests/:id`.
 
 ---
 
