@@ -202,6 +202,42 @@ function EmailPreferences({ notifications, onSaved }) {
   );
 }
 
+// ─── The directory on your phone ──────────────────────────────────────────────
+
+// The whole member directory as one contacts file. On a phone, opening it
+// offers to add everybody at once; on a computer it downloads, to be sent to a
+// phone or imported into an address book. Only for an approved account — the
+// server checks the same.
+const DIRECTORY_VCF = `${API}/directory.vcf`;
+
+function DirectoryToPhone({ canExport }) {
+  if (!canExport) return null;
+  return (
+    <div className="card" role="region" aria-label="The directory on your phone">
+      <h3 className="font-semibold text-church-navy text-sm">The church directory on your phone</h3>
+      <p className="text-xs text-gray-500 mt-1">
+        Adds everybody in the member directory to your phone&apos;s contacts — names, phone numbers,
+        email and addresses, with family photos where there are some — each marked
+        &ldquo;Capshaw Church of Christ&rdquo; so you can find them together.
+      </p>
+      <a href={DIRECTORY_VCF} className="btn-primary inline-flex items-center gap-2 text-sm mt-3">
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v12m0 0l-4-4m4 4l4-4M5 20h14" />
+        </svg>
+        Add the directory to my phone
+      </a>
+      <ul className="text-xs text-gray-500 mt-3 space-y-1 list-disc pl-4">
+        <li><strong>iPhone:</strong> tap the button in Safari, then <em>Add All Contacts</em>.</li>
+        <li><strong>Android:</strong> tap the button, open the downloaded file, and choose Contacts to import it.</li>
+        <li>Doing it again later adds everybody a second time; your Contacts app can merge the duplicates (iPhone: <em>Duplicates Found</em>; Android: <em>Merge duplicates</em>).</li>
+      </ul>
+      <p className="text-xs text-gray-400 mt-2">
+        Please keep these to yourself — they are our church family&apos;s details, shared so we can reach one another.
+      </p>
+    </div>
+  );
+}
+
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export default function MyProfileView({ user }) {
@@ -249,6 +285,7 @@ export default function MyProfileView({ user }) {
           notifications={data.notifications}
           onSaved={notifications => setData(prev => prev && ({ ...prev, notifications }))}
         />
+        <DirectoryToPhone canExport={user?.role === 'approved' || user?.role === 'admin'} />
 
         <div className="card text-center py-10">
           <p className="text-sm text-gray-600">
@@ -286,6 +323,7 @@ export default function MyProfileView({ user }) {
         notifications={data.notifications}
         onSaved={notifications => setData(prev => prev && ({ ...prev, notifications }))}
       />
+      <DirectoryToPhone canExport={user?.role === 'approved' || user?.role === 'admin'} />
 
       <PersonCard
         person={data.person}
