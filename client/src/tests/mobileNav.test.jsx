@@ -1,5 +1,5 @@
-import { render, screen, fireEvent, within } from '@testing-library/react';
-import { describe, test, expect, vi } from 'vitest';
+import { render, screen, fireEvent, within, act } from '@testing-library/react';
+import { describe, test, expect, vi, afterEach } from 'vitest';
 import MobileNav from '../components/MobileNav';
 
 // The same shape App.jsx builds for an admin: five groups, fifteen items. As a
@@ -97,5 +97,59 @@ describe('MobileNav', () => {
     fireEvent.click(screen.getByRole('button'));
     expect(within(panel()).queryByText('Church Office')).toBeNull();
     expect(within(panel()).queryByRole('button', { name: 'Church Records' })).toBeNull();
+  });
+});
+
+// On a phone, 100vh is the height with the browser's toolbars hidden, so a
+// panel sized from it ran under Safari's bottom bar and its last groups could
+// not be reached. It is sized from what is really visible instead.
+describe('MobileNav — fitting the screen', () => {
+  let barBottom;
+  let viewport;
+
+  function phone({ visible = 664, layout = 844, bar = 108 } = {}) {
+    barBottom = bar;
+    viewport = Object.assign(new EventTarget(), { height: visible, offsetTop: 0 });
+    vi.stubGlobal('visualViewport', viewport);
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(layout);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      return { top: barBottom - 44, bottom: barBottom, left: 0, right: 390, width: 390, height: 44, x: 0, y: barBottom - 44 };
+    });
+  }
+  afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  test('hangs from the bottom of the bar and stops at the bottom of what can be seen', () => {
+    phone({ visible: 664, layout: 844, bar: 108 });
+    render(<MobileNav groups={GROUPS} activeTab="assignments" onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button'));
+    expect(panel().style.top).toBe('108px');
+    // 664 visible − 108 above it — not 844 − 7rem, which ran past the toolbar.
+    expect(panel().style.maxHeight).toBe('556px');
+    expect(panel().className).toMatch(/overflow-y-auto/);
+    expect(panel().className).not.toMatch(/100vh/);
+  });
+
+  test('measures again when the toolbars come or go, or the bar sticks to the top', () => {
+    phone({ visible: 664, bar: 108 });
+    render(<MobileNav groups={GROUPS} activeTab="assignments" onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button'));
+
+    viewport.height = 600;                        // Safari's toolbars slide back in
+    act(() => { viewport.dispatchEvent(new Event('resize')); });
+    expect(panel().style.maxHeight).toBe('492px');
+
+    barBottom = 44;                               // scrolled: the bar is now stuck at the top
+    act(() => { window.dispatchEvent(new Event('scroll')); });
+    expect(panel().style.top).toBe('44px');
+    expect(panel().style.maxHeight).toBe('556px');
+  });
+
+  test('without visualViewport, falls back to the window height', () => {
+    vi.stubGlobal('visualViewport', undefined);
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(700);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ top: 56, bottom: 100, left: 0, right: 390, width: 390, height: 44 });
+    render(<MobileNav groups={GROUPS} activeTab="assignments" onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button'));
+    expect(panel().style.maxHeight).toBe('600px');
   });
 });

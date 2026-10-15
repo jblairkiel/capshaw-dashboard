@@ -1,13 +1,29 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 
 // ─── Mobile nav ────────────────────────────────────────────────────────────────
 // A row of dropdowns cannot fit a phone, and each is whitespace-nowrap, so the
 // row used to force the whole page wider than the viewport. Below lg (1024px),
 // where every menu first fits beside the Refresh button, the nav collapses to
 // one button that opens every group as a folder.
+//
+// The open panel is sized from what is really on screen, not from 100vh. On a
+// phone 100vh is the height with the browser's toolbars hidden, and the bar
+// sits further down at the top of a page than once it has stuck, so a panel
+// sized from 100vh ran under Safari's bottom toolbar: the last groups (Church
+// Office, Admin) were below the edge, and since the panel keeps the scroll to
+// itself, there was no way to reach them. Instead it hangs from wherever the
+// bar ends and stops at the bottom of the visible area (visualViewport, which
+// leaves the toolbars out), and measures again whenever either moves.
+
+// The height of what can actually be seen.
+function visibleHeight() {
+  return window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight;
+}
 
 export default function MobileNav({ groups, activeTab, onSelect }) {
   const [open, setOpen] = useState(false);
+  // Where the panel hangs from, and how tall it may be, while it is open.
+  const [fit, setFit] = useState(null);
   const ref = useRef(null);
 
   const activeGroup = groups.find(g => g.items.some(i => i.id === activeTab));
@@ -22,6 +38,27 @@ export default function MobileNav({ groups, activeTab, onSelect }) {
     return () => {
       document.removeEventListener('mousedown', onPointer);
       document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  // Measured before the panel is painted, so it never shows at the wrong size.
+  useLayoutEffect(() => {
+    if (!open) { setFit(null); return; }
+    const measure = () => {
+      const top = Math.max(0, Math.round(ref.current?.getBoundingClientRect().bottom ?? 0));
+      setFit({ top, maxHeight: Math.max(160, Math.floor(visibleHeight() - top)) });
+    };
+    measure();
+    const viewport = window.visualViewport;
+    window.addEventListener('resize', measure);
+    window.addEventListener('scroll', measure, { passive: true });
+    viewport?.addEventListener('resize', measure);
+    viewport?.addEventListener('scroll', measure);
+    return () => {
+      window.removeEventListener('resize', measure);
+      window.removeEventListener('scroll', measure);
+      viewport?.removeEventListener('resize', measure);
+      viewport?.removeEventListener('scroll', measure);
     };
   }, [open]);
 
@@ -52,7 +89,8 @@ export default function MobileNav({ groups, activeTab, onSelect }) {
       {open && (
         <div
           id="mobile-nav-panel"
-          className="absolute top-full left-0 right-0 bg-white shadow-xl border-t border-gray-200 z-50 max-h-[calc(100vh-7rem)] overflow-y-auto overscroll-contain pb-2"
+          className="fixed left-0 right-0 bg-white shadow-xl border-t border-gray-200 z-50 overflow-y-auto overscroll-contain pb-[max(0.5rem,env(safe-area-inset-bottom))]"
+          style={fit ? { top: fit.top, maxHeight: fit.maxHeight } : { top: 0, visibility: 'hidden' }}
         >
           {groups.map(group => (
             <div key={group.id} className="border-b border-gray-100 last:border-0">
