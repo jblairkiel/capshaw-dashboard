@@ -11,6 +11,13 @@ const { requireAuth, requireApproved, requireArea } = require('../middleware/aut
 const actionLog = require('../lib/actionLog');
 const rotations = require('../lib/rotations');
 const { tellNextUp, tellTurnGiven } = require('../mail/rotations');
+const notices = require('../mail/notices');
+
+const rotationNotice = (req, extra) => ({
+  kind: 'rotation-changed', page: 'rotations', params: { rotation: req.rotation.id },
+  subjectType: 'rotation', subjectId: req.rotation.id, actor: req.user,
+  why: `your name is on the "${req.rotation.name}" rotation`, ...extra,
+});
 // Read through the module, so a test can say what day it is.
 const recordKeeping = require('../lib/recordKeeping');
 const churchToday = () => recordKeeping.churchToday();
@@ -129,6 +136,11 @@ router.delete('/:id/members/:directoryId', requireApproved, runOnly, (req, res) 
   const result = rotations.removeMember(req.rotation.id, req.params.directoryId);
   if (result.error) return fail(res, result);
   log(req, { action: 'update', summary: `Took ${result.removed.name} off the "${req.rotation.name}" rotation` });
+  notices.rotations([{ directoryId: result.removed.directoryId }], rotationNotice(req, {
+    subject: `You are no longer on the "${req.rotation.name}" rotation`,
+    lines: [`${req.user.name} has taken you off the "${req.rotation.name}" rotation, so your turn will not come round any more.`,
+      'If that is a mistake, please let them know.'],
+  }), `${req.rotation.id}:member:${result.removed.directoryId}:removed`);
   respond(req, res);
 });
 
@@ -187,6 +199,13 @@ router.delete('/:id/turns/:turnId', requireApproved, runOnly, (req, res) => {
       : `Took ${before.name}'s turn${before.date ? ` on ${before.date}` : ''} out of the "${req.rotation.name}" history`,
     before,
   });
+  // A turn still to come, called off: whoever had it was getting ready for it.
+  if (before.date && before.date >= churchToday()) {
+    notices.rotations([{ directoryId: before.directory_id, name: before.name }], rotationNotice(req, {
+      subject: `Your turn on "${req.rotation.name}" on ${before.date} is off`,
+      lines: [`${req.user.name} has cancelled your turn on the "${req.rotation.name}" rotation on ${before.date}.${requeue ? ' You are back at the front of the line, so your turn will come round again next.' : ''}`],
+    }), `${req.rotation.id}:turn:${before.id}:cancelled`);
+  }
   respond(req, res);
 });
 

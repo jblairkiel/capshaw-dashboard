@@ -31,6 +31,7 @@ const mailer = require('../mail/mailer');
 const plans = require('../lib/worshipPlans');
 const actionLog = require('../lib/actionLog');
 const blackouts = require('../lib/blackouts');
+const notices = require('../mail/notices');
 
 const AREA = 'serving-schedule';
 const manageOnly = requireArea(AREA);
@@ -411,6 +412,38 @@ router.put('/service-jobs', requireApproved, manageOnly, (req, res) => {
 
 // ─── Slots ────────────────────────────────────────────────────────────────────
 
+const { servingSlotAhead: stillAhead, slotWhen } = notices;
+
+// The schedule keeper changing a slot by hand: whoever is now on it, and
+// whoever was taken off it, hear about it. The monthly schedule itself is
+// announced when it is published (notify.schedulePublished); this is for the
+// changes after that, and for anything filled by hand.
+function tellAboutSlot(before, after, actor) {
+  const slot = after || before;
+  if (!stillAhead(slot) && !(before && stillAhead(before))) return;
+  const notice = notices.servingNotice(slot, actor);
+  const was = (before?.name || '').trim();
+  const now = (after?.name || '').trim();
+  const moved = before && after && was && was === now
+    && (before.date !== after.date || before.service !== after.service || before.job !== after.job || before.month !== after.month);
+
+  if (now && now !== was) notices.servingPutOn(after, now, actor);
+  if (was && was !== now) {
+    notices.servingSchedule([{ name: was }], { ...notice,
+      subject: `You are off ${before.job}: ${slotWhen(before)}`,
+      lines: [after
+        ? `${actor?.name || 'The schedule keeper'} has taken you off ${before.job} on ${slotWhen(before)}${now ? `; ${now} is doing it instead` : ''}.`
+        : `${actor?.name || 'The schedule keeper'} has taken ${before.job} on ${slotWhen(before)} off the schedule, so you are no longer down for it.`],
+    }, `${slot.id}:removed`);
+  }
+  if (moved) {
+    notices.servingSchedule([{ name: now }], { ...notice,
+      subject: `Changed: ${after.job}, now ${slotWhen(after)}`,
+      lines: [`${actor?.name || 'The schedule keeper'} has changed a slot you are down for. It was ${before.job} on ${slotWhen(before)}; it is now ${after.job} on ${slotWhen(after)}.`],
+    }, `${slot.id}:changed`);
+  }
+}
+
 router.post('/assignments', requireApproved, manageOnly, (req, res) => {
   const month   = String(req.body?.month || '').trim();
   const date    = String(req.body?.date || '').trim();
@@ -433,6 +466,7 @@ router.post('/assignments', requireApproved, manageOnly, (req, res) => {
     summary:  `Added ${job} on ${date || month}${name ? ` for ${name}` : ' (nobody yet)'}`,
     after:    row,
   });
+  tellAboutSlot(null, row, req.user);
   res.json({ success: true, assignment: row, warning: awayWarning(row) });
 });
 
@@ -457,6 +491,7 @@ router.patch('/assignments/:id', requireApproved, manageOnly, (req, res) => {
     after,
   });
   if (after.name !== before.name) settleReplacement(after.id, after.name, req.user);
+  tellAboutSlot(before, after, req.user);
   res.json({ success: true, assignment: after, warning: awayWarning(after) });
 });
 
@@ -474,6 +509,7 @@ router.delete('/assignments/:id', requireApproved, manageOnly, (req, res) => {
     before,
   });
   settleReplacement(before.id, '', req.user);
+  tellAboutSlot(before, null, req.user);
   res.json({ success: true });
 });
 

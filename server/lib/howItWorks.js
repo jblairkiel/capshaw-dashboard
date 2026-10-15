@@ -60,6 +60,7 @@ const SECTIONS = [
         '**My Church → My Household & Preferences** — keep your own details current (and your household\'s), and say which worship jobs you are glad to do, willing to do, or would rather not.',
         '**My Church → My Inbox** — anything waiting on you, such as a guest to follow up with, in one list.',
         'The **bell** at the top — what has happened that you have not seen yet: a meeting posted in your group, a reply, a request you made being answered. Choosing one takes you to it.',
+        '**When somebody else changes something that concerns you** — puts you down for a Sunday, a month of communion preparation or a sign-up; takes you off one; moves its date; cancels it — you are told on the bell and by email. So is whoever was counting on you, if you take your own name off something they keep. Nobody is told about what they did themselves.',
       ] },
     ],
   },
