@@ -18,6 +18,7 @@
 // never from the generic start form, so it always names a real slot.
 
 const notifications = require('../../lib/notifications');
+const notices = require('../../mail/notices');
 const actionLog = require('../../lib/actionLog');
 const { holdsArea } = require('../../lib/areas');
 
@@ -136,7 +137,11 @@ module.exports = {
           effect: (data, { db, user, note, instance }) => {
             const name = String(note || '').trim().slice(0, 100);
             if (!name) return { error: 'Say who is taking it' };
-            if (!setSlot(data, db, name, user)) return { error: 'That slot is no longer on the schedule — leave it open instead' };
+            const slot = setSlot(data, db, name, user);
+            if (!slot) return { error: 'That slot is no longer on the schedule — leave it open instead' };
+            // Whoever is now doing it hears so — unless the name was already
+            // on the slot (put there from the Scheduled tab, which told them).
+            if (slot.name !== name) notices.servingPutOn({ ...slot, name }, name, user, { replacing: slot.name });
             tellRequester(instance, db, `${name} is taking ${data.slotJob} for you, ${when(data)}`);
             return { data: { replacedBy: name } };
           },

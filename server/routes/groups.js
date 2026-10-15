@@ -8,6 +8,7 @@ const comments      = require('../lib/eventComments');
 const notifications = require('../lib/notifications');
 const actionLog     = require('../lib/actionLog');
 const notify        = require('../mail/notify');
+const notices       = require('../mail/notices');
 const keeping       = require('../lib/recordKeeping');
 const { requireAuth, requireApproved } = require('../middleware/auth');
 
@@ -239,8 +240,18 @@ router.put('/:groupId', requireApproved, loadGroup, (req, res) => {
     fields.sortOrder = req.body?.sortOrder;
   }
 
+  const roll = groups.membersOf(req.group.id);
   const result = groups.updateGroup(req.group.id, fields);
   if (result.error) return res.status(400).json({ success: false, error: result.error });
+  // Retiring a group: everybody on its roll was counting on it meeting.
+  if (result.before.active && !result.group.active) {
+    notices.churchGroups(roll.map(m => ({ directoryId: m.directoryId })), {
+      kind: 'group-changed', page: 'groups', params: {}, actor: req.user,
+      subject: `${req.group.name} has stopped meeting`,
+      lines: [`${req.user.name} has retired the ${req.group.name} church group, so it will not be meeting any more.`],
+      why: `you were on ${req.group.name}'s roll`,
+    }, `${req.group.id}:retired`);
+  }
 
   actionLog.record(req.user, {
     area:     'church-groups',
@@ -257,8 +268,17 @@ router.put('/:groupId', requireApproved, loadGroup, (req, res) => {
 // ─── DELETE /api/groups/:groupId ──────────────────────────────────────────────
 
 router.delete('/:groupId', requireApproved, loadGroup, requireManages, (req, res) => {
+  const roll = groups.membersOf(req.group.id);
   const result = groups.deleteGroup(req.group.id);
   if (result.error) return res.status(400).json({ success: false, error: result.error });
+  if (req.group.active) {
+    notices.churchGroups(roll.map(m => ({ directoryId: m.directoryId })), {
+      kind: 'group-changed', page: 'groups', params: {}, actor: req.user,
+      subject: `${req.group.name} has been taken down`,
+      lines: [`${req.user.name} has deleted the ${req.group.name} church group and its meetings.`],
+      why: `you were on ${req.group.name}'s roll`,
+    }, `${req.group.id}:deleted`);
+  }
 
   actionLog.record(req.user, {
     area:     'church-groups',
@@ -363,6 +383,13 @@ router.delete('/:groupId/members/:memberId', requireApproved, loadGroup, require
     summary:  `Removed ${result.member.name} from ${req.group.name}`,
     details:  { group: req.group.key, directoryId: result.member.directory_id },
   });
+  notices.churchGroups([{ directoryId: result.member.directory_id }], {
+    kind: 'group-changed', page: 'groups', params: { group: req.group.id }, actor: req.user,
+    subject: `You are no longer in ${req.group.name}`,
+    lines: [`${req.user.name} has taken you off ${req.group.name}'s roll, so you will not hear about its meetings any more.`,
+      'If that is a mistake, please let them know.'],
+    why: `you were on ${req.group.name}'s roll`,
+  }, `${req.group.id}:member:${result.member.id}:removed`);
   res.json({ success: true, members: groups.membersOf(req.group.id) });
 });
 
@@ -619,6 +646,21 @@ router.put('/:groupId/events/:eventId/head-count', requireApproved, loadGroup, r
 });
 
 router.delete('/:groupId/events/:eventId', requireApproved, loadGroup, requireLeads, loadEvent, (req, res) => {
+  // A posted meeting still to come that is deleted rather than cancelled is
+  // just as much off for the people coming, so the roll is told the same way.
+  const event = events.getEvent(req.event.id);
+  if (req.event.status === 'published' && (!event.date || event.date >= keeping.churchToday())) {
+    notifications.notify({
+      users: groups.membersOf(req.group.id).map(m => m.userId),
+      kind:  'group-event-cancelled',
+      title: `Cancelled: ${event.title}`,
+      body:  `${req.group.name}'s meeting${event.date ? ` on ${event.date}` : ''} is off.`,
+      subjectType: 'church-group',
+      subjectId:   req.group.id,
+      actor: req.user,
+    });
+    notify.groupEventCancelled({ group: req.group, event });
+  }
   db.prepare('DELETE FROM group_events WHERE id = ?').run(req.event.id);
   actionLog.record(req.user, {
     area:     'church-groups',
@@ -766,6 +808,29 @@ router.post('/:groupId/events/:eventId/signups', requireApproved, loadGroup, req
 router.delete('/:groupId/events/:eventId/signups/:claimId', requireApproved, loadGroup, requireBelongs, loadEvent, (req, res) => {
   const result = events.releaseSignup(Number(req.params.claimId), req.user, { canManage: req.perms.leads });
   if (result.error) return res.status(403).json({ success: false, error: result.error });
+  const { claim } = result;
+  const own = claim.user_id === req.user.id || (!!req.user.directory_id && claim.directory_id === req.user.directory_id);
+  const upcoming = !req.event.date || req.event.date >= keeping.churchToday();
+  if (upcoming && own) {
+    // The leaders were counting on it being brought.
+    const leaders = groups.membersOf(req.group.id).filter(m => m.role === 'leader' || m.role === 'co-leader');
+    notifications.notify({
+      users: leaders.map(m => m.userId),
+      kind:  'group-event-signup',
+      title: `${claim.user_name || req.user.name} is no longer bringing ${claim.label}`,
+      body:  `For "${req.event.title}".`,
+      subjectType: 'group-event',
+      subjectId:   req.event.id,
+      actor: req.user,
+    });
+  } else if (upcoming) {
+    notices.churchGroups([{ userId: claim.user_id, directoryId: claim.directory_id, name: claim.user_name }], {
+      kind: 'group-event-signup', page: 'groups', params: { group: req.group.id, event: req.event.id }, actor: req.user,
+      subject: `You are no longer down to bring ${claim.label}`,
+      lines: [`${req.user.name} has taken you off bringing ${claim.label} to "${req.event.title}"${req.event.date ? ` on ${req.event.date}` : ''}.`],
+      why: `you signed up to bring something to ${req.group.name}'s meeting`,
+    }, `${req.group.id}:event:${req.event.id}:signup:${claim.id}:removed`);
+  }
   res.json({ success: true, signups: events.signupsFor(req.event.id, req.user) });
 });
 

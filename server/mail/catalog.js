@@ -16,6 +16,7 @@ const leaderReminders = require('./worshipReminders');
 const communionPrep = require('./communionPrep');
 const signupMail = require('./signups');
 const rotationMail = require('./rotations');
+const notices = require('./notices');
 
 const CATEGORIES = [
   { id: 'notifications', label: 'Notifications', description: 'Messages to one person about their own account or something waiting on them.' },
@@ -258,6 +259,69 @@ const EMAILS = [
     }),
   },
 
+  // ── Telling the people a change concerns (mail/notices.js) ─────────────────
+  {
+    id: 'notice-serving', category: 'notifications',
+    name: 'Put on, taken off or moved on the serving schedule',
+    audience: 'Whoever the schedule keeper puts on a slot, takes off it, or whose slot moves',
+    trigger: 'The schedule keeper changes a slot still to come by hand. (The month itself is announced when it is published.)',
+    like: ['notice:serving:%'],
+    preview: () => notices.compose.notice({
+      name: SAMPLE.user.name, subject: 'You are down for Lead Singing: Oct 19, Sunday AM',
+      lines: ['Kay Webb has put you down for Lead Singing on Oct 19, Sunday AM.', 'If you cannot do it, choose "Ask to be replaced" on the slot so whoever keeps the schedule can find somebody.'],
+      page: 'service-roster', params: { tab: 'scheduled' }, why: 'your name is on the serving schedule',
+    }),
+  },
+  {
+    id: 'notice-communion-prep', category: 'notifications',
+    name: 'Communion preparation changed',
+    audience: 'Whoever the keeper puts down for a month or takes off it — and the keeper, when somebody takes their own name off',
+    trigger: 'The keeper changes who prepares a month that has not ended, or a member takes their name off one.',
+    like: ['notice:communion-prep:%'],
+    preview: () => notices.compose.notice({
+      name: SAMPLE.user.name, subject: 'You are down to prepare communion in November 2026',
+      lines: ['Kay Webb has put you down to prepare the Lord\'s Supper in November 2026. You will get a reminder a week before the month begins.'],
+      page: 'communion-prep', params: { year: 2026 }, why: 'your name is on the communion preparation list',
+    }),
+  },
+  {
+    id: 'notice-signup', category: 'notifications',
+    name: 'A sign-up you are on changed',
+    audience: 'Whoever is put on or taken off a sign-up by somebody else, or whose date moves or list is deleted — and whoever made the list, when somebody takes their own name off',
+    trigger: 'Any of those happens to a date still to come.',
+    like: ['notice:signup:%'],
+    preview: () => notices.compose.notice({
+      name: SAMPLE.user.name, subject: 'You are down for “Desserts” on “Fellowship meal”',
+      lines: ['Kay Webb has put you down for “Desserts” on “Fellowship meal”, 2026-11-01 at 17:00.', 'If you cannot do it, please let them know, or take your name off on the sign-up.'],
+      page: 'signups', params: { list: 1 }, why: 'your name is on the sign-up “Fellowship meal”',
+    }),
+  },
+  {
+    id: 'notice-rotation', category: 'notifications',
+    name: 'Taken off a rotation, or a turn cancelled',
+    audience: 'Whoever a coordinator takes off a rotation, or whose turn still to come is cancelled',
+    trigger: 'A coordinator makes one of those changes.',
+    like: ['notice:rotation:%'],
+    preview: () => notices.compose.notice({
+      name: SAMPLE.user.name, subject: 'Your turn on "Baby shower hosts" on 2026-11-08 is off',
+      lines: ['Ruth Hale has cancelled your turn on the "Baby shower hosts" rotation on 2026-11-08. You are back at the front of the line, so your turn will come round again next.'],
+      page: 'rotations', params: { rotation: 1 }, why: 'your name is on the "Baby shower hosts" rotation',
+    }),
+  },
+  {
+    id: 'notice-areas', category: 'notifications',
+    name: 'What you look after changed',
+    audience: 'A member an admin gives an area to, or takes one from',
+    trigger: 'An admin changes somebody\'s areas on Members & Access.',
+    like: ['notice:areas:%'],
+    preview: () => notices.compose.notice({
+      name: SAMPLE.user.name, subject: 'You now look after Rotations on the member portal',
+      lines: ['Ada Admin has asked you to look after:', '', '  • Rotations (Rotations) — Start a rotation for anything the church takes in turns, appoint who coordinates each one, and retire or delete them.', '',
+        'You will see the buttons for it on those pages (and under Church Office, where it has a page there). How It Works explains each one.'],
+      page: 'how-it-works', params: {}, why: 'an admin changed what you look after on the member portal',
+    }),
+  },
+
   // ── Groups ─────────────────────────────────────────────────────────────────
   {
     id: 'group-posted', category: 'groups',
@@ -282,6 +346,18 @@ const EMAILS = [
     trigger: "A group leader changes a posted meeting's time or place.",
     like: ['group-event:%:changed'],
     preview: () => notify.compose.groupEventChanged({ group: SAMPLE.group, event: SAMPLE.event, what: 'Now starts at 6:30.' }),
+  },
+  {
+    id: 'notice-group', category: 'groups',
+    name: 'Taken off a group, or it stopped meeting',
+    audience: 'Whoever is taken off a group\'s roll; the whole roll when a group is retired or deleted; whoever a leader takes off bringing something',
+    trigger: 'A leader or the group manager makes one of those changes.',
+    like: ['notice:group:%'],
+    preview: () => notices.compose.notice({
+      name: SAMPLE.user.name, subject: 'You are no longer in North Harvest',
+      lines: ['Kay Webb has taken you off North Harvest\'s roll, so you will not hear about its meetings any more.', 'If that is a mistake, please let them know.'],
+      page: 'groups', params: { group: 3 }, why: 'you were on North Harvest\'s roll',
+    }),
   },
 
   {

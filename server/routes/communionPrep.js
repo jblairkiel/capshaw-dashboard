@@ -8,6 +8,7 @@ const db      = require('../db');
 const { requireAuth, requireApproved, requireArea, holdsArea } = require('../middleware/auth');
 const actionLog = require('../lib/actionLog');
 const prep = require('../lib/communionPrep');
+const notices = require('../mail/notices');
 // Read through the module, so a test can say what day it is.
 const recordKeeping = require('../lib/recordKeeping');
 const churchToday = () => recordKeeping.churchToday();
@@ -18,6 +19,17 @@ const manageOnly = requireArea(AREA);
 router.use(requireAuth);
 
 const label = (year, month) => `${prep.MONTHS[month - 1]} ${year}`;
+
+// A month still to come, or under way: a change to one already over tells
+// nobody.
+function notOver(year, month) {
+  const [ty, tm] = churchToday().split('-').map(Number);
+  return year > ty || (year === ty && month >= tm);
+}
+
+const communionNotice = (year, actor) => ({
+  kind: 'communion-prep-changed', page: 'communion-prep', params: { year }, actor,
+});
 
 // GET /api/communion-prep?year= — one year's list, and what this person may do.
 router.get('/', (req, res) => {
@@ -75,6 +87,13 @@ router.delete('/:year/:month/signup', requireApproved, (req, res) => {
     summary: `${before.name} took their name off communion preparation in ${label(before.year, before.month)}`,
     before,
   });
+  // Whoever keeps the list was counting on them for that month.
+  notices.communionPrep(notices.keepersOf(AREA), {
+    ...communionNotice(before.year, req.user),
+    subject: `${before.name} can no longer prepare communion in ${label(before.year, before.month)}`,
+    lines: [`${before.name} has taken their name off preparing the Lord's Supper in ${label(before.year, before.month)}, so that month is open again.`],
+    why: 'you keep the communion preparation list',
+  }, `${before.id}:withdrawn`);
   res.json({ success: true, months: prep.listFor(before.year, { user: req.user, today }) });
 });
 
@@ -86,6 +105,24 @@ router.put('/:year/:month', requireApproved, manageOnly, (req, res) => {
   const { before, signup } = result;
   const year = Number(req.params.year);
   const month = Number(req.params.month);
+  if ((before?.name || '') !== (signup?.name || '') && notOver(year, month)) {
+    // The keeper writing somebody in, or taking them off: they hear it from
+    // here rather than finding out from a reminder, or not at all.
+    const notice = { ...communionNotice(year, req.user), why: 'your name is on the communion preparation list' };
+    if (signup) {
+      notices.communionPrep([{ directoryId: signup.directory_id, name: signup.name }], { ...notice,
+        subject: `You are down to prepare communion in ${label(year, month)}`,
+        lines: [`${req.user.name} has put you down to prepare the Lord's Supper in ${label(year, month)}. You will get a reminder a week before the month begins.`,
+          'If you cannot do it, please let them know, or take your name off on the list.'],
+      }, `${signup.id}:assigned`);
+    }
+    if (before) {
+      notices.communionPrep([{ directoryId: before.directory_id, name: before.name }], { ...notice,
+        subject: `You are no longer preparing communion in ${label(year, month)}`,
+        lines: [`${req.user.name} has taken you off preparing the Lord's Supper in ${label(year, month)}${signup ? `; ${signup.name} is doing it instead` : ''}.`],
+      }, `${before.id}:removed`);
+    }
+  }
   if ((before?.name || '') !== (signup?.name || '')) {
     actionLog.record(req.user, {
       area: AREA, action: signup ? (before ? 'update' : 'create') : 'delete', entity: 'communion preparation', entityId: signup?.id ?? before?.id,

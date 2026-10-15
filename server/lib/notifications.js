@@ -38,6 +38,12 @@ const KINDS = {
   'rotation-next-up':       'You are next up on a rotation',
   'rotation-turn-given':    'You were given a turn on a rotation',
   'rotation-turn-reminder': 'Your turn on a rotation is coming up',
+  'rotation-changed':       'You were taken off a rotation, or a turn of yours was cancelled',
+  'serving-changed':        'The schedule keeper put you on, took you off, or moved a slot of yours',
+  'communion-prep-changed': 'Somebody changed who prepares communion in a month that concerns you',
+  'signup-changed':         'A sign-up you are on, or made, changed',
+  'group-changed':          'You were taken off a church group, or it stopped meeting',
+  'areas-changed':          'What you look after on the portal changed',
 };
 
 const KIND_IDS = Object.keys(KINDS);

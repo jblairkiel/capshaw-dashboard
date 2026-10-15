@@ -50,7 +50,7 @@ describe('the catalogue', () => {
     const res = await request(buildApp(ADMIN)).get('/api/emails/catalog');
     expect(res.body.categories.map(c => c.id)).toEqual(['notifications', 'bulletin', 'groups', 'reports']);
     const groups = res.body.categories.find(c => c.id === 'groups');
-    expect(groups.emails.map(e => e.name)).toEqual(['Meeting posted', 'Meeting cancelled', 'Meeting changed', 'About a sign-up list']);
+    expect(groups.emails.map(e => e.name)).toEqual(['Meeting posted', 'Meeting cancelled', 'Meeting changed', 'Taken off a group, or it stopped meeting', 'About a sign-up list']);
   });
 
   test('counts what each email has done: sent this month, waiting, failed', async () => {

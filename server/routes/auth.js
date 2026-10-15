@@ -16,6 +16,7 @@ const {
 const { EDITABLE_FIELDS } = require('../lib/people');
 const { rateLimit } = require('../middleware/rateLimit');
 const accountMail = require('../mail/accounts');
+const notices = require('../mail/notices');
 
 const isProd     = process.env.NODE_ENV === 'production';
 const CLIENT_URL = isProd ? 'https://capshaw.jblairkiel.com' : 'http://localhost:5173';
@@ -1198,6 +1199,24 @@ router.patch('/users/:id/areas', requireAuth, requireAdmin, (req, res) => {
       ].filter(Boolean).join('; '),
       details:  { added, removed, areas: after },
     });
+    // What they now look after is what the church will be counting on them
+    // for; what was taken away, they should not go on doing.
+    const describe = id => {
+      const area = AREAS.find(a => a.id === id);
+      return area ? `${area.label} (${area.page}) — ${area.description}` : areaLabel(id);
+    };
+    notices.areas([{ userId: target.id }], {
+      kind: 'areas-changed', page: 'how-it-works', params: {}, actor: req.user,
+      subject: added.length
+        ? `You now look after ${added.map(areaLabel).join(', ')} on the member portal`
+        : `You no longer look after ${removed.map(areaLabel).join(', ')} on the member portal`,
+      lines: [
+        ...(added.length ? [`${req.user.name} has asked you to look after:`, '', ...added.map(a => `  • ${describe(a)}`), '',
+          'You will see the buttons for it on those pages (and under Church Office, where it has a page there). How It Works explains each one.'] : []),
+        ...(removed.length ? [`${added.length ? '\n' : ''}${req.user.name} has taken ${removed.map(areaLabel).join(', ')} off your account, so you no longer need to look after ${removed.length === 1 ? 'it' : 'them'}.`] : []),
+      ],
+      why: 'an admin changed what you look after on the member portal',
+    }, `${target.id}:changed`);
   }
 
   res.json({ success: true, user: userRow(target.id) });

@@ -45,6 +45,27 @@ router.get('/:id(\\d+)', (req, res) => {
   res.json({ success: true, list, emailGroups, canManage: lists.isManager(req.user) });
 });
 
+// ─── Telling the people a change concerns ─────────────────────────────────────
+// Somebody else putting your name down or taking it off, a date you are on
+// moving, or the list going: you hear about it. And taking your own name off
+// tells whoever made the list, who was counting on you.
+
+const db = require('../db');
+const notices = require('../mail/notices');
+
+const entryWhat = (entry, item) => (item ? `“${item.label}”` : `“${entry.note}”`);
+const signupNotice = (list, actor) => ({
+  kind: 'signup-changed', page: 'signups', params: { list: list.id }, actor,
+  why: `your name is on the sign-up “${list.title}”`,
+});
+const ENTRIES_AHEAD = `
+  SELECT e.*, d.date AS on_date, d.time AS on_time, i.label AS item_label
+    FROM signup_entries e JOIN signup_dates d ON d.id = e.date_id LEFT JOIN signup_items i ON i.id = e.item_id
+   WHERE d.date >= ?`;
+// Every entry on a list for a date still to come — or one entry, if it is.
+const entriesAhead = listId => db.prepare(`${ENTRIES_AHEAD} AND e.list_id = ?`).all(today(), listId);
+const entryAhead = entryId => db.prepare(`${ENTRIES_AHEAD} AND e.id = ?`).get(today(), entryId);
+
 // POST /api/signups — a new list.
 router.post('/', requireApproved, (req, res) => {
   const result = lists.create(req.user, req.body);
@@ -59,6 +80,10 @@ router.post('/', requireApproved, (req, res) => {
 
 // PUT /api/signups/:id — change it.
 router.put('/:id(\\d+)', requireApproved, (req, res) => {
+  // Who is on each date to come, and when it was, so anybody whose date moves
+  // can be told.
+  const was = new Map(db.prepare('SELECT id, date, time FROM signup_dates WHERE list_id = ?').all(Number(req.params.id)).map(d => [d.id, d]));
+  const onDates = entriesAhead(Number(req.params.id));
   const result = lists.update(req.user, req.params.id, req.body);
   if (result.error) return fail(res, result);
   const list = lists.detail(result.id, req.user, today());
@@ -66,6 +91,18 @@ router.put('/:id(\\d+)', requireApproved, (req, res) => {
     area: AREA, action: 'update', entity: 'sign-up list', entityId: list.id,
     summary: `Changed the sign-up “${list.title}”`, before: result.before, after: req.body,
   });
+  const now = new Map(db.prepare('SELECT id, date, time FROM signup_dates WHERE list_id = ?').all(list.id).map(d => [d.id, d]));
+  for (const entry of onDates) {
+    const before = was.get(entry.date_id);
+    const after = now.get(entry.date_id);
+    if (!before || !after || (before.date === after.date && before.time === after.time)) continue;
+    const when = d => `${d.date}${d.time ? ` at ${d.time}` : ''}`;
+    notices.signups([{ directoryId: entry.directory_id, userId: entry.user_id, name: entry.name }], {
+      ...signupNotice(list, req.user),
+      subject: `Date changed on “${list.title}”: now ${when(after)}`,
+      lines: [`${req.user.name} has moved a date you signed up for on “${list.title}”. You are down for ${entry.item_label ? `“${entry.item_label}”` : `“${entry.note}”`}, which was ${when(before)} and is now ${when(after)}.`],
+    }, `${list.id}:entry:${entry.id}:moved`);
+  }
   res.json({ success: true, list });
 });
 
@@ -83,6 +120,8 @@ router.post('/:id(\\d+)/close', requireApproved, (req, res) => {
 
 // DELETE /api/signups/:id
 router.delete('/:id(\\d+)', requireApproved, (req, res) => {
+  const going = lists.listRow(req.params.id);
+  const onDates = going ? entriesAhead(going.id) : [];
   const result = lists.remove(req.user, req.params.id);
   if (result.error) return fail(res, result);
   actionLog.record(req.user, {
@@ -90,6 +129,12 @@ router.delete('/:id(\\d+)', requireApproved, (req, res) => {
     summary: `Deleted the sign-up “${result.list.title}”${result.entries ? ` and its ${result.entries} name${result.entries === 1 ? '' : 's'}` : ''}`,
     before: result.list,
   });
+  // Everybody still down for a date to come: what they signed up for is gone.
+  notices.signups(onDates.map(e => ({ directoryId: e.directory_id, userId: e.user_id, name: e.name })), {
+    ...signupNotice(result.list, req.user), page: 'signups', params: {},
+    subject: `The sign-up “${result.list.title}” has been taken down`,
+    lines: [`${req.user.name} has deleted the sign-up “${result.list.title}”, so you are no longer down for anything on it.`],
+  }, `${result.list.id}:deleted`);
   res.json({ success: true });
 });
 
@@ -102,17 +147,49 @@ router.post('/:id(\\d+)/entries', requireApproved, (req, res) => {
     area: AREA, action: 'create', entity: 'sign-up', entityId: entry.id,
     summary: `${entry.name} signed up for ${item ? `“${item.label}”` : `“${entry.note}”`} on “${list.title}”, ${date.date}`,
   });
+  // Put down by somebody else: they hear they are on it.
+  if (req.body?.name) {
+    notices.signups([{ directoryId: entry.directory_id, name: entry.name }], {
+      ...signupNotice(list, req.user),
+      subject: `You are down for ${entryWhat(entry, item)} on “${list.title}”`,
+      lines: [`${req.user.name} has put you down for ${entryWhat(entry, item)} on “${list.title}”, ${date.date}${date.time ? ` at ${date.time}` : ''}.`,
+        'If you cannot do it, please let them know, or take your name off on the sign-up.'],
+    }, `${list.id}:entry:${entry.id}:added`);
+  }
   res.json({ success: true, list: lists.detail(list.id, req.user, today()) });
 });
 
 // DELETE /api/signups/entries/:entryId — take a name off.
 router.delete('/entries/:entryId(\\d+)', requireApproved, (req, res) => {
+  const ahead = entryAhead(Number(req.params.entryId));
   const result = lists.removeEntry(req.user, req.params.entryId);
   if (result.error) return fail(res, result);
   actionLog.record(req.user, {
     area: AREA, action: 'delete', entity: 'sign-up', entityId: result.entry.id,
     summary: `Took ${result.entry.name} off “${result.list.title}”`, before: result.entry,
   });
+  const { entry, list } = result;
+  if (ahead) {
+    const what = ahead.item_label ? `“${ahead.item_label}”` : `“${entry.note}”`;
+    const when = `${ahead.on_date}${ahead.on_time ? ` at ${ahead.on_time}` : ''}`;
+    const own = entry.user_id === req.user.id || (!!req.user.directory_id && entry.directory_id === req.user.directory_id);
+    if (own) {
+      // Whoever made the list was counting on them.
+      if (list.created_by) {
+        notices.signups([{ userId: list.created_by }], {
+          ...signupNotice(list, req.user), why: `you made the sign-up “${list.title}”`,
+          subject: `${entry.name} took their name off “${list.title}”`,
+          lines: [`${entry.name} is no longer down for ${what} on “${list.title}”, ${when}.`],
+        }, `${list.id}:entry:${entry.id}:withdrawn`);
+      }
+    } else {
+      notices.signups([{ directoryId: entry.directory_id, userId: entry.user_id, name: entry.name }], {
+        ...signupNotice(list, req.user),
+        subject: `You are no longer down for ${what} on “${list.title}”`,
+        lines: [`${req.user.name} has taken your name off ${what} on “${list.title}”, ${when}.`],
+      }, `${list.id}:entry:${entry.id}:removed`);
+    }
+  }
   res.json({ success: true, list: lists.detail(result.list.id, req.user, today()) });
 });
 

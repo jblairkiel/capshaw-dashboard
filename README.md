@@ -869,6 +869,40 @@ saved rather than when a mail server answers.
 | `group-membership` | The person added to a group, or made its leader |
 | `bug-report-new` | Every admin, when somebody files a bug report |
 | `bug-report-status` | Whoever filed it, when an admin moves it through triage |
+| `serving-changed` | Whoever the schedule keeper puts on a slot, takes off it, or whose slot moves |
+| `communion-prep-changed` | Whoever the keeper puts down for a month or takes off it; the keeper, when a member takes their own name off |
+| `signup-changed` | Whoever is put on or taken off a sign-up by somebody else, or whose date moves or list goes; whoever made the list, when somebody takes their own name off |
+| `group-changed` | Whoever is taken off a group's roll; the whole roll when a group is retired or deleted |
+| `rotation-changed` | Whoever is taken off a rotation, or whose turn still to come is cancelled |
+| `areas-changed` | A member an admin gives an area to, or takes one from |
+
+### Telling the person a change concerns
+
+Whenever one person does something another is counting on — or now has to count
+on — that person is told, on the bell and by email, from `server/mail/notices.js`:
+
+| Page | What | Who is told |
+|---|---|---|
+| Serving Schedule | The keeper writes a name into a slot, changes it, moves the slot, or removes it | Whoever is put in, and whoever is taken out |
+| Communion Preparation | The keeper puts somebody down for a month, or replaces or clears them | That person |
+| Communion Preparation | A member takes their own name off | Whoever keeps the list (admins, if nobody does) |
+| Sign-Ups | Somebody else puts your name down or takes it off | You |
+| Sign-Ups | You take your own name off | Whoever made the list |
+| Sign-Ups | A date you are on moves, or the list is deleted | Everybody on it |
+| Church Groups | Taken off a roll; a group retired or deleted | The member(s) |
+| Church Groups | A posted meeting deleted rather than cancelled | The roll, exactly as a cancellation |
+| Church Groups | Somebody drops what they were bringing | The leaders — or the person, if a leader dropped it for them |
+| Rotations | Taken off a rotation; a turn still to come cancelled | That person |
+| Members & Access | An area given or taken away | The member, with what the area is |
+
+The same rules everywhere: nobody is told about their own doing; a change to
+something already past (a Sunday gone, a month over, an old turn) tells nobody;
+a page that keeps only a typed name finds the person only when exactly one
+directory entry has that name; and a notice never stops a change from saving.
+The email goes to the directory address, else a linked account's; somebody with
+neither still gets the bell if they have an account. Each page's notices are
+their own line on the Emails page (`notice:<page>:…`), so Email Delivery can
+switch them separately.
 
 Two things it deliberately does not do: nobody is ever notified about their own
 doing, and opening the panel does not mark everything read — reading a list is
