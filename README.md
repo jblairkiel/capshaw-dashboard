@@ -976,6 +976,19 @@ A *household* is everyone sharing a street address — the same grouping the
 directory shows as a family. Someone with no address on file is a household of
 one, so a blank address never pulls in strangers.
 
+**The directory on your phone.** Any approved member can choose **Add the
+directory to my phone** here. `GET /api/profile/directory.vcf`
+(`server/lib/directoryVcard.js`) answers with every named directory entry as
+one vCard 3.0 file — name (split into given and family name, so phones sort it
+properly), cell and home phone, email, address, and the family photo when it is
+a JPEG, PNG or GIF of 512 KB or less — each with the church as its organisation
+and category, and a `UID` from the directory id. Opening it on an iPhone offers
+**Add All Contacts**; Android imports it from Contacts. Every download is
+written to the action history under the directory area, with how many contacts
+it held, and the terms of service and privacy policy say members may keep the
+directory in their own phone but must not pass it on. A `pending` account is
+refused.
+
 **Gender** is asked here because this congregation rosters the worship jobs
 among its men. It is chosen by the person (or by the directory area on their
 behalf), never guessed from a name, and "prefer not to say" is a real answer.

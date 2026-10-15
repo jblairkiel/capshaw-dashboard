@@ -192,3 +192,34 @@ describe('MyProfileView — email preferences', () => {
     expect(await screen.findByRole('checkbox', { name: /monthly schedule summary/i })).toBeInTheDocument();
   });
 });
+
+// ─── The directory on your phone ──────────────────────────────────────────────
+
+describe('MyProfileView — adding the directory to your phone', () => {
+  beforeEach(() => { mockProfile(); });
+
+  test('an approved member gets a link to the whole directory as a contacts file', async () => {
+    render(<MyProfileView user={{ role: 'approved' }} />);
+    const region = await screen.findByRole('region', { name: 'The directory on your phone' });
+    expect(within(region).getByRole('link', { name: /Add the directory to my phone/ })).toHaveAttribute('href', '/api/profile/directory.vcf');
+    expect(within(region).getByText(/Add All Contacts/)).toBeInTheDocument();
+    expect(within(region).getByText(/keep these to yourself/)).toBeInTheDocument();
+  });
+
+  test('so does an admin', async () => {
+    render(<MyProfileView user={{ role: 'admin' }} />);
+    expect(await screen.findByRole('link', { name: /Add the directory to my phone/ })).toBeInTheDocument();
+  });
+
+  test('also shown when the account is not linked to a directory entry', async () => {
+    mockProfile({ linked: false, person: null, household: [] });
+    render(<MyProfileView user={{ role: 'approved' }} />);
+    expect(await screen.findByRole('link', { name: /Add the directory to my phone/ })).toBeInTheDocument();
+  });
+
+  test('an account still waiting for approval does not get it', async () => {
+    render(<MyProfileView user={{ role: 'pending' }} />);
+    await screen.findByText('Ray Harris');
+    expect(screen.queryByRole('link', { name: /Add the directory to my phone/ })).not.toBeInTheDocument();
+  });
+});
