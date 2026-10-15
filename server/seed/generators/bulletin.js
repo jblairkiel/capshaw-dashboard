@@ -7,6 +7,9 @@
 // One issue per week going back from this Sunday. The dates have to be real
 // Sundays and distinct, because bulletin_issues.sunday is unique — hence
 // reusing the newsletter's own week arithmetic rather than a second copy of it.
+// A Sunday that already has an issue (a real one, or an earlier batch's) is
+// stepped over rather than written again, so generating more goes further back
+// instead of failing on the first week it already has.
 const { MARK } = require('../people');
 const { sundayOf, addDays } = require('../../lib/bulletinData');
 
@@ -61,13 +64,18 @@ module.exports = {
   describe: 'A few weeks of prayer lists, giving figures and group leaders for the newsletter.',
   tables: ['bulletin_issues'],
 
-  generate({ insert, random, scale, helpers }) {
+  generate({ insert, random, scale, helpers, db }) {
     const thisSunday = sundayOf(helpers.asIsoDate(new Date()));
+    const taken = new Set(db.prepare('SELECT sunday FROM bulletin_issues').all().map(r => r.sunday));
 
-    // Three weeks per unit of scale, this Sunday backwards, so the page opens
-    // on an issue and has earlier ones to carry forward from.
-    for (let week = 0; week < scale * 3; week++) {
+    // Three issues per unit of scale, from this Sunday backwards over the weeks
+    // that are free, so the page opens on an issue and has earlier ones to
+    // carry forward from. Ten years back is plenty to look through.
+    let made = 0;
+    for (let week = 0; made < scale * 3 && week < 520; week++) {
       const sunday = addDays(thisSunday, -7 * week);
+      if (taken.has(sunday)) continue;
+      made++;
       const [quote, ref] = random.pick(VERSES);
 
       const groupNotes = {};

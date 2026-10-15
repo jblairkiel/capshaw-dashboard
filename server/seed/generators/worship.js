@@ -69,9 +69,16 @@ module.exports = {
 
     // One song of the week per week, keyed on the Monday it starts — the column
     // is unique, so the weeks are stepped rather than picked at random.
-    for (let w = 0; w < Math.min(6, 2 + scale); w++) {
+    // A week that already has a song of the week (a real one, or an earlier
+    // batch's) is stepped over, so generating more goes further back rather
+    // than failing on the first week it already has.
+    const takenWeeks = new Set(db.prepare('SELECT week_start FROM song_of_week').all().map(r => r.week_start));
+    let weeks = 0;
+    for (let w = 0; weeks < Math.min(6, 2 + scale) && w < 520; w++) {
       const monday = random.date(w * 7);
       monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+      if (takenWeeks.has(helpers.asIsoDate(monday))) continue;
+      weeks++;
       const song = random.pick(songs);
       insert('song_of_week', {
         song_id:    song.id,
