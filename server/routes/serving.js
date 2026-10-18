@@ -27,6 +27,8 @@ const engine = require('../workflows/engine');
 const notifications = require('../lib/notifications');
 const rosterFill = require('../lib/rosterFill');
 const rosterBuild = require('../lib/rosterBuild');
+const specials = require('../lib/specialServices');
+const { specialChoices, BIBLE_CLASS } = specials;
 const notify = require('../mail/notify');
 const mailer = require('../mail/mailer');
 const plans = require('../lib/worshipPlans');
@@ -214,7 +216,7 @@ router.get('/months/plan', requireApproved, manageOnly, (req, res) => {
 router.post('/months', requireApproved, manageOnly, (req, res) => {
   const built = rosterBuild.build(req.body || {}, { user: req.user, view: assignmentsWithConflicts });
   if (built.error) return res.status(400).json({ success: false, error: built.error });
-  const { month, services, preview, seed, created, filled, open, saveJobs, assignments } = built;
+  const { month, services, preview, seed, created, filled, open, saveJobs, added, assignments } = built;
 
   if (!preview) {
     actionLog.record(req.user, {
@@ -223,12 +225,13 @@ router.post('/months', requireApproved, manageOnly, (req, res) => {
       entity:   'serving schedule',
       entityId: month,
       summary:  `Built ${month} — ${created} new slot${created === 1 ? '' : 's'}, ${filled.length} filled from preferences, ${open} still open`
+        + (added.length ? `; added ${added.map(sp => `${sp.service}, ${sp.when}`).join('; ')}` : '')
         + (saveJobs.length ? `; made this month's jobs the usual ones for ${saveJobs.join(', ')}` : ''),
-      details:  { month, services, skip: req.body?.skip || [], jobs: req.body?.jobs || null, created, filled: filled.map(f => ({ id: f.id, job: f.job, date: f.date, name: f.name })), open },
+      details:  { month, services, skip: req.body?.skip || [], jobs: req.body?.jobs || null, added, created, filled: filled.map(f => ({ id: f.id, job: f.job, date: f.date, name: f.name })), open },
     });
   }
 
-  res.json({ success: true, month, preview, seed, created, filled: filled.length, open, assignments });
+  res.json({ success: true, month, preview, seed, created, filled: filled.length, open, added, assignments });
 });
 
 // ─── GET /api/serving/assignments/:id/candidates ──────────────────────────────
@@ -281,28 +284,6 @@ router.post('/months/notify', requireApproved, manageOnly, (req, res) => {
   res.json({ success: true, emailed: queued.length, unreachable });
 });
 
-// ─── POST /api/serving/special ────────────────────────────────────────────────
-// A service that does not come round every week — a gospel meeting, a monthly
-// singing — on one day or each night of a run of days, with the jobs it needs
-// and nobody against them yet. It is put down by the service's own name, which
-// is how Upcoming Service finds it, fills its parts, and reminds its song
-// leader.
-
-const isIsoDate = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) && !Number.isNaN(Date.parse(`${s}T12:00:00Z`));
-const MAX_NIGHTS = 14;
-
-// A Bible class is not a service anybody is rostered for, so it is never
-// offered — whatever its tracking says.
-const BIBLE_CLASS = /\bbible\b|\bclass(es)?\b|\bstudy\b/i;
-
-function specialChoices() {
-  const regular = new Set(SERVICES.map(s => s.toLowerCase()));
-  return plans.activeServices()
-    .filter(s => !regular.has(s.name.toLowerCase()) && !plans.servingServiceFor(s.name)
-      && !(s.tracking === 'weekly' && s.weekday !== null) && !BIBLE_CLASS.test(s.name))
-    .map(s => s.name);
-}
-
 // ─── POST /api/serving/service-kinds  { name } ────────────────────────────────
 // A new kind of service — a youth rally, a lectureship — added by whoever
 // keeps the schedule rather than waiting on an admin. It goes on the church's
@@ -336,45 +317,19 @@ router.post('/service-kinds', requireApproved, manageOnly, (req, res) => {
   res.json({ success: true, service: saved.name, specialServices: specialChoices(), serviceJobs: serviceJobs.list(specialChoices()) });
 });
 
+// ─── POST /api/serving/special ────────────────────────────────────────────────
+// A service that does not come round every week — a gospel meeting, a monthly
+// singing — on one day or each night of a run of days, with the jobs it needs
+// and nobody against them yet. It is put down by the service's own name, which
+// is how Upcoming Service finds it, fills its parts, and reminds its song
+// leader. The rules live in lib/specialServices.js, which the
+// Build a month wizard shares.
+
 router.post('/special', requireApproved, manageOnly, (req, res) => {
-  const type = plans.serviceType(req.body?.service);
-  if (!type || !type.active || !specialChoices().includes(type.name)) {
-    return res.status(400).json({ success: false, error: 'Choose which service it is, or add a new kind of service first.' });
-  }
-  const from = String(req.body?.from || '');
-  const through = String(req.body?.through || '') || from;
-  if (!isIsoDate(from) || !isIsoDate(through)) return res.status(400).json({ success: false, error: 'Choose the day it is held' });
-  if (through < from) return res.status(400).json({ success: false, error: 'The last night is before the first' });
-
-  const nights = [];
-  for (let d = new Date(`${from}T12:00:00Z`); d.toISOString().slice(0, 10) <= through; d.setUTCDate(d.getUTCDate() + 1)) {
-    nights.push(new Date(d));
-    if (nights.length > MAX_NIGHTS) return res.status(400).json({ success: false, error: `That is more than ${MAX_NIGHTS} nights — add a longer meeting in parts` });
-  }
-
-  const asked = Array.isArray(req.body?.jobs) ? req.body.jobs : serviceJobs.jobsFor(type.name);
-  // In the order of the worship jobs; a job asked for twice is two slots.
-  const jobs = WORSHIP_ROLES.flatMap(j => Array(Math.min(asked.filter(a => a === j).length, serviceJobs.MAX_OF_ONE_JOB)).fill(j));
-  if (!jobs.length) return res.status(400).json({ success: false, error: 'Choose at least one job it needs' });
-
-  const label = d => ({ month: `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`, date: `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}` });
-  const already = db.prepare('SELECT job, COUNT(*) AS n FROM job_assignments WHERE month = ? AND date = ? AND lower(service) = lower(?) GROUP BY job');
-  const insert = db.prepare('INSERT INTO job_assignments (month, date, service, job, name) VALUES (?, ?, ?, ?, ?)');
-  const created = db.transaction(() => {
-    let n = 0;
-    for (const night of nights) {
-      const { month, date } = label(night);
-      const have = new Map(already.all(month, date, type.name).map(r => [r.job, r.n]));
-      for (const job of serviceJobs.missing(jobs, have)) {
-        insert.run(month, date, type.name, job, '');
-        n++;
-      }
-    }
-    return n;
-  })();
-
-  const first = label(nights[0]);
-  const when = nights.length === 1 ? first.date : `${first.date} – ${label(nights.at(-1)).date}`;
+  const special = specials.check(req.body || {});
+  if (special.error) return res.status(400).json({ success: false, error: special.error });
+  const created = specials.layOut(special);
+  const { type, from, through, nights, jobs, when } = special;
   actionLog.record(req.user, {
     area:     AREA,
     action:   'create',
@@ -384,7 +339,7 @@ router.post('/special', requireApproved, manageOnly, (req, res) => {
     details:  { service: type.name, from, through, jobs, created },
   });
 
-  res.json({ success: true, created, month: first.month, assignments: assignmentsWithConflicts(first.month) });
+  res.json({ success: true, created, month: nights[0].month, assignments: assignmentsWithConflicts(nights[0].month) });
 });
 
 // ─── PUT /api/serving/service-jobs  { service, jobs } ───────────────────────────

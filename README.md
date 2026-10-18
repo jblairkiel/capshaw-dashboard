@@ -425,10 +425,15 @@ month up: slots that already exist are left alone.
    lists each service's dates and how much of each is already built). Any
    date can be clicked off: a combined service or a holiday. Fill in names,
    or lay the month out empty. The special services already planned that
-   month can be filled too.
+   month can be filled too, and a new one added: which service, its first
+   and last night (inside the month, at most 14 nights). It is laid out,
+   filled, previewed and saved with the month (`addSpecials`), through the
+   same rules as Setup → Add a special service (`server/lib/specialServices.js`).
+   A month can be built with only a special service and no regular ones.
 2. **Jobs.** Each service's jobs for this month only, starting from the
    usual ones (Setup → Jobs for each service). Tick *Make these the usual
-   jobs* to keep a change for later months as well.
+   jobs* to keep a change for later months as well. Each new special service
+   gets a row too, starting from the jobs that kind usually needs.
 3. **Preview.** `POST /api/serving/months` with `preview: true` does the
    real build inside a transaction and rolls it back, so the keeper sees the
    whole month as a roster (dates across, jobs down, new names marked)

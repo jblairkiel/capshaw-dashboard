@@ -1,15 +1,17 @@
 import { useState, useEffect, useMemo } from 'react';
 import Dialog from './Dialog';
-import { MonthInput } from './DateInput';
+import DateInput, { MonthInput } from './DateInput';
 import { isoFromMonthDay } from '../lib/dates';
 
 // "Build a month", as a wizard for the schedule keeper:
 //
 //   1. Dates    — the month, its services, and which of their dates to leave
-//                 out; whether to fill in names, and the special services
-//                 already planned that month.
+//                 out; whether to fill in names; the special services already
+//                 planned that month, and any new one to add (a gospel
+//                 meeting's nights).
 //   2. Jobs     — each service's jobs for this month only, starting from the
-//                 usual ones, with the choice to keep them as the usual ones.
+//                 usual ones, with the choice to keep them as the usual ones;
+//                 and the jobs each new special service needs.
 //   3. Preview  — the month as it would be, before anything is saved.
 //                 "Shuffle again" draws a fresh fill; saving keeps the draw
 //                 that is on screen (its seed goes back to the server).
@@ -63,7 +65,7 @@ function Steps({ step }) {
 
 // ─── Step one ─────────────────────────────────────────────────────────────────
 
-function DatesStep({ plan, chosen, toggleService, skip, toggleDate, fill, setFill, fillSpecials, setFillSpecials }) {
+function DatesStep({ plan, chosen, toggleService, skip, toggleDate, fill, setFill, fillSpecials, setFillSpecials, adding, setAdding }) {
   return (
     <div className="space-y-4">
       <fieldset className="border-0 p-0 m-0 space-y-3">
@@ -107,31 +109,119 @@ function DatesStep({ plan, chosen, toggleService, skip, toggleDate, fill, setFil
         </span>
       </label>
 
+      <SpecialServices plan={plan} fill={fill} fillSpecials={fillSpecials} setFillSpecials={setFillSpecials} adding={adding} setAdding={setAdding} />
+    </div>
+  );
+}
+
+// The first and last day of a month, as ISO dates, for the date boxes.
+function monthBounds(label) {
+  const [name, year] = String(label).split(' ');
+  const m = MONTH_NAMES.indexOf(name);
+  if (m < 0 || !year) return {};
+  const last = new Date(Date.UTC(Number(year), m + 1, 0)).getUTCDate();
+  const mm = String(m + 1).padStart(2, '0');
+  return { first: `${year}-${mm}-01`, last: `${year}-${mm}-${last}` };
+}
+
+const nightsBetween = (from, through) => Math.round((Date.parse(`${through}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86400000) + 1;
+const whenOf = ({ from, through }) => (through && through !== from ? `${shortDate(from)} – ${shortDate(through)}` : shortDate(from));
+
+// The month's special services: the ones already planned, whose names can be
+// filled with the rest, and new ones added here — laid out, previewed and
+// saved with the month, their jobs chosen on the next step.
+function SpecialServices({ plan, fill, fillSpecials, setFillSpecials, adding, setAdding }) {
+  const kinds = plan.specialKinds || [];
+  const { first, last } = monthBounds(plan.month);
+  const [service, setService] = useState('');
+  const [from, setFrom]       = useState('');
+  const [through, setThrough] = useState('');
+  const end = through || from;
+  const problem = !from ? ''
+    : end < from ? 'The last night is before the first'
+    : nightsBetween(from, end) > plan.maxNights ? `That is more than ${plan.maxNights} nights — add a longer meeting in parts`
+    : '';
+
+  function add() {
+    const kind = kinds.find(k => k.service === service);
+    setAdding(prev => [...prev, { key: `${service}|${from}|${Date.now()}`, service, from, through: end, counts: countsOf(kind.jobs) }]);
+    setService(''); setFrom(''); setThrough('');
+  }
+
+  return (
+    <fieldset className="border-0 p-0 m-0 space-y-2">
+      <legend className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Special services</legend>
+
       {plan.specials.length > 0 && (
         <label className="flex items-start gap-2 text-sm text-gray-700">
           <input type="checkbox" checked={fillSpecials} disabled={!fill} onChange={e => setFillSpecials(e.target.checked)} className="accent-church-gold mt-0.5" />
           <span>
-            Fill names for the special services this month too
+            Fill names for the special services already planned
             <span className="block text-xs text-gray-500">
               {plan.specials.map(sp => `${sp.service} (${sp.dates.join(', ')}; ${sp.open} open)`).join(' · ')}
             </span>
           </span>
         </label>
       )}
-    </div>
+
+      {adding.length > 0 && (
+        <ul className="space-y-1" aria-label="Special services to add">
+          {adding.map(a => (
+            <li key={a.key} className="flex items-center justify-between gap-2 text-sm bg-church-cream border border-church-gold/40 rounded-lg px-3 py-1.5">
+              <span><span className="font-medium text-church-navy">{a.service}</span> <span className="text-gray-600">· {whenOf(a)}</span></span>
+              <button type="button" onClick={() => setAdding(prev => prev.filter(x => x.key !== a.key))}
+                aria-label={`Remove ${a.service}, ${whenOf(a)}`} className="text-xs text-gray-500 underline">Remove</button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {kinds.length ? (
+        <div className="grid grid-cols-1 sm:grid-cols-[1.4fr_1fr_1fr_auto] gap-2 items-end" role="group" aria-label="Add a special service">
+          <label className="text-xs text-gray-500">
+            Add a special service
+            <select value={service} onChange={e => setService(e.target.value)} aria-label="Which special service"
+              className="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white">
+              <option value="">Choose…</option>
+              {kinds.map(k => <option key={k.service} value={k.service}>{k.service}</option>)}
+            </select>
+          </label>
+          <label className="text-xs text-gray-500">
+            First night
+            <DateInput value={from} min={first} max={last} aria-label="First night"
+              onChange={v => { setFrom(v); if (through && v > through) setThrough(''); }} />
+          </label>
+          <label className="text-xs text-gray-500">
+            Last night <span className="text-gray-400">(if more than one)</span>
+            <DateInput value={through} min={from || first} max={last} aria-label="Last night" onChange={setThrough} />
+          </label>
+          <button type="button" onClick={add} disabled={!service || !from || !!problem}
+            className="text-sm px-3 py-2 rounded-lg border border-church-gold text-church-navy disabled:opacity-40">
+            Add
+          </button>
+          {problem && <p className="text-xs text-red-600 sm:col-span-4">{problem}</p>}
+        </div>
+      ) : (
+        <p className="text-xs text-gray-500">No special services are on the church&apos;s list yet. Add a kind with Setup → Add a special service.</p>
+      )}
+      <p className="text-xs text-gray-400">
+        A special service added here is laid out — and filled, if you are filling in names — with the rest of the month,
+        and you choose its jobs on the next step. One that runs into another month goes in with Setup → Add a special service.
+      </p>
+    </fieldset>
   );
 }
 
 // ─── Step two ─────────────────────────────────────────────────────────────────
 
-function JobsRow({ service, usual, counts, setCounts, jobs, keep, setKeep }) {
+function JobsRow({ service, title = service, usual, counts, setCounts, jobs, keep, setKeep }) {
   const expand = c => jobs.flatMap(j => Array(c[j] || 0).fill(j));
   const changed = expand(counts).join('|') !== expand(countsOf(usual)).join('|');
   const setCount = (job, n) => setCounts({ ...counts, [job]: n });
   return (
-    <section className="py-3 border-t border-gray-100 first:border-t-0" aria-label={`${service} jobs this month`}>
+    <section className="py-3 border-t border-gray-100 first:border-t-0" aria-label={`${title} jobs this month`}>
       <div className="flex items-baseline justify-between gap-2 flex-wrap">
-        <h4 className="text-sm font-semibold text-church-navy">{service}</h4>
+        <h4 className="text-sm font-semibold text-church-navy">{title}</h4>
         <span className="text-xs text-gray-400">
           {changed ? 'Changed for this month' : 'The usual jobs'}
           {changed && (
@@ -158,7 +248,7 @@ function JobsRow({ service, usual, counts, setCounts, jobs, keep, setKeep }) {
           </div>
         ))}
       </div>
-      {changed && (
+      {changed && setKeep && (
         <label className="mt-2 flex items-center gap-2 text-xs text-gray-600">
           <input type="checkbox" checked={keep} onChange={e => setKeep(e.target.checked)} className="accent-church-gold" />
           Make these the usual jobs for {service} from now on
@@ -255,6 +345,7 @@ export default function BuildMonthWizard({ jobs, initialMonth, onClose, onBuilt 
   const [skip, setSkip]         = useState(() => new Set());
   const [counts, setCounts]     = useState({});
   const [keep, setKeep]         = useState(() => new Set());
+  const [adding, setAdding]     = useState([]);     // new special services, { key, service, from, through, counts }
   const [result, setResult]     = useState(null);
   const [busy, setBusy]         = useState(false);
   const [error, setError]       = useState('');
@@ -271,6 +362,7 @@ export default function BuildMonthWizard({ jobs, initialMonth, onClose, onBuilt 
         setSkip(new Set());
         setCounts(Object.fromEntries(json.services.map(s => [s.service, countsOf(s.jobs)])));
         setKeep(new Set());
+        setAdding([]);
         setChosen(prev => prev ?? new Set(json.settings.services));
         if (!chosen) { setFill(json.settings.fill); setFillSpecials(json.settings.fillSpecials); }
       })
@@ -311,6 +403,7 @@ export default function BuildMonthWizard({ jobs, initialMonth, onClose, onBuilt 
       saveJobs: [...keep].filter(s => monthJobs[s]),
       fill,
       fillSpecials: fill && fillSpecials && (plan?.specials.length ?? 0) > 0,
+      addSpecials: adding.map(a => ({ service: a.service, from: a.from, through: a.through, jobs: expand(a.counts) })),
       ...extra,
     };
   }
@@ -339,7 +432,10 @@ export default function BuildMonthWizard({ jobs, initialMonth, onClose, onBuilt 
     }
   }
 
-  const previewServices = result ? [...services, ...(body().fillSpecials ? plan.specials.map(s => s.service) : [])] : [];
+  const previewServices = result
+    ? [...new Set([...services, ...(body().fillSpecials ? plan.specials.map(s => s.service) : []), ...adding.map(a => a.service)])]
+    : [];
+  const ready = plan && ((services.length && datesLeft) || adding.length);
 
   return (
     <Dialog title="Build a month" subtitle="Choose the dates and jobs, then see the whole month before it is saved" onClose={onClose} width="max-w-3xl">
@@ -355,7 +451,7 @@ export default function BuildMonthWizard({ jobs, initialMonth, onClose, onBuilt 
       {!plan && !error && <p className="text-sm text-gray-400">Loading the month…</p>}
 
       {plan && step === 0 && (
-        <DatesStep plan={plan} chosen={chosen} toggleService={toggleIn(setChosen)} skip={skip} toggleDate={toggleIn(setSkip)}
+        <DatesStep plan={plan} chosen={chosen} toggleService={toggleIn(setChosen)} skip={skip} toggleDate={toggleIn(setSkip)} adding={adding} setAdding={setAdding}
           fill={fill} setFill={setFill} fillSpecials={fillSpecials} setFillSpecials={setFillSpecials} />
       )}
 
@@ -368,6 +464,11 @@ export default function BuildMonthWizard({ jobs, initialMonth, onClose, onBuilt 
             <JobsRow key={s} service={s} usual={usualOf(s)} jobs={jobs}
               counts={counts[s] || {}} setCounts={c => setCounts(prev => ({ ...prev, [s]: c }))}
               keep={keep.has(s)} setKeep={on => setKeep(prev => { const n = new Set(prev); if (on) n.add(s); else n.delete(s); return n; })} />
+          ))}
+          {adding.map(a => (
+            <JobsRow key={a.key} service={a.service} title={`${a.service}, ${whenOf(a)}`} jobs={jobs}
+              usual={plan.specialKinds.find(k => k.service === a.service)?.jobs || []}
+              counts={a.counts} setCounts={c => setAdding(prev => prev.map(x => (x.key === a.key ? { ...x, counts: c } : x)))} />
           ))}
         </div>
       )}
@@ -383,12 +484,12 @@ export default function BuildMonthWizard({ jobs, initialMonth, onClose, onBuilt 
         </button>
         <div className="flex gap-2">
           {step === 0 && (
-            <button type="button" onClick={() => setStep(1)} disabled={!plan || !services.length || !datesLeft} className="btn-primary text-sm disabled:opacity-50">
+            <button type="button" onClick={() => setStep(1)} disabled={!ready} className="btn-primary text-sm disabled:opacity-50">
               Next: jobs
             </button>
           )}
           {step === 1 && (
-            <button type="button" onClick={() => preview()} disabled={busy || services.some(s => !expand(counts[s] || {}).length)} className="btn-primary text-sm disabled:opacity-50">
+            <button type="button" onClick={() => preview()} disabled={busy || services.some(s => !expand(counts[s] || {}).length) || adding.some(a => !expand(a.counts).length)} className="btn-primary text-sm disabled:opacity-50">
               {busy ? 'Working it out…' : 'Next: preview'}
             </button>
           )}

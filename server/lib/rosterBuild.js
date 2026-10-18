@@ -4,11 +4,13 @@
 // The wizard walks the schedule keeper through three steps:
 //
 //   1. Dates — which services, which of their dates (a Sunday evening given
-//      over to a combined service is left out), whether to fill in names, and
-//      whether to fill the special services already planned that month.
+//      over to a combined service is left out), whether to fill in names,
+//      whether to fill the special services already planned that month, and
+//      any new special service to add (a gospel meeting's nights).
 //   2. Jobs — each service's jobs for this month only (four communion assists
 //      instead of six on a fifth Sunday), starting from the usual ones, with
-//      the choice to make them the usual ones from now on.
+//      the choice to make them the usual ones from now on; and the jobs each
+//      new special service needs.
 //   3. Preview — the whole month as it would be, laid out and filled, before
 //      anything is saved. "Shuffle again" draws a fresh fill; saving keeps
 //      exactly the draw that was shown, because the preview's random seed is
@@ -24,6 +26,7 @@ const { SERVICES, parseMonth, servicesIn } = require('../workflows/scheduling');
 const serviceJobs = require('./serviceJobs');
 const rosterFill = require('./rosterFill');
 const blackouts = require('./blackouts');
+const specialServices = require('./specialServices');
 
 const DEFAULTS = { services: SERVICES, fill: true, fillSpecials: true };
 
@@ -92,6 +95,9 @@ function plan(label) {
     month: parsed.label,
     services,
     specials: [...specials.values()].map(sp => ({ ...sp, dates: [...sp.dates].sort((a, b) => isoOf(a).localeCompare(isoOf(b))) })),
+    // What can be added as a special service, each with the jobs it usually needs.
+    specialKinds: specialServices.specialChoices().map(service => ({ service, jobs: serviceJobs.jobsFor(service) })),
+    maxNights: specialServices.MAX_NIGHTS,
     settings: settings(),
   };
 }
@@ -116,7 +122,8 @@ const ROLLBACK = Symbol('preview');
 // Build a month) sends:
 //
 //   month         "June 2026"
-//   services      which regular services; all of them when left out
+//   services      which regular services; all of them when left out. An
+//                 empty list is none, when the build only adds specials.
 //   skip          ["June 7|Sunday Evening", …]: dates to leave alone
 //   jobs          { service: [jobs] } for this month only
 //   saveJobs      [service, …]: also make this month's jobs the usual ones
@@ -124,6 +131,9 @@ const ROLLBACK = Symbol('preview');
 //   fillSpecials  true or false: fill the month's special services as well.
 //                 Left out, every open slot in the month is filled, as the
 //                 one-step build always did.
+//   addSpecials   [{ service, from, through, jobs }, …]: new special
+//                 services, each night inside the month, laid out (and
+//                 filled, if names are being filled) with the rest
 //   preview       true shows what would happen and saves nothing
 //   seed          the preview's draw, to save exactly that
 //
@@ -134,10 +144,23 @@ function build(body = {}, { user, view = slotsIn } = {}) {
   const parsed = parseMonth(label);
   if (!parsed) return { error: `"${label}" is not a month I understand — try "June 2026"` };
 
-  const wanted = Array.isArray(body.services) && body.services.length
+  // Special services to add, each checked, and all inside this month: the
+  // preview shows one month, so a meeting running over the turn of the month
+  // goes in through Setup → Add a special service instead.
+  const added = [];
+  for (const asked of Array.isArray(body.addSpecials) ? body.addSpecials : []) {
+    const special = specialServices.check(asked);
+    if (special.error) return { error: `${asked?.service || 'Special service'}: ${special.error}` };
+    if (special.nights.some(n => n.month !== parsed.label)) {
+      return { error: `${special.type.name}: every night has to be in ${parsed.label} — add a meeting that runs into another month with Setup → Add a special service` };
+    }
+    added.push(special);
+  }
+
+  const wanted = Array.isArray(body.services) && (body.services.length || added.length)
     ? SERVICES.filter(s => body.services.includes(s))
     : SERVICES;
-  if (!wanted.length) return { error: 'Choose at least one service' };
+  if (!wanted.length && !added.length) return { error: 'Choose at least one service' };
 
   const roles = serviceJobs.rolesByService();
   const monthJobs = {};
@@ -152,15 +175,17 @@ function build(body = {}, { user, view = slotsIn } = {}) {
 
   const skip = new Set((Array.isArray(body.skip) ? body.skip : []).map(String));
   const all = servicesIn(parsed, wanted, roles);
-  if (!all.length) return { error: `No services fall in ${parsed.label}` };
+  if (!all.length && !added.length) return { error: `No services fall in ${parsed.label}` };
   const occasions = all.filter(o => !skip.has(`${o.dateLabel}|${o.service}`));
-  if (!occasions.length) return { error: 'Every date is left out, so there is nothing to build' };
+  if (!occasions.length && !added.length) return { error: 'Every date is left out, so there is nothing to build' };
+  const addedNights = new Set(added.flatMap(sp => sp.nights.map(n => `${n.date}|${sp.type.name}`)));
 
   const specials = new Set(slotsIn(parsed.label).filter(s => !SERVICES.includes(s.service)).map(s => s.service));
   const inScope = body.fillSpecials === undefined
     ? () => true
     : s => (wanted.includes(s.service) && !skip.has(`${s.date}|${s.service}`))
-        || (body.fillSpecials === true && specials.has(s.service));
+        || (body.fillSpecials === true && specials.has(s.service))
+        || addedNights.has(`${s.date}|${s.service}`);
 
   const seed = Number.isInteger(body.seed) ? body.seed : Math.floor(Math.random() * 2 ** 31);
   const preview = body.preview === true;
@@ -179,6 +204,7 @@ function build(body = {}, { user, view = slotsIn } = {}) {
     }
     const insert = db.prepare('INSERT INTO job_assignments (month, date, service, job, name) VALUES (?, ?, ?, ?, ?)');
     let created = 0;
+    for (const special of added) created += specialServices.layOut(special);
     for (const occasion of occasions) {
       for (const job of serviceJobs.missing(occasion.roles, have.get(`${occasion.dateLabel}|${occasion.service}`))) {
         insert.run(parsed.label, occasion.dateLabel, occasion.service, job, '');
@@ -193,13 +219,14 @@ function build(body = {}, { user, view = slotsIn } = {}) {
     if (!preview) {
       for (const service of saveJobs) serviceJobs.setJobs(service, monthJobs[service], user);
       // The specials choice is only a choice in a month that has some.
-      remember({ services: wanted, fill: body.fill !== false, ...(typeof body.fillSpecials === 'boolean' && specials.size ? { fillSpecials: body.fillSpecials } : {}) }, user);
+      remember({ ...(wanted.length ? { services: wanted } : {}), fill: body.fill !== false, ...(typeof body.fillSpecials === 'boolean' && specials.size ? { fillSpecials: body.fillSpecials } : {}) }, user);
     }
 
     const old = new Set(before.map(a => a.id));
     const filledIds = new Set(filled.map(f => f.id));
     result = {
       month: parsed.label, services: wanted, preview, seed, created, filled, open, saveJobs,
+      added: added.map(sp => ({ service: sp.type.name, from: sp.from, through: sp.through, when: sp.when, nights: sp.nights.length, jobs: sp.jobs })),
       assignments: view(parsed.label).map(a => ({ ...a, isNew: !old.has(a.id), justFilled: filledIds.has(a.id) })),
     };
     if (preview) throw ROLLBACK;

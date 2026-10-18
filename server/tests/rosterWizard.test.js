@@ -178,3 +178,50 @@ describe('remembered choices', () => {
       .toEqual({ services: ['Wednesday'], fill: true, fillSpecials: false });
   });
 });
+
+describe('adding a special service in the wizard', () => {
+  const MEETING = { service: 'Gospel Meeting', from: '2026-06-15', through: '2026-06-17', jobs: ['Song Leader', 'Speaker'] };
+
+  test('step one offers the kinds of special service, each with its usual jobs', async () => {
+    const { specialKinds, maxNights } = (await keeper().get('/api/serving/months/plan?month=June%202026')).body;
+    expect(specialKinds).toContainEqual({ service: 'Gospel Meeting', jobs: ['Song Leader', 'Opening Prayer', 'Closing Prayer'] });
+    expect(specialKinds.map(k => k.service)).not.toContain('Sunday Worship');
+    expect(maxNights).toBe(14);
+  });
+
+  test('its nights show in the preview, filled, and nothing is saved until the month is', async () => {
+    const body = { month: 'June 2026', services: ['Wednesday'], addSpecials: [MEETING], fillSpecials: false };
+    const shown = (await keeper().post('/api/serving/months').send({ ...body, preview: true })).body;
+    const meeting = shown.assignments.filter(a => a.service === 'Gospel Meeting');
+    expect(meeting.map(a => `${a.date} ${a.job}`)).toEqual([
+      'June 15 Song Leader', 'June 15 Speaker', 'June 16 Song Leader', 'June 16 Speaker', 'June 17 Song Leader', 'June 17 Speaker',
+    ]);
+    expect(meeting.every(a => a.isNew && a.name)).toBe(true);
+    expect(shown.added).toEqual([{ service: 'Gospel Meeting', from: '2026-06-15', through: '2026-06-17', when: 'June 15 – June 17', nights: 3, jobs: ['Song Leader', 'Speaker'] }]);
+    expect(slotsIn('June 2026')).toEqual([]);
+
+    await keeper().post('/api/serving/months').send({ ...body, seed: shown.seed });
+    expect(names(slotsIn('June 2026'))).toEqual(names(shown.assignments));
+    expect(db.prepare('SELECT summary FROM action_log').get().summary).toMatch(/; added Gospel Meeting, June 15 – June 17/);
+  });
+
+  test('a month can be built with only a special service, and laid out empty', async () => {
+    const res = await keeper().post('/api/serving/months').send({ month: 'June 2026', services: [], addSpecials: [MEETING], fill: false });
+    expect(res.status).toBe(200);
+    expect(slotsIn('June 2026').map(s => s.service)).toEqual(Array(6).fill('Gospel Meeting'));
+    expect(slotsIn('June 2026').every(s => s.name === '')).toBe(true);
+    // Choosing no regular services this once is not remembered.
+    expect((await keeper().get('/api/serving/months/plan?month=July%202026')).body.settings.services).toHaveLength(3);
+  });
+
+  test('one running into another month, or not a special service at all, is refused', async () => {
+    const over = await keeper().post('/api/serving/months').send({ month: 'June 2026', addSpecials: [{ ...MEETING, from: '2026-06-29', through: '2026-07-02' }] });
+    expect(over.status).toBe(400);
+    expect(over.body.error).toMatch(/^Gospel Meeting: every night has to be in June 2026/);
+    const regular = await keeper().post('/api/serving/months').send({ month: 'June 2026', addSpecials: [{ ...MEETING, service: 'Sunday Worship' }] });
+    expect(regular.body.error).toMatch(/^Sunday Worship: Choose which service it is/);
+    const backwards = await keeper().post('/api/serving/months').send({ month: 'June 2026', addSpecials: [{ ...MEETING, through: '2026-06-01' }] });
+    expect(backwards.body.error).toMatch(/last night is before the first/);
+    expect(slotsIn('June 2026')).toEqual([]);
+  });
+});
