@@ -430,11 +430,14 @@ approved member the same file.
 and gold rule, a table for each service (Sunday Worship, Sunday Evening,
 Wednesday, then anything else; a job for the whole month last), its jobs down
 the left on alternating cream rows and its dates across a navy header, so every
-Sunday of the month reads side by side. A job a service needs twice is two
-rows; a date that does not have a job at all is left blank, and an open slot
-says *Needs someone* in amber. It is set large (names 15pt bold, jobs and dates
-14pt, service titles 20pt); a name too long for its column wraps rather than
-shrinking. A usual month fits on two pages. A table goes over to the next page
+Sunday of the month reads side by side. A job a service needs more than once
+(Sunday morning's six communion assists) is that many rows; a date that does
+not have a job at all is left blank, and an open slot says *Needs someone* in
+amber. It is set large (names 13pt bold, jobs and dates 12pt, service titles
+18pt), and every job is one line: a name too long for its column is set a
+point or so smaller, then shortened to an initial (F. Quarrington), and only
+past that cut short. Sunday morning's whole roster fits on the first page, and
+a usual month on two. A table goes over to the next page
 whole when it fits there; only one too long for any page is split, with a
 "(continued)" title and its dates repeated. A run of more than five nights is
 split into tables of five, so no column gets too narrow.

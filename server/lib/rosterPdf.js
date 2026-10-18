@@ -1,21 +1,22 @@
 // ─── The month's serving schedule as a PDF ────────────────────────────────────
 //
 // What "Email everyone (PDF)" attaches and "Download PDF" hands over: one
-// month of the Serving Schedule, a card per service, in the portal's own
-// colours — the navy banner, the gold rule, the cream cards — and set large, so
+// month of the Serving Schedule, a table per service, in the portal's own
+// colours — the navy banner, the gold rule, the cream rows — and set large, so
 // it reads easily on a phone, printed on the fridge, or held at arm's length in
 // the foyer.
 //
 // The page is landscape and laid out as a duty roster: a table for each
 // service, the jobs down the left and that service's dates across the top, so
 // every Sunday of the month reads side by side and the month fits on a page or
-// two. A name too long for its column wraps onto a second line rather than
-// shrinking.
+// two. Every job is one line: a name too long for its column is set a little
+// smaller, and failing that shortened to an initial (F. Quarrington), so a
+// Sunday's fourteen jobs always stack evenly.
 //
 // Drawn with pdfkit, as the newsletter is (lib/bulletinPdf.js), so it costs the
 // runtime image nothing but the dependency it already has. pdfkit draws rather
-// than flows, so every row is measured before it is placed: a row never splits
-// across pages, and a table that runs over carries its header with it.
+// than flows, so every table is measured before it is placed, and a table that
+// runs over carries its header with it.
 
 const PDFDocument = require('pdfkit');
 const blackouts = require('./blackouts');
@@ -36,20 +37,24 @@ const PAGE = { width: 792, height: 612 };          // US Letter, landscape
 const M = 36;                                      // margin
 const W = PAGE.width - M * 2;
 const BOTTOM = PAGE.height - 34;                   // room for the footer, low in the margin
-// The job names down the left, and at most this many dates across: a run of
-// nights longer than that (a gospel meeting) continues in a second table.
-const JOB_COL = 150;
+// At most this many dates across: a run of nights longer than that (a gospel
+// meeting) continues in a second table. The job column is as wide as the
+// longest job needs, within these bounds.
 const MAX_DATES = 5;
+const JOB_COL = { min: 110, max: 190 };
 
-// Large on purpose: these are read by everybody, at every age.
+// Large on purpose: these are read by everybody, at every age. Sized so a
+// Sunday morning's full roster, six communion assists and all, sits on the
+// first page with every job on one line.
 const SIZE = {
   banner:  30,
   month:   24,
   church:  11,
-  service: 20,   // each table's title
-  date:    14,   // the dates across the top
-  job:     14,   // the jobs down the left
-  name:    15,   // who is doing each
+  service: 18,   // each table's title
+  date:    12,   // the dates across the top
+  job:     12,   // the jobs down the left
+  name:    13,   // who is doing each
+  minName: 10,   // the smallest a long name is set before it is shortened
   footer:  10,
 };
 
@@ -58,7 +63,9 @@ const SANS    = 'Helvetica';
 const SANS_B  = 'Helvetica-Bold';
 const SANS_I  = 'Helvetica-Oblique';
 
-const CELL = { padX: 8, padY: 5, head: 28, gap: 16, title: 30 };
+const CELL = { padX: 7, padY: 5, head: 24, gap: 14, title: 28 };
+// Every row is one line, so every row is the same height.
+const ROW = Math.ceil(SIZE.name * 1.2) + CELL.padY * 2;
 
 function longDay(iso, fallback) {
   if (!iso) return fallback;
@@ -136,30 +143,48 @@ function tablesOf(draft) {
   return split;
 }
 
-// How wide each date column is, and how tall each job's row has to be for its
-// longest name.
-function measureTable(doc, table) {
-  if (table.monthly) {
-    const colW = W - JOB_COL;
-    doc.font(SANS_B).fontSize(SIZE.name);
-    const rows = table.monthly.map(r => Math.max(
-      doc.heightOfString(r.name || 'Needs someone', { width: colW - CELL.padX * 2 }),
-      doc.font(SANS).fontSize(SIZE.job).heightOfString(r.job, { width: JOB_COL - CELL.padX * 2 }),
-    ) + CELL.padY * 2);
-    return { colW, rows, height: CELL.title + rows.reduce((a, b) => a + b, 0) };
-  }
-  const colW = (W - JOB_COL) / table.dates.length;
-  const rows = table.rows.map(row => {
-    doc.font(SANS).fontSize(SIZE.job);
-    let h = doc.heightOfString(row.job, { width: JOB_COL - CELL.padX * 2 });
-    doc.font(SANS_B).fontSize(SIZE.name);
-    for (const d of table.dates) {
-      const name = table.cells.get(`${row.key}|${d.iso}`);
-      h = Math.max(h, doc.heightOfString(name || 'Needs someone', { width: colW - CELL.padX * 2 }));
+// "Fennimore Quarrington" → "F. Quarrington".
+function initialed(name) {
+  const words = name.split(/\s+/);
+  return words.length > 1 ? `${words[0][0]}. ${words.slice(1).join(' ')}` : name;
+}
+
+// The text and size that put `text` on one line `width` wide: full size if it
+// fits, a touch smaller if that does, then (for a name) the initialed form
+// before anything gets really small, and as a last resort cut short with an
+// ellipsis. Names stay close to one size, so no one's looks like an afterthought.
+const NUDGE = 1.5;
+
+function fitLine(doc, text, width, { font, size, min = SIZE.minName, initial = false }) {
+  doc.font(font);
+  const tries = initial
+    ? [[text, size - NUDGE], [initialed(text), min], [text, min]]
+    : [[text, min]];
+  for (const [form, floor] of tries) {
+    for (let s = size; s >= floor; s -= 0.5) {
+      if (doc.fontSize(s).widthOfString(form) <= width) return { text: form, size: s };
     }
-    return h + CELL.padY * 2;
-  });
-  return { colW, rows, height: CELL.title + CELL.head + rows.reduce((a, b) => a + b, 0) };
+  }
+  let cut = initial ? initialed(text) : text;
+  doc.fontSize(min);
+  while (cut.length > 1 && doc.widthOfString(`${cut}…`) > width) cut = cut.slice(0, -1);
+  return { text: `${cut.trimEnd()}…`, size: min };
+}
+
+// The job column wide enough for the month's longest job, and the height of a
+// table whose rows are all one line.
+function jobColumn(doc, tables) {
+  doc.font(SANS).fontSize(SIZE.job);
+  const jobs = tables.flatMap(t => (t.monthly || t.rows).map(r => r.job));
+  const widest = Math.max(0, ...jobs.map(j => doc.widthOfString(j)));
+  return Math.min(JOB_COL.max, Math.max(JOB_COL.min, Math.ceil(widest) + CELL.padX * 2 + 4));
+}
+
+function measureTable(doc, table, jobCol = JOB_COL.min) {
+  const count = (table.monthly || table.rows).length;
+  const colW = table.monthly ? W - jobCol : (W - jobCol) / table.dates.length;
+  const rows = Array(count).fill(ROW);
+  return { colW, jobCol, rows, height: CELL.title + (table.monthly ? 0 : CELL.head) + count * ROW };
 }
 
 function drawBanner(doc, month) {
@@ -193,24 +218,32 @@ function drawTitle(doc, table, y) {
 }
 
 // The navy row of dates across the top of a table.
-function drawHeader(doc, table, y, colW) {
+function drawHeader(doc, table, y, colW, jobCol) {
   doc.rect(M, y, W, CELL.head).fill(THEME.navy);
   table.dates.forEach((d, i) => {
     doc.fillColor('#ffffff').font(SANS_B).fontSize(SIZE.date)
-      .text(d.label, M + JOB_COL + i * colW + CELL.padX, y + 8, { width: colW - CELL.padX * 2, lineBreak: false });
+      .text(d.label, M + jobCol + i * colW + CELL.padX, y + (CELL.head - SIZE.date) / 2 + 1, { width: colW - CELL.padX * 2, lineBreak: false });
   });
   return y + CELL.head;
 }
 
+// One line of text, centred in its row whatever size it ended up. fitLine has
+// already made it fit; given a width, pdfkit would still wrap at a space.
+function drawLine(doc, fit, font, color, x, y) {
+  doc.fillColor(color).font(font).fontSize(fit.size)
+    .text(fit.text, x, y + (ROW - fit.size) / 2 + 1, { lineBreak: false });
+}
+
 function drawCell(doc, name, x, y, w) {
-  if (name) doc.fillColor(THEME.navy).font(SANS_B).fontSize(SIZE.name).text(name, x + CELL.padX, y + CELL.padY, { width: w - CELL.padX * 2 });
-  else doc.fillColor(THEME.open).font(SANS_I).fontSize(SIZE.name - 1).text('Needs someone', x + CELL.padX, y + CELL.padY + 1, { width: w - CELL.padX * 2 });
+  const width = w - CELL.padX * 2;
+  if (name) drawLine(doc, fitLine(doc, name, width, { font: SANS_B, size: SIZE.name, initial: true }), SANS_B, THEME.navy, x + CELL.padX, y);
+  else drawLine(doc, fitLine(doc, 'Needs someone', width, { font: SANS_I, size: SIZE.name - 1 }), SANS_I, THEME.open, x + CELL.padX, y);
 }
 
 // Draws one table from `y`, moving to a new page between rows if it has to.
 // Returns where it ended.
-function drawTable(doc, table, y, month, { pageHasContent = true } = {}) {
-  const m = measureTable(doc, table);
+function drawTable(doc, table, y, month, { pageHasContent = true, jobCol = JOB_COL.min } = {}) {
+  const m = measureTable(doc, table, jobCol);
   const firstRow = table.monthly ? 0 : CELL.head;
   // A table that would fit whole on a page of its own is not split: it goes
   // over to the next page instead. Only one too long for any page is split, and
@@ -222,7 +255,7 @@ function drawTable(doc, table, y, month, { pageHasContent = true } = {}) {
     y = drawRunningHead(doc, month);
   }
   y = drawTitle(doc, table, y);
-  if (!table.monthly) y = drawHeader(doc, table, y, m.colW);
+  if (!table.monthly) y = drawHeader(doc, table, y, m.colW, jobCol);
 
   const rows = table.monthly || table.rows;
   rows.forEach((row, i) => {
@@ -232,16 +265,17 @@ function drawTable(doc, table, y, month, { pageHasContent = true } = {}) {
       y = drawRunningHead(doc, month);
       // The rest of the table says whose it is, and carries its dates.
       y = drawTitle(doc, { ...table, continued: true }, y);
-      if (!table.monthly) y = drawHeader(doc, table, y, m.colW);
+      if (!table.monthly) y = drawHeader(doc, table, y, m.colW, jobCol);
     }
     doc.rect(M, y, W, h).fill(i % 2 ? '#ffffff' : THEME.cream);
     doc.rect(M, y, 4, h).fill(THEME.gold);
-    doc.fillColor(THEME.text).font(SANS).fontSize(SIZE.job).text(row.job, M + CELL.padX + 4, y + CELL.padY + 1, { width: JOB_COL - CELL.padX * 2 - 4 });
+    const jobWidth = jobCol - CELL.padX * 2 - 4;
+    drawLine(doc, fitLine(doc, row.job, jobWidth, { font: SANS, size: SIZE.job, min: 9 }), SANS, THEME.text, M + CELL.padX + 4, y);
     if (table.monthly) {
-      drawCell(doc, row.name, M + JOB_COL, y, m.colW);
+      drawCell(doc, row.name, M + jobCol, y, m.colW);
     } else {
       table.dates.forEach((d, c) => {
-        const x = M + JOB_COL + c * m.colW;
+        const x = M + jobCol + c * m.colW;
         doc.moveTo(x, y).lineTo(x, y + h).lineWidth(0.5).strokeColor(THEME.line).stroke();
         const key = `${row.key}|${d.iso}`;
         // A date that does not have this job at all (a special night that
@@ -284,7 +318,8 @@ function rosterPdf(draft) {
   if (!tables.length) {
     doc.fillColor(THEME.muted).font(SANS).fontSize(SIZE.name).text('Nothing is on the schedule for this month yet.', M, y + 10, { width: W });
   }
-  tables.forEach((table, i) => { y = drawTable(doc, table, y, draft.month, { pageHasContent: i > 0 }); });
+  const jobCol = jobColumn(doc, tables);
+  tables.forEach((table, i) => { y = drawTable(doc, table, y, draft.month, { pageHasContent: i > 0, jobCol }); });
   drawFooters(doc, draft.month);
   doc.end();
 
@@ -296,4 +331,4 @@ function rosterPdf(draft) {
 
 const pdfFilename = month => `Worship Schedule - ${String(month).replace(/[^\w ,.-]/g, '').trim() || 'month'}.pdf`;
 
-module.exports = { THEME, SIZE, PAGE, MAX_DATES, occasionsOf, tablesOf, measureTable, rosterPdf, pdfFilename };
+module.exports = { THEME, SIZE, PAGE, MAX_DATES, occasionsOf, tablesOf, measureTable, fitLine, initialed, rosterPdf, pdfFilename };

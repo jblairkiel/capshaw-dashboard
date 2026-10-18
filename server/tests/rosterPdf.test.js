@@ -12,7 +12,9 @@ const request = require('supertest');
 const express = require('express');
 const db = require('../db');
 const mailer = require('../mail/mailer');
-const { rosterPdf, occasionsOf, tablesOf, pdfFilename, SIZE, THEME, MAX_DATES } = require('../lib/rosterPdf');
+const PDFDocument = require('pdfkit');
+const { rosterPdf, occasionsOf, tablesOf, fitLine, initialed, pdfFilename, SIZE, THEME, MAX_DATES } = require('../lib/rosterPdf');
+const { SERVICE_ROLES } = require('../workflows/scheduling');
 const router = require('../routes/serving');
 
 function buildApp(user) {
@@ -111,23 +113,45 @@ describe('the PDF', () => {
     expect(pages(rosterPdf({ month: 'November 2026', rows }))).toBeGreaterThan(3);
   });
 
-  test('a usual month — five Sundays morning and evening, four Wednesdays — fits on two pages', () => {
+  test('a usual month — five Sundays morning and evening, six communion assists each, four Wednesdays — fits on two pages', () => {
     const rows = [];
-    const sunday = ['Song Leader', 'Opening Prayer', 'Scripture Reading', 'Communion', 'Communion Assist', 'Communion Assist', 'Speaker', 'Announcements', 'Closing Prayer', 'Usher'];
+    expect(SERVICE_ROLES['Sunday Worship'].filter(j => j === 'Communion Assist')).toHaveLength(6);
     for (const d of [1, 8, 15, 22, 29]) {
-      for (const job of sunday) rows.push({ date: `November ${d}`, service: 'Sunday Worship', job, name: 'Fennimore Quarrington' });
-      for (const job of ['Song Leader', 'Opening Prayer', 'Closing Prayer']) rows.push({ date: `November ${d}`, service: 'Sunday Evening', job, name: 'Fennimore Quarrington' });
+      for (const job of SERVICE_ROLES['Sunday Worship']) rows.push({ date: `November ${d}`, service: 'Sunday Worship', job, name: 'Fennimore Quarrington' });
+      for (const job of SERVICE_ROLES['Sunday Evening']) rows.push({ date: `November ${d}`, service: 'Sunday Evening', job, name: 'Fennimore Quarrington' });
     }
-    // Wednesday has a column fewer, so most names there fit on one line.
-    for (const d of [4, 11, 18, 25]) for (const job of ['Song Leader', 'Opening Prayer', 'Closing Prayer']) rows.push({ date: `November ${d}`, service: 'Wednesday', job, name: 'Tom Nelson' });
+    for (const d of [4, 11, 18, 25]) for (const job of SERVICE_ROLES.Wednesday) rows.push({ date: `November ${d}`, service: 'Wednesday', job, name: 'Fennimore Quarrington' });
+    rows.push({ date: '', service: '', job: 'Visual preparation', name: 'Fennimore Quarrington' });
     expect(pages(rosterPdf({ month: 'November 2026', rows }))).toBe(2);
   });
 
+  test('every job is one line: a long name is set smaller, then shortened to an initial', () => {
+    const doc = new PDFDocument({ size: 'LETTER', layout: 'landscape' });
+    const fits = (fit, font, width) => doc.font(font).fontSize(fit.size).widthOfString(fit.text) <= width;
+    // Short names stay as they are, at full size.
+    expect(fitLine(doc, 'Tom Nelson', 100, { font: 'Helvetica-Bold', size: SIZE.name, initial: true })).toEqual({ text: 'Tom Nelson', size: SIZE.name });
+    // A long one comes down a little before it is shortened.
+    const smaller = fitLine(doc, 'Peregrine Westmarch', 125, { font: 'Helvetica-Bold', size: SIZE.name, initial: true });
+    expect(smaller.text).toBe('Peregrine Westmarch');
+    expect(smaller.size).toBeLessThan(SIZE.name);
+    expect(smaller.size).toBeGreaterThanOrEqual(SIZE.minName);
+    // Longer still, it keeps the surname whole.
+    const short = fitLine(doc, 'Fennimore Quarrington', 100, { font: 'Helvetica-Bold', size: SIZE.name, initial: true });
+    expect(short.text).toBe('F. Quarrington');
+    expect(fits(short, 'Helvetica-Bold', 100)).toBe(true);
+    // And nothing ever overruns its column.
+    const cut = fitLine(doc, 'Bartholomew Featherstonehaugh-Wolstenholme', 60, { font: 'Helvetica-Bold', size: SIZE.name, initial: true });
+    expect(cut.text.endsWith('…')).toBe(true);
+    expect(fits(cut, 'Helvetica-Bold', 60)).toBe(true);
+    expect(initialed('Cher')).toBe('Cher');
+  });
+
   test('is set large, in the portal\'s colours', () => {
-    expect(SIZE.name).toBeGreaterThanOrEqual(15);
-    expect(SIZE.job).toBeGreaterThanOrEqual(14);
-    expect(SIZE.date).toBeGreaterThanOrEqual(14);
-    expect(SIZE.service).toBeGreaterThanOrEqual(20);
+    expect(SIZE.name).toBeGreaterThanOrEqual(13);
+    expect(SIZE.minName).toBeGreaterThanOrEqual(10);
+    expect(SIZE.job).toBeGreaterThanOrEqual(12);
+    expect(SIZE.date).toBeGreaterThanOrEqual(12);
+    expect(SIZE.service).toBeGreaterThanOrEqual(18);
     expect(THEME).toMatchObject({ navy: '#1a2744', gold: '#c9a84c', cream: '#f9f6f0' });
   });
 
