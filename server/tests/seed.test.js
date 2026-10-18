@@ -53,6 +53,33 @@ describe('making sample data', () => {
     expect(batch.tables.length).toBeGreaterThan(10);
   });
 
+  // Weekly things are unique per week (bulletin_issues.sunday,
+  // song_of_week.week_start). A second batch used to collide with the first on
+  // those weeks and, since a batch is one transaction, fail as a whole.
+  test('more can be made: a second and third batch go on from the first rather than failing', () => {
+    seed.generate({ scale: 1 });
+    expect(() => seed.generate({ scale: 1 })).not.toThrow();
+    expect(() => seed.generate({ scale: 2 })).not.toThrow();
+    for (const [table, column] of [['bulletin_issues', 'sunday'], ['song_of_week', 'week_start']]) {
+      const { n, weeks } = db.prepare(`SELECT COUNT(*) AS n, COUNT(DISTINCT ${column}) AS weeks FROM ${table}`).get();
+      expect([table, n]).toEqual([table, weeks]);
+    }
+    // Each batch added newsletters of its own, further back.
+    expect(db.prepare('SELECT COUNT(*) AS n FROM bulletin_issues').get().n).toBe(3 + 3 + 6);
+  });
+
+  test('a week somebody really wrote up is stepped over, never written again', () => {
+    const { sundayOf } = require('../lib/bulletinData');
+    const today = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    const thisSunday = sundayOf(`${today.getFullYear()}-${pad(today.getMonth() + 1)}-${pad(today.getDate())}`);
+    db.prepare("INSERT INTO bulletin_issues (sunday, quote) VALUES (?, 'The real one')").run(thisSunday);
+
+    seed.generate({ generators: ['bulletin'], scale: 1 });
+    expect(db.prepare('SELECT quote FROM bulletin_issues WHERE sunday = ?').get(thisSunday).quote).toBe('The real one');
+    expect(db.prepare('SELECT COUNT(*) AS n FROM bulletin_issues').get().n).toBe(4);
+  });
+
   test('only the parts asked for are filled', () => {
     const made = seed.generate({ generators: ['directory'], scale: 1 });
 

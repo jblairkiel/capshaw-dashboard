@@ -197,6 +197,26 @@ describe('App — deep links from generated emails', () => {
     expect(window.location.search).toBe('');
   });
 
+  test('?page=rotations&rotation=5 opens that rotation, and its link stays in the address bar', async () => {
+    window.history.replaceState(null, '', '/?page=rotations&rotation=5');
+    const rotation = {
+      id: 5, name: 'Baby shower hosts', description: '', active: true, canRun: false, canManage: false,
+      nextUp: null, members: [], coordinators: [], upcoming: [], history: [],
+    };
+    vi.stubGlobal('fetch', vi.fn(url => {
+      const u = String(url);
+      const body = u.startsWith('/api/auth/me') ? { user: { id: 1, name: 'Mel', role: 'approved' } }
+        : u === '/api/rotations/5' ? { success: true, rotation }
+        : u.startsWith('/api/rotations') ? { success: true, canManage: false, rotations: [] }
+        : { success: true, data: null };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+    }));
+    render(<App />);
+
+    expect(await screen.findByRole('heading', { name: 'Baby shower hosts' })).toBeInTheDocument();
+    expect(window.location.search).toBe('?page=rotations&rotation=5');
+  });
+
   test('an unknown ?page falls back to the default tab rather than a blank one', async () => {
     window.history.replaceState(null, '', '/?page=not-a-real-page');
     const fetchMock = mockDeepLinkApi({ id: 1, name: 'Mel', role: 'approved' });

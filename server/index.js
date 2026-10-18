@@ -72,4 +72,15 @@ app.listen(PORT, () => {
   };
   remindCommunion();
   setInterval(remindCommunion, REMINDER_TICK_MS);
+
+  // A week before somebody's dated turn on a rotation. Claimed on the turn
+  // before it is sent, so ticking often is safe.
+  const rotationReminders = require('./mail/rotations');
+  const remindRotations = () => {
+    try {
+      for (const r of rotationReminders.tick()) console.log(`[rotations] reminder to ${r.name} for ${r.rotation} on ${r.date}`);
+    } catch (err) { console.error('[rotations] reminder failed:', err.message); }
+  };
+  remindRotations();
+  setInterval(remindRotations, REMINDER_TICK_MS);
 });

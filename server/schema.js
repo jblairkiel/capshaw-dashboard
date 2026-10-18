@@ -882,6 +882,11 @@ function initSchema(db) {
   addColumn('users', 'approved_at', 'TEXT');
   addColumn('users', 'approved_by', 'INTEGER REFERENCES users(id) ON DELETE SET NULL');
 
+  // An address somebody asked to add to a Google or Facebook account that came
+  // without one, kept here until they open the confirmation link (which uses
+  // the email_verify_* columns above). Only then does it become their email.
+  addColumn('users', 'pending_email', "TEXT NOT NULL DEFAULT ''");
+
   // Whether this person may be rostered for the men's worship jobs. Chosen on
   // My Info (or by the directory area on their behalf) — not guessed from a
   // name. '' means nobody has said.
@@ -1025,6 +1030,35 @@ function initSchema(db) {
   // one: 'local' rows store the folded address in provider_id, so the existing
   // UNIQUE(provider, provider_id) already enforces that.
   db.exec(`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);`);
+
+  // ─── One person, several ways in ──────────────────────────────────────────────
+  // An account keeps the way it was first made on users.provider/provider_id.
+  // Any other sign-in that turns out to be the same person — Google after an
+  // email-and-password sign-up, Facebook after Google — is recorded here and,
+  // once an admin confirms it, signs in to that same account rather than
+  // making a second one the directory then cannot tell apart. See upsertUser
+  // in server/routes/auth.js.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_identities (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      provider    TEXT    NOT NULL,
+      provider_id TEXT    NOT NULL,
+      email       TEXT,
+      created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+      last_login  TEXT,
+      UNIQUE(provider, provider_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_identities_user  ON user_identities(user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_identities_email ON user_identities(email);
+  `);
+  // Matching addresses are not enough on their own: an admin confirms each
+  // join before the new sign-in can reach the account. 'pending' until they
+  // decide, then 'approved' or 'declined', with who decided and when. A row
+  // made before this existed starts out pending, which is the safe way round.
+  addColumn('user_identities', 'status', "TEXT NOT NULL DEFAULT 'pending'");
+  addColumn('user_identities', 'decided_at', 'TEXT');
+  addColumn('user_identities', 'decided_by', 'INTEGER REFERENCES users(id) ON DELETE SET NULL');
 
   // ─── From the old role ladder to areas ────────────────────────────────────────
   // 'worship-coordinator' was a rung above member that existed only to own the
@@ -1383,6 +1417,57 @@ function initSchema(db) {
       reminded_at  TEXT,
       UNIQUE (year, month)
     );
+  `);
+
+  // ─── Rotations ────────────────────────────────────────────────────────────────
+  // Anything the church takes in turns — teaching a class, hosting a baby
+  // shower — kept as an ordered queue of directory people (lib/rotations.js).
+  // Whoever is first and not sitting out is next up; giving somebody a turn
+  // writes it to rotation_turns and sends them to the back. Made by whoever
+  // holds the rotations area, and run by the coordinators it appoints (directory
+  // people, matched to an account the same way group leaders are).
+  // `notified_directory_id` is who was last told they are next, so the same
+  // person is not emailed twice for one wait. A turn's `reminded_at` claims its
+  // reminder a week before (mail/rotations.js), so it is sent once.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS rotations (
+      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+      name                  TEXT    NOT NULL,
+      description           TEXT    NOT NULL DEFAULT '',
+      active                INTEGER NOT NULL DEFAULT 1,
+      notified_directory_id INTEGER REFERENCES directory(id) ON DELETE SET NULL,
+      created_by            INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_at            TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS rotation_members (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      rotation_id  INTEGER NOT NULL REFERENCES rotations(id) ON DELETE CASCADE,
+      directory_id INTEGER NOT NULL REFERENCES directory(id) ON DELETE CASCADE,
+      position     INTEGER NOT NULL,
+      sitting_out  INTEGER NOT NULL DEFAULT 0,
+      added_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (rotation_id, directory_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_rotation_members_rotation ON rotation_members(rotation_id, position);
+    CREATE TABLE IF NOT EXISTS rotation_coordinators (
+      rotation_id  INTEGER NOT NULL REFERENCES rotations(id) ON DELETE CASCADE,
+      directory_id INTEGER NOT NULL REFERENCES directory(id) ON DELETE CASCADE,
+      PRIMARY KEY (rotation_id, directory_id)
+    );
+    -- A turn keeps the name it was given under, so the history still reads
+    -- properly after somebody leaves the directory.
+    CREATE TABLE IF NOT EXISTS rotation_turns (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      rotation_id  INTEGER NOT NULL REFERENCES rotations(id) ON DELETE CASCADE,
+      directory_id INTEGER REFERENCES directory(id) ON DELETE SET NULL,
+      name         TEXT    NOT NULL,
+      date         TEXT,                          -- YYYY-MM-DD, when it is or was
+      note         TEXT    NOT NULL DEFAULT '',
+      recorded_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      recorded_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+      reminded_at  TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_rotation_turns_rotation ON rotation_turns(rotation_id);
   `);
 
   // ─── Sign-up lists ────────────────────────────────────────────────────────────

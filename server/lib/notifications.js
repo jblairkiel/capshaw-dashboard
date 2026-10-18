@@ -35,6 +35,15 @@ const KINDS = {
   'song-request-planned':   'A song you asked for is going to be sung',
   'bible-quiz-flagged':     'Somebody flagged a Bible Quiz question',
   'bible-quiz-flag-answered': 'A Bible Quiz question you flagged was looked at',
+  'rotation-next-up':       'You are next up on a rotation',
+  'rotation-turn-given':    'You were given a turn on a rotation',
+  'rotation-turn-reminder': 'Your turn on a rotation is coming up',
+  'rotation-changed':       'You were taken off a rotation, or a turn of yours was cancelled',
+  'serving-changed':        'The schedule keeper put you on, took you off, or moved a slot of yours',
+  'communion-prep-changed': 'Somebody changed who prepares communion in a month that concerns you',
+  'signup-changed':         'A sign-up you are on, or made, changed',
+  'group-changed':          'You were taken off a church group, or it stopped meeting',
+  'areas-changed':          'What you look after on the portal changed',
 };
 
 const KIND_IDS = Object.keys(KINDS);
@@ -48,6 +57,7 @@ const PAGE_FOR_SUBJECT = {
   'serving-slot': 'service-roster',
   'song-request': 'upcoming',
   'bible-quiz-flag': 'bible-class',
+  'rotation':     'rotations',
 };
 
 function pageForSubject(subjectType) {

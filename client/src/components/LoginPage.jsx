@@ -3,16 +3,28 @@ import { useState } from 'react';
 const AUTH_ERROR_MESSAGES = {
   google:   'Google sign-in failed. Please try again.',
   facebook: 'Facebook sign-in failed. Please try again.',
+  // A Google or Facebook sign-in whose address an account here already has.
+  // It is joined to that account only once an admin confirms it is the same
+  // person, so nothing went wrong — it is waiting.
+  link_pending:
+    'You already have an account with this email address. To keep it safe, an admin will confirm this sign-in is you before it can be used — we have emailed you about it. Until then, please sign in the way you did before.',
+  link_declined:
+    'This sign-in was not joined to the account with its email address. Please sign in the way you did before, or contact the church office.',
 };
+
+const AUTH_ERROR_TONES = { link_pending: 'warn' };
 
 // Where the confirmation link in the email lands. The API redirects back here
 // carrying the outcome, so this is the one place that explains it.
 const VERIFY_MESSAGES = {
   '1':       'Your email address is confirmed and your account is ready. Please sign in.',
+  // A Google or Facebook account that came without an address, adding one.
+  'added':   'Your email address is confirmed and added to your account. Please sign in.',
   'pending': 'Thank you — your email address is confirmed. An admin still has to approve your account, and you will get an email from us the moment they do. You can sign in now to see who to contact if you would like it sooner.',
 };
 
 const VERIFY_ERROR_MESSAGES = {
+  taken:   'That email address now belongs to another account here, so it was not added. Please sign in and try a different one, or contact the church office.',
   missing: 'That confirmation link was incomplete. Please open the link in the email again, or ask for a new one below.',
   invalid: 'That confirmation link is no longer valid. It may already have been used — try signing in, or ask for a new link below.',
   expired: 'That confirmation link has expired. Ask for a new one below and we will send another.',
@@ -435,7 +447,9 @@ export default function LoginPage({ authError, verified, verifyError, resetToken
         </div>
 
         {authError && (
-          <Banner tone="error">{AUTH_ERROR_MESSAGES[authError] ?? 'Sign-in failed. Please try again.'}</Banner>
+          <Banner tone={Object.hasOwn(AUTH_ERROR_TONES, authError) ? AUTH_ERROR_TONES[authError] : 'error'}>
+            {Object.hasOwn(AUTH_ERROR_MESSAGES, authError) ? AUTH_ERROR_MESSAGES[authError] : 'Sign-in failed. Please try again.'}
+          </Banner>
         )}
         {verified && VERIFY_MESSAGES[verified] && (
           <Banner tone="success">{VERIFY_MESSAGES[verified]}</Banner>
@@ -526,6 +540,11 @@ export default function LoginPage({ authError, verified, verifyError, resetToken
 
         <p className="text-center text-xs text-gray-400 mt-4">
           8941 Wall Triana Hwy &bull; Harvest, AL
+        </p>
+        <p className="text-center text-xs mt-2">
+          <a href="/privacy.html" className="text-gray-400 underline hover:text-church-navy">Privacy policy</a>
+          <span className="text-gray-400">{' '}&bull;{' '}</span>
+          <a href="/terms.html" className="text-gray-400 underline hover:text-church-navy">Terms of service</a>
         </p>
       </div>
     </div>

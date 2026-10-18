@@ -44,6 +44,7 @@ const participationRoutes        = require('./routes/participation');
 const mailDeliveryRoutes         = require('./routes/mailDelivery');
 const signupRoutes               = require('./routes/signups');
 const communionPrepRoutes        = require('./routes/communionPrep');
+const rotationRoutes             = require('./routes/rotations');
 const paths                      = require('./lib/paths');
 const { requireSiteAuth, limitPending } = require('./middleware/auth');
 const { applyImpersonation }     = require('./middleware/impersonation');
@@ -168,6 +169,7 @@ function createApp() {
   app.use('/api/mail-delivery',   mailDeliveryRoutes);
   app.use('/api/signups',         signupRoutes);
   app.use('/api/communion-prep',  communionPrepRoutes);
+  app.use('/api/rotations',       rotationRoutes);
 
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -187,6 +189,14 @@ function createApp() {
       message: { success: false, error: 'Too many requests. Please wait a few minutes and try again.' },
     });
     app.use(staticRateLimit, express.static(clientDist));
+    // The privacy policy and terms of service (client/public/*.html), at the
+    // short addresses given to Google and Facebook. They are public, like
+    // every static file.
+    for (const page of ['privacy', 'terms']) {
+      app.get(`/${page}`, staticRateLimit, (req, res) => {
+        res.sendFile(path.join(clientDist, `${page}.html`));
+      });
+    }
     app.get('*', staticRateLimit, (req, res) => {
       res.sendFile(path.join(clientDist, 'index.html'));
     });

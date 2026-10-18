@@ -140,6 +140,13 @@ export const AREAS = [
     tone:        'bg-emerald-100 text-emerald-800',
   },
   {
+    id:          'rotations',
+    label:       'Rotations',
+    page:        'Rotations',
+    description: 'Start a rotation for anything the church takes in turns — teaching a class, hosting a baby shower — appoint who coordinates each one, and retire or delete them.',
+    tone:        'bg-slate-200 text-slate-800',
+  },
+  {
     id:          'mail-groups',
     label:       'Email Groups',
     page:        'Email Groups',

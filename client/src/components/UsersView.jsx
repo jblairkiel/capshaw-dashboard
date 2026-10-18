@@ -83,6 +83,102 @@ function ProviderBadge({ provider }) {
   return <Dash />;
 }
 
+// The way the account was made, then any other sign-in joined to it because it
+// carried the same address — one person, however they come in.
+function SignInBadges({ user }) {
+  const linked = user.linked_providers || [];
+  if (!linked.length) return <ProviderBadge provider={user.provider} />;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1" title="Joined because they share an email address">
+      <ProviderBadge provider={user.provider} />
+      {linked.map(p => <ProviderBadge key={p} provider={p} />)}
+    </span>
+  );
+}
+
+const PROVIDER_NAMES = { google: 'Google', facebook: 'Facebook', local: 'email and password' };
+
+// A Google or Facebook sign-in that came without an address (Facebook gives
+// none for somebody who joined it with a phone number). Such an account
+// cannot be emailed or matched to the directory until they add one.
+function NoEmailBadge() {
+  return (
+    <span
+      className="inline-block text-xs px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200"
+      title="Their sign-in gave no email address. They have been asked to add one; until then they cannot be emailed or matched to the directory."
+    >
+      No email
+    </span>
+  );
+}
+
+// Google or Facebook sign-ins that share an address with an existing account.
+// Each one waits here until an admin says it is the same person: approving
+// lets that sign-in into the account, with everything it can see and do. The
+// server refuses an admin approving one on their own account, so the button
+// is not offered for those.
+function LinkRequests({ requests, currentUserId, busyId, onDecide }) {
+  if (!requests.length) return null;
+  return (
+    <section className="card border border-amber-200 bg-amber-50" aria-labelledby="link-requests-heading">
+      <h3 id="link-requests-heading" className="font-semibold text-church-navy mb-1">
+        Sign-ins waiting to be joined to an account
+      </h3>
+      <p className="text-xs text-gray-600 mb-3">
+        Each of these used an email address that already belongs to somebody&apos;s account. Approve only
+        if you are sure it is the same person — the account holder has been emailed, and approving gives
+        this sign-in everything their account can do.
+      </p>
+      <ul className="space-y-2">
+        {requests.map(r => {
+          const own  = r.user_id === currentUserId;
+          const busy = busyId === r.id;
+          return (
+            <li key={r.id} className="bg-white rounded-lg border border-amber-100 px-3 py-2 flex items-center gap-3 flex-wrap">
+              <div className="flex-1 min-w-[12rem] text-sm">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <ProviderBadge provider={r.provider} />
+                  <span className="text-gray-700">{r.email}</span>
+                </div>
+                <div className="text-xs text-gray-500 mt-1">
+                  wants to join <strong className="text-church-navy">{r.account_name}</strong>
+                  {' '}({r.account_email || 'no address'}, signs in with {PROVIDER_NAMES[r.account_provider] || r.account_provider})
+                  {r.created_at && <> · asked {formatDateTime(r.created_at)}</>}
+                </div>
+                {own && (
+                  <div className="text-xs text-amber-800 mt-1">
+                    This is your own account — another admin has to approve it.
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {!own && (
+                  <button
+                    onClick={() => onDecide(r, 'approve')}
+                    disabled={busy}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-church-navy text-white hover:bg-church-navy/90 disabled:opacity-50"
+                    aria-label={`Approve ${PROVIDER_NAMES[r.provider] || r.provider} sign-in for ${r.account_name}`}
+                  >
+                    Approve
+                  </button>
+                )}
+                <button
+                  onClick={() => onDecide(r, 'decline')}
+                  disabled={busy}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                  aria-label={`Decline ${PROVIDER_NAMES[r.provider] || r.provider} sign-in for ${r.account_name}`}
+                >
+                  Decline
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 function Avatar({ user, size = 36 }) {
   const [imgError, setImgError] = useState(false);
 
@@ -216,8 +312,8 @@ const COLUMNS = [
     key:    'email',
     label:  'Email',
     filter: { type: 'text' },
-    text:   u => u.email || '',
-    render: u => u.email ? <span className="text-gray-600">{u.email}</span> : <Dash />,
+    text:   u => u.email || 'No email',
+    render: u => u.email ? <span className="text-gray-600">{u.email}</span> : <NoEmailBadge />,
   },
   {
     key:    'role',
@@ -244,7 +340,7 @@ const COLUMNS = [
     filter: { type: 'select', options: PROVIDERS },
     text:   u => u.provider || '',
     match:  'exact',
-    render: u => <ProviderBadge provider={u.provider} />,
+    render: u => <SignInBadges user={u} />,
   },
   {
     key:    'directory',
@@ -664,6 +760,13 @@ function UserDetail({ user, currentUserId, people, busy, onSetRole, onSetAreas, 
                   ? 'They have not opened the confirmation email yet, so they cannot sign in even once you approve them. You can still approve now — it will be waiting for them.'
                   : 'Until you approve them they see only a page saying they are waiting, with the admins\' cellphone numbers to call. Approving is also where you say who they are in the member directory.'}
               </p>
+              {!user.email && user.provider !== 'local' && (
+                <p className="text-xs text-orange-800 mt-1">
+                  Their {PROVIDER_NAMES[user.provider] || 'sign-in'} gave no email address, so they could not be matched to the
+                  directory and will not be emailed when you approve them. They have been asked to add one. You can
+                  still approve them now and pick their directory entry yourself; let them know in person.
+                </p>
+              )}
               <button
                 type="button"
                 onClick={() => onApproveRequest(user.id)}
@@ -679,7 +782,7 @@ function UserDetail({ user, currentUserId, people, busy, onSetRole, onSetAreas, 
           <dl className="grid grid-cols-2 gap-3 text-xs">
             <div>
               <dt className="text-gray-400 uppercase tracking-wide">Signed in with</dt>
-              <dd className="mt-1"><ProviderBadge provider={user.provider} /></dd>
+              <dd className="mt-1"><SignInBadges user={user} /></dd>
             </div>
             <div>
               <dt className="text-gray-400 uppercase tracking-wide">Joined</dt>
@@ -1001,6 +1104,8 @@ export default function UsersView({ currentUser }) {
   const [approveError, setApproveError] = useState('');
   const [filters, setFilters]   = useState({});
   const [sort, setSort]         = useState({ key: 'role', dir: 'asc' });
+  const [linkRequests, setLinkRequests] = useState([]);
+  const [linkBusyId, setLinkBusyId]     = useState(null);
 
   const [visibleKeys, setVisibleKeys] = useCookieState(COLUMN_COOKIE, DEFAULT_KEYS, { revive: reviveColumns });
 
@@ -1020,11 +1125,14 @@ export default function UsersView({ currentUser }) {
     Promise.all([
       fetch('/api/auth/users').then(r => r.json()),
       fetch('/api/records/directory?limit=2000&sort=name&dir=asc').then(r => r.json()).catch(() => ({ rows: [] })),
+      // Only ever a short list, and the page is still useful without it.
+      fetch('/api/auth/link-requests').then(r => r.json()).catch(() => ({ requests: [] })),
     ])
-      .then(([usersJson, dirJson]) => {
+      .then(([usersJson, dirJson, linkJson]) => {
         if (!usersJson.success) throw new Error(usersJson.error);
         setUsers(usersJson.users);
         setPeople(dirJson.rows ?? []);
+        setLinkRequests(Array.isArray(linkJson?.requests) ? linkJson.requests : []);
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
@@ -1136,6 +1244,25 @@ export default function UsersView({ currentUser }) {
     load();
   }
 
+  async function decideLink(req, decision) {
+    setNotice('');
+    setLinkBusyId(req.id);
+    try {
+      const res  = await fetch(`/api/auth/link-requests/${req.id}/${decision}`, { method: 'PATCH' });
+      const json = await res.json();
+      if (!json.success) {
+        setNotice(json.error || 'Could not save that decision.');
+        return;
+      }
+      setLinkRequests(list => list.filter(r => r.id !== req.id));
+      if (json.user) setUsers(list => list.map(u => (u.id === json.user.id ? { ...u, ...json.user } : u)));
+    } catch {
+      setNotice('Could not save that decision.');
+    } finally {
+      setLinkBusyId(null);
+    }
+  }
+
   function handleSort(key) {
     setSort(s => s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
   }
@@ -1206,6 +1333,13 @@ export default function UsersView({ currentUser }) {
           <button onClick={() => setNotice('')} className="underline text-xs ml-3">dismiss</button>
         </div>
       )}
+
+      <LinkRequests
+        requests={linkRequests}
+        currentUserId={currentUser.id}
+        busyId={linkBusyId}
+        onDecide={decideLink}
+      />
 
       {pendingCount > 0 && (
         <button

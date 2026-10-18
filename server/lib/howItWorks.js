@@ -57,9 +57,10 @@ const SECTIONS = [
       { chart: flow('Getting an account', ['You sign up', 'You confirm your email', 'An admin approves you', 'You see the portal']) },
       { p: 'The menu across the top groups the pages: **Worship**, **Our Church Family**, **Grow** and **My Church**. Whoever looks after part of the site also gets **Church Office**, with the pages for what they look after, and admins get **Admin** as well. On a phone, the same menu opens from the button at the top of the screen. Every page works on a phone; there is nothing to install.' },
       { list: [
-        '**My Church → My Household & Preferences** — keep your own details current (and your household\'s), and say which worship jobs you are glad to do, willing to do, or would rather not.',
+        '**My Church → My Household & Preferences** — keep your own details current (and your household\'s), and say which worship jobs you are glad to do, willing to do, or would rather not. **Add the directory to my phone** there puts everybody in the member directory into your phone\'s contacts, with family photos: on an iPhone, tap it in Safari and choose **Add All Contacts**; on Android, open the downloaded file with Contacts. Please keep those details to yourself.',
         '**My Church → My Inbox** — anything waiting on you, such as a guest to follow up with, in one list.',
         'The **bell** at the top — what has happened that you have not seen yet: a meeting posted in your group, a reply, a request you made being answered. Choosing one takes you to it.',
+        '**When somebody else changes something that concerns you** — puts you down for a Sunday, a month of communion preparation or a sign-up; takes you off one; moves its date; cancels it — you are told on the bell and by email. So is whoever was counting on you, if you take your own name off something they keep. Nobody is told about what they did themselves.',
       ] },
     ],
   },
@@ -130,6 +131,24 @@ const SECTIONS = [
       { p: 'A week before your month begins you are emailed a reminder. If you sign up (or are put down) less than a week before, the reminder comes straight away.' },
       { p: 'Whoever holds **Communion Preparation** starts each year\'s list with **Start the list** — this year\'s or up to two years ahead — and can put anybody\'s name against a month, or clear one, when somebody says so in person. A name that matches the member directory is reminded at the address the directory has.' },
       { chart: flow('A month of communion preparation', ['The keeper starts the year', 'You sign up for a month', 'A reminder a week before', 'You prepare that month']) },
+    ],
+  },
+  {
+    id: 'rotations', title: 'Rotations', audience: 'everyone',
+    blocks: [
+      { p: '**Our Church Family → Rotations** keeps track of anything the church takes in turns — teaching a class, hosting a baby shower — so nobody has to remember who went last. Each rotation is a line of people, and the first one in line is **next up**. If you are next, the rotation says so, and you will have had an email and a notification.' },
+      { p: 'A rotation\'s **coordinators** run it. When a turn comes round they **give the turn** to whoever is next (with a date and a note if they like), and that person goes to the back of the line. If she cannot do it this time and somebody else steps in, the turn is given to the one who stepped in, and she keeps her place at the front. A turn with a date still to come is shown as **upcoming**; cancelling it puts that person back at the front.' },
+      { list: [
+        '**Send to the back** — somebody passes this time without taking a turn.',
+        '**Sitting out** — somebody keeps their place but is passed over until they are back (a new baby, a busy season).',
+        '**Move up / Move down** — change the order. Changing the order tells nobody.',
+        '**Let them know** — email whoever is next up straight away.',
+      ] },
+      { p: 'Whoever is next up is told automatically whenever the rotation moves on — when a turn is given or somebody is sent to the back — and only once for each time they come to the front.' },
+      { p: 'When a coordinator gives you a turn with a date, you are emailed straight away with the date and any note, and again a week before as a reminder (a turn less than a week away gets just the first email).' },
+      { p: 'Every rotation has its own link. Choose **Copy link** on a rotation to share it or bookmark it; it opens straight on that rotation for anyone signed in.' },
+      { p: 'Whoever holds **Rotations** starts a rotation, chooses its coordinators from the member directory, and can retire one (it is hidden but kept) or delete it.' },
+      { chart: flow('A turn on a rotation', ['You come to the front', 'You are emailed', 'Coordinator gives turn', 'You go to the back']) },
     ],
   },
   {

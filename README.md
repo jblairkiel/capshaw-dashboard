@@ -151,6 +151,76 @@ Some smaller guardrails around the same routes:
 The Google and Facebook paths are untouched: those providers vouch for the
 address, so those accounts have nothing to confirm and no password here.
 
+### One person, one account
+
+Whichever way somebody comes in, the same email address is the same account —
+but a matching address is only ever a *suggestion* that it is the same person.
+An admin confirms every join.
+
+- **Registering with a password** for an address that already has an account —
+  made any way, or carried by a Google or Facebook sign-in joined to it (or
+  waiting to be) — makes nothing new; the mailbox owner is told how they
+  already sign in.
+- **Google or Facebook for the first time** with an address an account here
+  already has does **not** sign in, and does not make a second account. It is
+  recorded in `user_identities` as a request, and:
+  - every admin is emailed to confirm it, and
+  - the account holder is emailed too, so a sign-in that is not theirs never
+    waits quietly for somebody to approve it.
+
+  The person is sent back to the sign-in page, told an admin will confirm it,
+  and keeps signing in the way they did before. Trying again changes nothing
+  and sends no more email.
+- **An admin decides** under *Sign-ins waiting to be joined* on **Admin →
+  Members & Access**:
+  - **Approve** — that sign-in reaches the account from then on (same
+    household, same approval; the account keeps the name and address it was
+    made with). The account holder is emailed, and it is kept in the action
+    history. **An admin can never approve a join to their own account**;
+    another admin has to.
+  - **Decline** — that sign-in stays out, and does not get an account of its
+    own either. An admin can remove a declined request to let it ask again.
+- **The owner address** (`ADMIN_EMAIL`) joins straight away, since it is let in
+  on any sign-in anyway and may have nobody else to approve it.
+- **An address the provider says is unconfirmed** (Google reports this) is
+  never used to find an account — it gets a new, pending one as before.
+- **A password account still waiting on its confirmation email** is untouched
+  while the request waits. Once approved, it counts as confirmed (the provider
+  proved the address) and its password is cleared, because anybody could have
+  typed the address into the sign-up form; *Forgot your password?* sets a new
+  one.
+
+Admins see every approved way an account signs in as badges in the **Sign-in**
+column. Accounts that were already duplicated before this are not merged
+automatically — remove the spare one from **Admin → Members & Access**.
+
+The endpoints, all admin-only: `GET /api/auth/link-requests[?status=pending|approved|declined]`,
+`PATCH /api/auth/link-requests/:id/approve`, `PATCH /api/auth/link-requests/:id/decline`
+and `DELETE /api/auth/link-requests/:id`.
+
+### A Google or Facebook sign-in with no email address
+
+Facebook gives no address for somebody who joined it with a phone number, or
+who declines to share it. (Signing in with Facebook asks again for the email
+permission each time — `auth_type=rerequest` — in case it was declined.) Such
+an account cannot be matched to the directory or emailed, so:
+
+- **The waiting page asks for one.** `POST /api/auth/add-email` mails a
+  confirmation link to it (the same 48-hour link, and the same
+  `GET /api/auth/verify-email`, as a password account). Until it is opened the
+  address sits in `users.pending_email` and is not the account's.
+- **Opening the link** makes it the account's confirmed address and, if the
+  account is not linked to the directory yet, links it to the one entry with
+  that address.
+- **An address another account already has** is never added. The answer is the
+  same, so the form cannot be used to find out who has an account; the owner of
+  that address is emailed instead, and told the church office can join the two
+  sign-ins. The same check runs again when the link is opened.
+- **An admin viewing the portal as them** cannot add one on their behalf.
+- **Admins** see a *No email* badge in **Admin → Members & Access**, with a note
+  on the account explaining it. Approving still works; pick their directory
+  entry by hand and let them know in person, since there is nowhere to email.
+
 ---
 
 ## Roles & Areas
@@ -182,6 +252,7 @@ implicitly, and nobody else holds one until an admin grants it.
 | `calendar` | Church Calendar | Add and edit dated events |
 | `directory` | Member Directory | Edit anybody's directory entry, and add people who are not in it yet |
 | `church-groups` | Church Groups | Create the congregation's small groups (or generate a whole set at once), retire them, and appoint each group's leader |
+| `rotations` | Rotations | Start a rotation for anything taken in turns, choose its coordinators, and retire or delete it — see [Rotations](#rotations) |
 | `mail-groups` | Email Groups | Decide who is in each distribution group, and send to them |
 | `bulletin` | Weekly Newsletter | Write each week's prayer lists and offering, and export the newsletter as Word or PDF |
 | `contributions` | Contributions | Record each week's contribution total, correct earlier weeks, and import them from a CSV — see [Contributions](#contributions) |
@@ -685,6 +756,72 @@ because nobody ever heard of it.
 
 ---
 
+## Rotations
+
+**Our Church Family → Rotations** is for anything the church takes in turns —
+teaching the ladies' class, hosting a baby shower — so nobody has to remember
+who went last (`server/lib/rotations.js`, `server/routes/rotations.js`).
+
+Each rotation is an ordered line of people from the member directory
+(`rotation_members.position`):
+
+| | |
+|---|---|
+| **Next up** | The first person in the line who is not sitting out |
+| **Give a turn** | Writes it to `rotation_turns` (date and note optional) and sends that person to the back. Usually whoever is next up; when somebody else steps in, *they* go to the back and next up keeps their place |
+| **Upcoming / History** | A turn dated after today is upcoming. Cancelling an upcoming turn puts that person back at the front; removing an old one only takes it out of the history |
+| **Send to the back** | Passing without a turn — nothing is written down |
+| **Sitting out** | Keeps their place, but is passed over until they are back in |
+| **Reorder** | Move up / down. Tells nobody |
+
+A turn keeps the name it was given under, so the history still reads properly
+after somebody leaves the directory.
+
+**Who does what.** Everybody signed in sees every active rotation. Whoever holds
+the `rotations` area starts one, chooses its **coordinators** (directory people,
+matched to an account by `users.directory_id`, as group leaders are), and can
+retire it (hidden but kept) or delete it with its history. A coordinator runs
+only their own: the line, its order, its turns, and its name and description.
+
+**Telling whoever is next.** When a rotation moves on — a turn is given, or
+somebody is sent to the back — whoever is next up then is emailed
+(`server/mail/rotations.js`, context `rotation:<id>:next-up`) and gets a
+notification in the bell. `rotations.notified_directory_id` remembers who was
+last told, so one wait is one email however often the rotation is touched.
+Setting a rotation up, reordering it and sitting somebody out tell nobody; a
+coordinator's **Let them know** tells whoever is next up straight away. The
+address is the directory entry's, else a linked account's; somebody with
+neither is shown as *No email* to the coordinators.
+
+**Telling somebody about their turn.** Two more messages, each an email and a
+bell notification:
+
+- **Given a turn** (`rotation:<id>:turn:<turnId>:given`) — sent when a
+  coordinator gives somebody a turn dated today or later: what, when and the
+  note. A turn written down after the fact (no date, or a past one) tells
+  nobody, and nor does a coordinator giving themselves a turn.
+- **Reminder** (`rotation:<id>:turn:<turnId>:reminder`) — a week before a dated
+  turn, from the same 15-minute timer as the other reminders
+  (`server/mail/rotations.js` → `tick`). Each is claimed on the turn
+  (`rotation_turns.reminded_at`) before it is sent, so a restart never sends it
+  twice. A turn given less than a week ahead is claimed when it is given, since
+  the first message already said when. A cancelled turn, a turn on a retired
+  rotation, and a turn whose day has come get none; somebody with no address
+  or account is tried again on the next tick.
+
+**Permanent links.** Each rotation has its own address,
+`/?page=rotations&rotation=<id>`. The address bar holds it while the rotation
+is open (as Sign-Ups does), **Copy link** on the rotation copies it, and every
+rotation email links to it. A link to a rotation that has since been deleted
+says so and offers the list instead.
+
+The endpoints, under `/api/rotations`: `GET /`, `GET /people`, `GET /:id`;
+for the area, `POST /`, `DELETE /:id` and `PUT /:id/coordinators`; for a
+coordinator, `PATCH /:id`, `POST /:id/members`, `DELETE /:id/members/:directoryId`,
+`PATCH /:id/members/:directoryId` (sitting out), `POST /:id/members/:directoryId/back`,
+`PUT /:id/order`, `POST /:id/turns`, `DELETE /:id/turns/:turnId[?requeue=1]` and
+`POST /:id/remind`. Every change is in the action history under **Rotations**.
+
 ## Comments & Notifications
 
 ### Comments on any event
@@ -732,6 +869,40 @@ saved rather than when a mail server answers.
 | `group-membership` | The person added to a group, or made its leader |
 | `bug-report-new` | Every admin, when somebody files a bug report |
 | `bug-report-status` | Whoever filed it, when an admin moves it through triage |
+| `serving-changed` | Whoever the schedule keeper puts on a slot, takes off it, or whose slot moves |
+| `communion-prep-changed` | Whoever the keeper puts down for a month or takes off it; the keeper, when a member takes their own name off |
+| `signup-changed` | Whoever is put on or taken off a sign-up by somebody else, or whose date moves or list goes; whoever made the list, when somebody takes their own name off |
+| `group-changed` | Whoever is taken off a group's roll; the whole roll when a group is retired or deleted |
+| `rotation-changed` | Whoever is taken off a rotation, or whose turn still to come is cancelled |
+| `areas-changed` | A member an admin gives an area to, or takes one from |
+
+### Telling the person a change concerns
+
+Whenever one person does something another is counting on — or now has to count
+on — that person is told, on the bell and by email, from `server/mail/notices.js`:
+
+| Page | What | Who is told |
+|---|---|---|
+| Serving Schedule | The keeper writes a name into a slot, changes it, moves the slot, or removes it | Whoever is put in, and whoever is taken out |
+| Communion Preparation | The keeper puts somebody down for a month, or replaces or clears them | That person |
+| Communion Preparation | A member takes their own name off | Whoever keeps the list (admins, if nobody does) |
+| Sign-Ups | Somebody else puts your name down or takes it off | You |
+| Sign-Ups | You take your own name off | Whoever made the list |
+| Sign-Ups | A date you are on moves, or the list is deleted | Everybody on it |
+| Church Groups | Taken off a roll; a group retired or deleted | The member(s) |
+| Church Groups | A posted meeting deleted rather than cancelled | The roll, exactly as a cancellation |
+| Church Groups | Somebody drops what they were bringing | The leaders — or the person, if a leader dropped it for them |
+| Rotations | Taken off a rotation; a turn still to come cancelled | That person |
+| Members & Access | An area given or taken away | The member, with what the area is |
+
+The same rules everywhere: nobody is told about their own doing; a change to
+something already past (a Sunday gone, a month over, an old turn) tells nobody;
+a page that keeps only a typed name finds the person only when exactly one
+directory entry has that name; and a notice never stops a change from saving.
+The email goes to the directory address, else a linked account's; somebody with
+neither still gets the bell if they have an account. Each page's notices are
+their own line on the Emails page (`notice:<page>:…`), so Email Delivery can
+switch them separately.
 
 Two things it deliberately does not do: nobody is ever notified about their own
 doing, and opening the panel does not mark everything read — reading a list is
@@ -804,6 +975,19 @@ the same address, and each person's worship role preferences.
 A *household* is everyone sharing a street address — the same grouping the
 directory shows as a family. Someone with no address on file is a household of
 one, so a blank address never pulls in strangers.
+
+**The directory on your phone.** Any approved member can choose **Add the
+directory to my phone** here. `GET /api/profile/directory.vcf`
+(`server/lib/directoryVcard.js`) answers with every named directory entry as
+one vCard 3.0 file — name (split into given and family name, so phones sort it
+properly), cell and home phone, email, address, and the family photo when it is
+a JPEG, PNG or GIF of 512 KB or less — each with the church as its organisation
+and category, and a `UID` from the directory id. Opening it on an iPhone offers
+**Add All Contacts**; Android imports it from Contacts. Every download is
+written to the action history under the directory area, with how many contacts
+it held, and the terms of service and privacy policy say members may keep the
+directory in their own phone but must not pass it on. A `pending` account is
+refused.
 
 **Gender** is asked here because this congregation rosters the worship jobs
 among its men. It is chosen by the person (or by the directory area on their

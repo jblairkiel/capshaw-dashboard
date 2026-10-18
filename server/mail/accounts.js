@@ -197,6 +197,114 @@ compose.approved = ({ user, personName }) => {
   return { subject: 'Your Capshaw member portal account is ready', body };
 };
 
+// ─── Joining a second sign-in to an existing account ──────────────────────────
+
+const PROVIDER_NAME = { google: 'Google', facebook: 'Facebook' };
+
+function howAccountSignsIn(provider) {
+  return PROVIDER_NAME[provider] || 'an email address and password';
+}
+
+compose.linkAwaitingApproval = ({ account, provider, email }) => ({
+  subject: `Confirm a ${PROVIDER_NAME[provider] || provider} sign-in for ${account.name}`,
+  body: [
+    `Somebody signed in with ${PROVIDER_NAME[provider] || provider} using an email address that`,
+    `already belongs to ${account.name}'s account. Nothing has been joined yet:`,
+    'until an admin confirms it is the same person, that sign-in cannot reach',
+    'the account.',
+    '',
+    `  Existing account: ${account.name} <${account.email || '(no address)'}>`,
+    `  Signs in with:    ${howAccountSignsIn(account.provider)}`,
+    `  New sign-in:      ${PROVIDER_NAME[provider] || provider}, as ${email}`,
+    '',
+    `${account.name} has been sent a note about it too. If you are not sure`,
+    'it was them, ask before approving — approving gives that sign-in',
+    'everything the account can see and do.',
+    '',
+    `Approve or decline it here: ${clientUrl()} → Admin → Members & Access`,
+    SIGNATURE,
+  ].join('\n'),
+});
+
+compose.linkRequested = ({ name, provider }) => ({
+  subject: `Somebody signed in with ${PROVIDER_NAME[provider] || provider} using your address`,
+  body: [
+    `Hello ${name || 'there'},`,
+    '',
+    `Somebody just signed in to the Capshaw member portal with ${PROVIDER_NAME[provider] || provider},`,
+    'using the email address on your account.',
+    '',
+    'If it was you, there is nothing to do: an admin will confirm it, and you',
+    `will get another email when you can sign in with ${PROVIDER_NAME[provider] || provider} as well.`,
+    'Until then, keep signing in the way you always have.',
+    '',
+    'If it was not you, please let the church office know so they can decline',
+    'it. Nobody can reach your account this way until an admin approves it.',
+    SIGNATURE,
+  ].join('\n'),
+});
+
+compose.linkApproved = ({ name, provider }) => ({
+  subject: `You can now sign in with ${PROVIDER_NAME[provider] || provider}`,
+  body: [
+    `Hello ${name || 'there'},`,
+    '',
+    `An admin has confirmed that your ${PROVIDER_NAME[provider] || provider} sign-in is you, and joined it`,
+    'to your Capshaw member portal account. You can sign in either way now —',
+    'it is the same account, with the same household and preferences.',
+    '',
+    `  ${clientUrl()}`,
+    '',
+    'If this was not you, please let the church office know straight away.',
+    SIGNATURE,
+  ].join('\n'),
+});
+
+// ─── Adding an address to a Google or Facebook account ────────────────────────
+
+compose.confirmAddedAddress = ({ name, token, via }) => ({
+  subject: 'Confirm the email address for your Capshaw member portal account',
+  body: [
+    `Hello ${name || 'there'},`,
+    '',
+    `You signed in to the Capshaw Church of Christ member portal with ${PROVIDER_NAME[via] || 'your account'}, which`,
+    'did not give us an email address, and asked to add this one.',
+    '',
+    'Please confirm it by opening this link:',
+    '',
+    `  ${verifyUrl(token)}`,
+    '',
+    'The link is good for 48 hours. Once it is done we can email you about your',
+    'account, including when it is approved, and connect it to your entry in the',
+    'member directory.',
+    '',
+    'If this was not you, simply ignore this message. The address is not added',
+    'to anything unless the link is opened.',
+    SIGNATURE,
+  ].join('\n'),
+});
+
+compose.addressAlreadyInUse = ({ name, provider, via }) => ({
+  subject: 'You already have a Capshaw member portal account',
+  body: [
+    `Hello ${name || 'there'},`,
+    '',
+    `Somebody who signed in to the Capshaw Church of Christ member portal with ${PROVIDER_NAME[via] || 'another account'}`,
+    'asked to add this email address to their account. It already belongs to',
+    `your account, which signs in with ${howAccountSignsIn(provider)}, so it has not been added.`,
+    '',
+    'If it was you, keep signing in the way you always have:',
+    '',
+    `  ${clientUrl()}`,
+    '',
+    `If you would like to sign in with ${PROVIDER_NAME[via] || 'that account'} as well, ask the church office`,
+    'to join the two.',
+    '',
+    'If it was not you, nothing has changed and there is nothing to do.',
+    SIGNATURE,
+  ].join('\n'),
+});
+
 // ─── To the person registering ────────────────────────────────────────────────
 
 function confirmAddress({ name, email, token }) {
@@ -216,6 +324,26 @@ function addressAlreadyRegistered({ email, name, provider }) {
     to: [{ email, name: name || '' }],
     ...compose.addressAlreadyRegistered({ name, provider }),
     context: 'account:duplicate',
+    realRecipient: true,
+  });
+}
+
+// A Google or Facebook account that came without an address, adding one.
+function confirmAddedAddress({ name, email, token, via }) {
+  return mailer.send({
+    to: [{ email, name: name || '' }],
+    ...compose.confirmAddedAddress({ name, token, via }),
+    context: 'account:add-email',
+    realRecipient: true,
+  });
+}
+
+// Sent instead, when the address it asked for already belongs to an account.
+function addressAlreadyInUse({ email, name, provider, via }) {
+  return mailer.send({
+    to: [{ email, name: name || '' }],
+    ...compose.addressAlreadyInUse({ name, provider, via }),
+    context: 'account:add-email-in-use',
     realRecipient: true,
   });
 }
@@ -265,6 +393,42 @@ function awaitingApproval({ user }) {
   });
 }
 
+// Sent once, when a Google or Facebook sign-in first turns up on an address an
+// account already has. The account holder hears about it too (linkRequested),
+// so a sign-in that is not theirs never waits quietly for somebody to approve.
+function linkAwaitingApproval({ account, provider, email }) {
+  const recipients = admins();
+  if (!recipients.length) {
+    console.log(`[accounts] a ${provider} sign-in for ${account.email} is waiting to be joined but no admin has an address on file`);
+    return [];
+  }
+  return mailer.send({
+    to: recipients,
+    ...compose.linkAwaitingApproval({ account, provider, email }),
+    context: `account:${account.id}:link-awaiting-approval`,
+  });
+}
+
+function linkRequested({ account, provider }) {
+  if (!account.email) return [];
+  return mailer.send({
+    to: [{ email: account.email, name: account.name }],
+    ...compose.linkRequested({ name: account.name, provider }),
+    context: `account:${account.id}:link-requested`,
+    realRecipient: true,
+  });
+}
+
+function linkApproved({ account, provider }) {
+  if (!account.email) return [];
+  return mailer.send({
+    to: [{ email: account.email, name: account.name }],
+    ...compose.linkApproved({ name: account.name, provider }),
+    context: `account:${account.id}:link-approved`,
+    realRecipient: true,
+  });
+}
+
 // ─── To the person, once an admin has decided ─────────────────────────────────
 
 function approved({ user, personName }) {
@@ -285,9 +449,14 @@ module.exports = {
   RESET_TTL_MINUTES,
   confirmAddress,
   addressAlreadyRegistered,
+  confirmAddedAddress,
+  addressAlreadyInUse,
   resetPassword,
   noPasswordToReset,
   awaitingApproval,
   approved,
+  linkAwaitingApproval,
+  linkRequested,
+  linkApproved,
   admins,
 };

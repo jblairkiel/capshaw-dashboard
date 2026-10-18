@@ -359,13 +359,13 @@ describe('auto-linking at sign-in', () => {
   const { upsertUser } = authRouter;
 
   test('links a new account when exactly one directory email matches', () => {
-    const person = addPerson('Mel Harris', 'Mel@Example.com');
-    const user = upsertUser('google', 'new-1', 'mel@example.com', 'Mel', null);
+    const person = addPerson('Mel Harris', 'Mae@Example.com');
+    const user = upsertUser('google', 'new-1', 'mae@example.com', 'Mel', null);
     expect(user.directory_id).toBe(person.id);
   });
 
   test('leaves the account unlinked when the email matches nobody', () => {
-    addPerson('Mel Harris', 'mel@example.com');
+    addPerson('Mel Harris', 'mae@example.com');
     const user = upsertUser('google', 'new-2', 'someone@example.com', 'Someone', null);
     expect(user.directory_id).toBeNull();
   });
@@ -379,22 +379,22 @@ describe('auto-linking at sign-in', () => {
 
   test('never re-points a link an admin already set', () => {
     const assigned = addPerson('Ray Harris', 'ray@example.com');
-    const byEmail  = addPerson('Mel Harris', 'mel@example.com');
-    const created  = upsertUser('google', 'new-4', 'mel@example.com', 'Mel', null);
+    const byEmail  = addPerson('Mel Harris', 'mae@example.com');
+    const created  = upsertUser('google', 'new-4', 'mae@example.com', 'Mel', null);
     expect(created.directory_id).toBe(byEmail.id);
 
     // An admin corrects it, then that person signs in again.
     db.prepare('UPDATE users SET directory_id=? WHERE id=?').run(assigned.id, created.id);
-    const again = upsertUser('google', 'new-4', 'mel@example.com', 'Mel', null);
+    const again = upsertUser('google', 'new-4', 'mae@example.com', 'Mel', null);
     expect(again.directory_id).toBe(assigned.id);
   });
 
   test('links an existing unlinked account on their next sign-in', () => {
-    const created = upsertUser('google', 'new-5', 'mel@example.com', 'Mel', null);
+    const created = upsertUser('google', 'new-5', 'mae@example.com', 'Mel', null);
     expect(created.directory_id).toBeNull();
 
-    const person = addPerson('Mel Harris', 'mel@example.com');
-    const again  = upsertUser('google', 'new-5', 'mel@example.com', 'Mel', null);
+    const person = addPerson('Mel Harris', 'mae@example.com');
+    const again  = upsertUser('google', 'new-5', 'mae@example.com', 'Mel', null);
     expect(again.directory_id).toBe(person.id);
   });
 });
@@ -405,7 +405,7 @@ describe('a new account from Google or Facebook', () => {
 
   test('tells every admin straight away, once, and says how they signed up', () => {
     db.prepare('DELETE FROM mail_outbox').run();
-    const user = upsertUser('facebook', 'fb-1', 'pat@example.com', 'Pat New', null);
+    const user = upsertUser('facebook', 'fb-1', 'quinn@example.com', 'Pat New', null);
     expect(user.role).toBe('pending');
     const sent = toAdmins();
     expect(sent).toHaveLength(1);
@@ -414,7 +414,7 @@ describe('a new account from Google or Facebook', () => {
     expect(sent[0].body).toMatch(/Signed up with: Facebook/);
 
     // Signing in again is not news.
-    upsertUser('facebook', 'fb-1', 'pat@example.com', 'Pat New', null);
+    upsertUser('facebook', 'fb-1', 'quinn@example.com', 'Pat New', null);
     expect(toAdmins()).toHaveLength(1);
   });
 });

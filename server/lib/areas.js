@@ -97,6 +97,12 @@ const AREAS = [
     description: 'Create the congregation\'s small groups (or generate a whole set at once), retire them, and say who leads each one.',
   },
   {
+    id:    'rotations',
+    label: 'Rotations',
+    page:  'Rotations',
+    description: 'Start a rotation for anything the church takes in turns — teaching a class, hosting a baby shower — appoint who coordinates each one, and retire or delete them.',
+  },
+  {
     id:    'mail-groups',
     label: 'Email Groups',
     page:  'Email Groups',
