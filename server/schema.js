@@ -230,6 +230,16 @@ function initSchema(db) {
     updated_at TEXT    NOT NULL DEFAULT (datetime('now'))
   );
 
+  -- What the schedule keeper chose the last time a month was built (which
+  -- services, whether to fill in names), so the next month's wizard starts
+  -- from there. One row per setting, the value as JSON.
+  CREATE TABLE IF NOT EXISTS serving_settings (
+    key        TEXT    PRIMARY KEY,
+    value      TEXT    NOT NULL DEFAULT 'null',
+    updated_by TEXT    NOT NULL DEFAULT '',
+    updated_at TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS visitors (
     id   INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT    NOT NULL

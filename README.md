@@ -416,6 +416,32 @@ them yet — fill or clear any slot by hand, add a one-off job, and run the
 Monthly Worship Schedule workflow. Running the layout twice never doubles a
 month up: slots that already exist are left alone.
 
+### Build a month: the wizard
+
+**Build a month** (`client/src/components/BuildMonthWizard.jsx`, built on
+`server/lib/rosterBuild.js`) takes the schedule keeper through three steps:
+
+1. **Dates.** The month and its services (`GET /api/serving/months/plan?month=`
+   lists each service's dates and how much of each is already built). Any
+   date can be clicked off: a combined service or a holiday. Fill in names,
+   or lay the month out empty. The special services already planned that
+   month can be filled too.
+2. **Jobs.** Each service's jobs for this month only, starting from the
+   usual ones (Setup → Jobs for each service). Tick *Make these the usual
+   jobs* to keep a change for later months as well.
+3. **Preview.** `POST /api/serving/months` with `preview: true` does the
+   real build inside a transaction and rolls it back, so the keeper sees the
+   whole month as a roster (dates across, jobs down, new names marked)
+   before anything is saved. **Shuffle again** draws a new fill. **Save**
+   sends the preview's `seed` back, so the names saved are the ones shown.
+
+The services, fill and specials choices are remembered (`serving_settings`)
+and the next month's wizard starts from them. Dates left out and a month's
+own jobs are about one month, so they are not remembered. The body
+`POST /api/serving/months` takes is documented in `rosterBuild.build`. Left
+without `fillSpecials`, it fills every open slot in the month, as the
+one-step build did.
+
 ### The month as a PDF
 
 **Email everyone (PDF)** (schedule keeper only, `POST /api/serving/months/notify`)

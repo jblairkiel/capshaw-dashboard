@@ -71,11 +71,12 @@ function rank(slot, ctx, random = Math.random) {
 // will do this job.
 const willDo = c => c.free && (c.level === 'preferred' || c.level === 'willing');
 
-// Fills the month's empty slots, in date order. Returns what it filled.
-function fillOpen(month, { random = Math.random } = {}) {
+// Fills the month's empty slots, in date order — or only those `only` says
+// to. Returns what it filled.
+function fillOpen(month, { random = Math.random, only = () => true } = {}) {
   const ctx = contextFor(month);
   const order = s => blackouts.dateOf(s.month, s.date) || '9999';
-  const open = ctx.slots.filter(s => !s.name.trim() && s.date).sort((a, b) => order(a).localeCompare(order(b)) || a.id - b.id);
+  const open = ctx.slots.filter(s => !s.name.trim() && s.date && only(s)).sort((a, b) => order(a).localeCompare(order(b)) || a.id - b.id);
   const set = db.prepare('UPDATE job_assignments SET name = ? WHERE id = ?');
   const filled = [];
   db.transaction(() => {

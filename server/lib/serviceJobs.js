@@ -52,6 +52,22 @@ function list(specials = []) {
   }));
 }
 
+// A list of jobs checked and put in order, or what is wrong with it. A job may
+// be listed more than once — six communion assists are six slots — but not
+// without limit. Kept in the order of the worship jobs, repeats together.
+function cleanJobs(jobs) {
+  if (!Array.isArray(jobs)) return { error: 'Say which jobs the service needs' };
+  const unknown = jobs.find(j => !WORSHIP_ROLES.includes(j));
+  if (unknown !== undefined) return { error: `"${unknown}" is not one of the worship jobs` };
+  const counts = {};
+  for (const j of jobs) counts[j] = (counts[j] || 0) + 1;
+  const tooMany = Object.entries(counts).find(([, n]) => n > MAX_OF_ONE_JOB);
+  if (tooMany) return { error: `No more than ${MAX_OF_ONE_JOB} of ${tooMany[0]} at one service` };
+  const clean = WORSHIP_ROLES.flatMap(j => Array(counts[j] || 0).fill(j));
+  if (!clean.length) return { error: 'A service needs at least one job' };
+  return { jobs: clean };
+}
+
 // `jobs` null puts a service back on its defaults.
 function setJobs(service, jobs, user) {
   const name = String(service || '').trim();
@@ -61,18 +77,8 @@ function setJobs(service, jobs, user) {
     db.prepare('DELETE FROM service_jobs WHERE service = ?').run(name);
     return { service: name, before, jobs: jobsFor(name) };
   }
-  if (!Array.isArray(jobs)) return { error: 'Say which jobs the service needs' };
-  const unknown = jobs.find(j => !WORSHIP_ROLES.includes(j));
-  if (unknown !== undefined) return { error: `"${unknown}" is not one of the worship jobs` };
-  // A job may be listed more than once — two communion assists are two
-  // slots — but not without limit.
-  const counts = {};
-  for (const j of jobs) counts[j] = (counts[j] || 0) + 1;
-  const tooMany = Object.entries(counts).find(([, n]) => n > MAX_OF_ONE_JOB);
-  if (tooMany) return { error: `No more than ${MAX_OF_ONE_JOB} of ${tooMany[0]} at one service` };
-  // Kept in the order of the worship jobs, repeats together.
-  const clean = WORSHIP_ROLES.flatMap(j => Array(counts[j] || 0).fill(j));
-  if (!clean.length) return { error: 'A service needs at least one job' };
+  const { jobs: clean, error } = cleanJobs(jobs);
+  if (error) return { error };
   db.prepare(`
     INSERT INTO service_jobs (service, jobs, updated_by, updated_at) VALUES (?, ?, ?, datetime('now'))
     ON CONFLICT (service) DO UPDATE SET jobs = excluded.jobs, updated_by = excluded.updated_by, updated_at = excluded.updated_at
@@ -94,4 +100,4 @@ function missing(jobs, have) {
   return out;
 }
 
-module.exports = { SPECIAL_DEFAULT, MAX_OF_ONE_JOB, missing, jobsFor, rolesByService, list, setJobs };
+module.exports = { cleanJobs, SPECIAL_DEFAULT, MAX_OF_ONE_JOB, missing, jobsFor, rolesByService, list, setJobs };
