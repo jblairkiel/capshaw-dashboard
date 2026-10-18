@@ -12,6 +12,8 @@ const router  = express.Router();
 const db      = require('../db');
 const { requireAuth, requireApproved, requireArea, holdsArea } = require('../middleware/auth');
 const actionLog = require('../lib/actionLog');
+const guestMail = require('../mail/guests');
+const mailGroups = require('../mail/groups');
 
 const AREA = 'visitors';
 const manageOnly = requireArea(AREA);
@@ -134,6 +136,16 @@ function cleanFields(body) {
 
 // ─── GET /api/visitors ────────────────────────────────────────────────────────
 
+// GET /api/visitors/mail-lists — where the guests at a service can be emailed,
+// with how many on each list can be reached. Before /:id, which would take it
+// for a guest.
+router.get('/mail-lists', requireApproved, manageOnly, (req, res) => {
+  const lists = mailGroups.listGroups().map(g => ({
+    key: g.key, name: g.name, reachable: mailGroups.recipientsFor(g.key).recipients.length,
+  }));
+  res.json({ success: true, lists, defaultList: guestMail.DEFAULT_LIST });
+});
+
 router.get('/', (req, res) => {
   const search = String(req.query.search || '').trim();
   const rows = search
@@ -219,6 +231,120 @@ router.delete('/:id', requireApproved, manageOnly, (req, res) => {
     before,
   });
   res.json({ success: true });
+});
+
+// ─── Recording who came to a service ──────────────────────────────────────────
+//
+// Guests are written down a service at a time: on Sunday somebody has the
+// cards in hand, some of them from people who have been before and some new.
+// One request carries the lot — the date, the service, and each guest, either
+// one we already have (by id, with any details that have changed) or a new
+// one with their contact details — so the whole service goes in or none of it
+// does.
+//
+// { date, service, guests: [{ id?, name, phone, email, … }], email?: { list } }
+//
+// With `email`, the congregation is told who came once they are saved
+// (server/mail/guests.js). The guests are saved whether or not the email can
+// go, and the answer says which.
+
+router.post('/record', requireApproved, manageOnly, (req, res) => {
+  const date    = String(req.body?.date || '').trim();
+  const service = String(req.body?.service || '').trim();
+  const list    = Array.isArray(req.body?.guests) ? req.body.guests : [];
+
+  if (!date)        return res.status(400).json({ success: false, error: 'Choose the date of the service' });
+  if (!list.length) return res.status(400).json({ success: false, error: 'Add at least one guest' });
+
+  // Checked before anything is written, so a bad entry halfway down the list
+  // does not leave the ones above it recorded and the rest not.
+  const seen = new Set();
+  for (const entry of list) {
+    if (entry?.id != null) {
+      if (!visitorRow(entry.id)) return res.status(404).json({ success: false, error: 'No such guest' });
+      if (seen.has(String(entry.id))) return res.status(400).json({ success: false, error: 'A guest is listed twice' });
+      seen.add(String(entry.id));
+      const values = cleanFields(entry);
+      if ('name' in values && !values.name) return res.status(400).json({ success: false, error: 'A guest needs a name' });
+    } else if (!cleanFields(entry).name) {
+      return res.status(400).json({ success: false, error: 'Every new guest needs a name' });
+    }
+  }
+
+  const hasVisit = db.prepare('SELECT 1 FROM visitor_visits WHERE visitor_id = ? AND date = ? AND service = ?');
+  const addVisit = db.prepare('INSERT INTO visitor_visits (visitor_id, date, service) VALUES (?, ?, ?)');
+  const when     = `${date}${service ? ` (${service})` : ''}`;
+
+  const recorded = db.transaction(() => list.map(entry => {
+    const values = cleanFields(entry);
+    const fields = Object.keys(values);
+
+    if (entry.id == null) {
+      const { lastInsertRowid: id } = db.prepare(
+        `INSERT INTO visitors (${fields.join(', ')}, created_at) VALUES (${fields.map(() => '?').join(', ')}, datetime('now'))`
+      ).run(...fields.map(f => values[f]));
+      addVisit.run(id, date, service);
+      const after = visitorRow(id);
+      actionLog.record(req.user, {
+        area: AREA, action: 'create', entity: 'guest', entityId: id,
+        summary: `Added guest ${after.name}, with us ${when}`,
+        after,
+      });
+      return { id, isNew: true };
+    }
+
+    const before = visitorRow(entry.id);
+    // Only what actually changed is written, so a returning guest picked off
+    // the list without touching their details leaves no edit in the history.
+    const changed = fields.filter(f => values[f] !== String(before[f] ?? ''));
+    if (changed.length) {
+      db.prepare(`UPDATE visitors SET ${changed.map(f => `${f} = ?`).join(', ')} WHERE id = ?`)
+        .run(...changed.map(f => values[f]), before.id);
+      actionLog.record(req.user, {
+        area: AREA, action: 'update', entity: 'guest', entityId: before.id,
+        summary: `Edited guest ${visitorRow(before.id).name}`,
+        before, after: visitorRow(before.id),
+      });
+    }
+
+    // Saving the same service twice should not count them as coming twice.
+    if (!hasVisit.get(before.id, date, service)) {
+      const { lastInsertRowid: visitId } = addVisit.run(before.id, date, service);
+      actionLog.record(req.user, {
+        area: AREA, action: 'create', entity: 'guest visit', entityId: visitId,
+        summary: `Recorded a visit by ${visitorRow(before.id).name} on ${when}`,
+        details: { visitor: before.name, date, service },
+      });
+    }
+    return { id: before.id, isNew: false };
+  }))();
+
+  const visitors = recorded.map(r => withVisits(visitorRow(r.id)));
+
+  let emailed = null;
+  if (req.body?.email) {
+    const listKey = String(req.body.email.list || guestMail.DEFAULT_LIST);
+    const result  = guestMail.sendGuestsRecorded({ date, service, guests: visitors, listKey, from: req.user?.name || '' });
+    if (result.error) {
+      emailed = { error: result.error };
+    } else {
+      emailed = result;
+      actionLog.record(req.user, {
+        area: AREA, action: 'other', entity: 'guest email', entityId: date,
+        summary: `Emailed the guests at ${when} to the ${result.list.name} list (${result.queued})`,
+        details: { list: result.list.key, queued: result.queued, missing: result.missing, guests: visitors.map(v => v.id) },
+      });
+    }
+  }
+
+  res.json({
+    success:  true,
+    date, service,
+    added:    recorded.filter(r => r.isNew).length,
+    returning: recorded.filter(r => !r.isNew).length,
+    visitors,
+    emailed,
+  });
 });
 
 // ─── Visits ───────────────────────────────────────────────────────────────────
