@@ -7,6 +7,10 @@
 // an optional Final Jeopardy — and kept under its own permanent link, so a
 // teacher can find it again next week or send it to someone else.
 //
+// Each game names its author, who wrote it, which is searched and can be
+// filtered on. It starts as whoever uploads it and can be changed, since one
+// teacher may put up a game another wrote.
+//
 // Any approved member can make one. Whoever made a game keeps it (renames it,
 // uploads a corrected board, deletes it); whoever holds Bible Quiz Keeper can
 // do the same to every game. Playing it — teams, scores, which clues are gone
@@ -18,7 +22,7 @@ const { readWorkbook } = require('./xlsxReader');
 const { writeWorkbook } = require('./xlsxWriter');
 
 const AREA = 'bible-quiz';
-const LIMITS = { title: 120, category: 60, clue: 500, answer: 300, categories: 6, clues: 6, search: 100 };
+const LIMITS = { title: 120, author: 80, category: 60, clue: 500, answer: 300, categories: 6, clues: 6, search: 100 };
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 
 const clean = (v, max) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -219,6 +223,7 @@ function shape(row, user, { withBoard = false } = {}) {
   const game = {
     id: row.id,
     title: row.title,
+    author: row.author || row.created_by_name || '',
     createdBy: row.created_by,
     createdByName: row.created_by_name,
     createdAt: row.created_at,
@@ -247,30 +252,46 @@ function get(id, user) {
   return shape(row(id), user, { withBoard: true });
 }
 
-// Newest first. A search looks at the name, who made it, and everything on the
-// board — so "Noah" finds a game with a clue about him, whatever it is called.
-function list(user, query = '') {
+// Newest first. A search looks at the name, the author, who uploaded it, and
+// everything on the board — so "Noah" finds a game with a clue about him,
+// whatever it is called. `author` narrows the list to one author's games.
+function list(user, query = '', { author = '' } = {}) {
   const q = clean(query, LIMITS.search).toLowerCase();
-  const rows = q
-    ? db.prepare(`
-        SELECT * FROM jeopardy_games
-         WHERE lower(title) LIKE ? ESCAPE '\\' OR lower(created_by_name) LIKE ? ESCAPE '\\' OR search_text LIKE ? ESCAPE '\\'
-         ORDER BY (lower(title) LIKE ? ESCAPE '\\') DESC, updated_at DESC, id DESC
-      `).all(...Array(4).fill(`%${q.replace(/[\\%_]/g, c => `\\${c}`)}%`))
-    : db.prepare('SELECT * FROM jeopardy_games ORDER BY updated_at DESC, id DESC').all();
+  const by = clean(author, LIMITS.author).toLowerCase();
+  const where = []; const values = [];
+  if (q) {
+    const like = `%${q.replace(/[\\%_]/g, c => `\\${c}`)}%`;
+    where.push(`(lower(title) LIKE ? ESCAPE '\\' OR lower(author) LIKE ? ESCAPE '\\'
+                 OR lower(created_by_name) LIKE ? ESCAPE '\\' OR search_text LIKE ? ESCAPE '\\')`);
+    values.push(like, like, like, like);
+  }
+  if (by) { where.push('lower(author) = ?'); values.push(by); }
+  const rows = db.prepare(`
+    SELECT * FROM jeopardy_games ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+     ORDER BY ${q ? `(lower(title) LIKE ? ESCAPE '\\') DESC, ` : ''}updated_at DESC, id DESC
+  `).all(...values, ...(q ? [values[0]] : []));
   return rows.map(r => shape(r, user));
 }
 
-function create(user, { title, board }) {
+// Everyone who has written a game, with how many, for the author filter.
+function authors() {
+  return db.prepare(`
+    SELECT author AS name, COUNT(*) AS games FROM jeopardy_games
+     WHERE trim(author) <> '' GROUP BY lower(author) ORDER BY lower(author)
+  `).all();
+}
+
+function create(user, { title, author, board }) {
   const name = clean(title, LIMITS.title);
   if (!name) return { error: 'Give the game a name' };
+  const writer = clean(author, LIMITS.author) || clean(user.name, LIMITS.author);
   const { lastInsertRowid: id } = db.prepare(`
-    INSERT INTO jeopardy_games (title, board, search_text, created_by, created_by_name) VALUES (?, ?, ?, ?, ?)
-  `).run(name, JSON.stringify(board), searchTextOf(board), user.id, user.name || '');
+    INSERT INTO jeopardy_games (title, author, board, search_text, created_by, created_by_name) VALUES (?, ?, ?, ?, ?, ?)
+  `).run(name, writer, JSON.stringify(board), searchTextOf(board), user.id, user.name || '');
   return { game: get(id, user) };
 }
 
-function update(user, id, { title, board }) {
+function update(user, id, { title, author, board }) {
   const before = get(id, user);
   if (!before) return { error: 'No such game', status: 404 };
   if (!before.canEdit) return { error: 'Only whoever made this game can change it', status: 403 };
@@ -279,6 +300,11 @@ function update(user, id, { title, board }) {
     const name = clean(title, LIMITS.title);
     if (!name) return { error: 'Give the game a name' };
     sets.push('title = ?'); values.push(name);
+  }
+  if (author !== undefined) {
+    const writer = clean(author, LIMITS.author);
+    if (!writer) return { error: 'Say who wrote the game' };
+    sets.push('author = ?'); values.push(writer);
   }
   if (board) { sets.push('board = ?', 'search_text = ?'); values.push(JSON.stringify(board), searchTextOf(board)); }
   if (!sets.length) return { error: 'Nothing to change' };
@@ -297,5 +323,5 @@ function remove(user, id) {
 module.exports = {
   AREA, LIMITS, MAX_FILE_BYTES,
   template, boardFrom, readBoard, searchTextOf,
-  canEdit, list, get, create, update, remove,
+  canEdit, list, authors, get, create, update, remove,
 };

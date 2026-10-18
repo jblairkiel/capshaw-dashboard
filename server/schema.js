@@ -1482,6 +1482,9 @@ function initSchema(db) {
       title           TEXT    NOT NULL,
       board           TEXT    NOT NULL DEFAULT '{"categories":[]}',
       search_text     TEXT    NOT NULL DEFAULT '',   -- every word on the board, for the search box
+      -- Who wrote the game, as they want it credited. Not always whoever
+      -- uploaded it (created_by), since one teacher may put up another's.
+      author          TEXT    NOT NULL DEFAULT '',
       created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
       created_by_name TEXT    NOT NULL DEFAULT '',
       created_at      TEXT    NOT NULL DEFAULT (datetime('now')),

@@ -21,7 +21,7 @@ const BOARD = {
   final: { category: 'Apostles', clue: 'He replaced Judas.', answer: 'Who is Matthias?' },
 };
 const GAME = {
-  id: 7, title: 'Genesis review', createdByName: 'Maker', createdAt: '2026-10-18 10:00:00', updatedAt: '2026-10-18 10:00:00',
+  id: 7, title: 'Genesis review', author: 'Brother Lee', createdByName: 'Maker', createdAt: '2026-10-18 10:00:00', updatedAt: '2026-10-18 10:00:00',
   categoryNames: ['The Flood', 'Kings'], clueCount: 3, hasFinal: true, canEdit: true, board: BOARD,
 };
 
@@ -29,7 +29,7 @@ function mockApi(routes = {}) {
   const fetchMock = vi.fn((url, options = {}) => {
     const key = `${options.method || 'GET'} ${String(url).replace(/\?.*$/, '')}`;
     const body = routes[key]?.(url, options) ?? (
-      key === 'GET /api/jeopardy' ? { success: true, games: [GAME] }
+      key === 'GET /api/jeopardy' ? { success: true, games: [GAME], authors: [{ name: 'Brother Lee', games: 1 }] }
         : key === 'GET /api/jeopardy/7' ? { success: true, game: GAME }
           : { success: false, error: `unexpected ${key}` });
     return Promise.resolve({ json: () => Promise.resolve(body) });
@@ -52,11 +52,45 @@ describe('the list of games', () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/jeopardy?q=noah')).toBe(true));
   });
 
+  test('shows who wrote each game, and narrows the list to one author', async () => {
+    const fetchMock = mockApi();
+    render(<JeopardyView />);
+    expect(await screen.findByRole('button', { name: /Genesis review/ })).toHaveTextContent('by Brother Lee');
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Author' }), { target: { value: 'Brother Lee' } });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/jeopardy?author=Brother+Lee')).toBe(true));
+  });
+
+  test("the author's name on a game shows all of their games", async () => {
+    const fetchMock = mockApi();
+    render(<JeopardyView initialGameId={7} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Brother Lee' }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => url === '/api/jeopardy?author=Brother+Lee')).toBe(true));
+    expect(screen.getByRole('combobox', { name: 'Author' })).toHaveValue('Brother Lee');
+  });
+
+  test('a new game is credited to whoever uploads it unless another author is named', async () => {
+    const fetchMock = mockApi({ 'POST /api/jeopardy': () => ({ success: true, game: GAME }) });
+    render(<JeopardyView user={{ id: 1, name: 'Maker' }} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'New game' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByLabelText(/^Author/)).toHaveValue('Maker');
+    type(within(dialog).getByLabelText(/^Author/), 'Brother Lee');
+    type(within(dialog).getByLabelText(/Name of the game/), 'Genesis review');
+    fireEvent.change(within(dialog).getByLabelText(/Filled-in template/), { target: { files: [new File(['x'], 'game.xlsx')] } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save the game' }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(([url, o]) => url === '/api/jeopardy' && o?.method === 'POST');
+      expect(call[1].body.get('author')).toBe('Brother Lee');
+    });
+  });
+
   test('a template with mistakes says which rows to put right', async () => {
     mockApi({
       'POST /api/jeopardy': () => ({ success: false, error: 'The template needs a few things put right', errors: ['Row 2: "Day one." has no answer.'] }),
     });
-    render(<JeopardyView />);
+    render(<JeopardyView user={{ id: 1, name: 'Maker' }} />);
     fireEvent.click(await screen.findByRole('button', { name: 'New game' }));
     const dialog = screen.getByRole('dialog');
     type(within(dialog).getByLabelText(/Name of the game/), 'Creation');
@@ -69,7 +103,7 @@ describe('the list of games', () => {
 
   test('a saved game opens straight away, with the answers hidden until asked for', async () => {
     mockApi({ 'POST /api/jeopardy': () => ({ success: true, game: GAME }) });
-    render(<JeopardyView />);
+    render(<JeopardyView user={{ id: 1, name: 'Maker' }} />);
     fireEvent.click(await screen.findByRole('button', { name: 'New game' }));
     const dialog = screen.getByRole('dialog');
     type(within(dialog).getByLabelText(/Name of the game/), 'Genesis review');

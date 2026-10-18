@@ -46,9 +46,14 @@ router.get('/template', async (req, res) => {
   res.send(buffer);
 });
 
-// GET /api/jeopardy?q= — the saved games, newest first, or those matching a search.
+// GET /api/jeopardy?q=&author= — the saved games, newest first, or those
+// matching a search and/or by one author; and every author, for the filter.
 router.get('/', (req, res) => {
-  res.json({ success: true, games: jeopardy.list(req.user, req.query.q) });
+  res.json({
+    success: true,
+    games: jeopardy.list(req.user, req.query.q, { author: req.query.author }),
+    authors: jeopardy.authors(),
+  });
 });
 
 // GET /api/jeopardy/:id — one game with its board, for playing.
@@ -58,23 +63,25 @@ router.get('/:id(\\d+)', (req, res) => {
   res.json({ success: true, game });
 });
 
-// POST /api/jeopardy (multipart: file, title) — a new game from a filled-in template.
+// POST /api/jeopardy (multipart: file, title, author?) — a new game from a
+// filled-in template. The author is whoever uploads it unless another is named.
 router.post('/', receive, async (req, res) => {
   const read = await boardFromUpload(req);
   if (read.errors) return res.status(400).json({ success: false, error: 'The template needs a few things put right', errors: read.errors });
 
-  const result = jeopardy.create(req.user, { title: req.body?.title, board: read.board });
+  const result = jeopardy.create(req.user, { title: req.body?.title, author: req.body?.author, board: read.board });
   if (result.error) return fail(res, result);
   actionLog.record(req.user, {
     area: jeopardy.AREA, action: 'create', entity: 'jeopardy game', entityId: result.game.id,
-    summary: `Made the Bible Jeopardy game "${result.game.title}"`,
-    details: { categories: result.game.categoryNames, clues: result.game.clueCount },
+    summary: `Made the Bible Jeopardy game "${result.game.title}" by ${result.game.author}`,
+    details: { author: result.game.author, categories: result.game.categoryNames, clues: result.game.clueCount },
   });
   res.status(201).json({ success: true, game: result.game });
 });
 
-// PUT /api/jeopardy/:id (multipart: title?, file?) — rename a game, or replace
-// its board with a corrected template. The link stays the same.
+// PUT /api/jeopardy/:id (multipart: title?, author?, file?) — rename a game,
+// change its author, or replace its board with a corrected template. The link
+// stays the same.
 router.put('/:id(\\d+)', receive, async (req, res) => {
   let board;
   if (req.file) {
@@ -82,14 +89,21 @@ router.put('/:id(\\d+)', receive, async (req, res) => {
     if (read.errors) return res.status(400).json({ success: false, error: 'The template needs a few things put right', errors: read.errors });
     board = read.board;
   }
-  const result = jeopardy.update(req.user, req.params.id, { title: req.body?.title, board });
+  const result = jeopardy.update(req.user, req.params.id, { title: req.body?.title, author: req.body?.author, board });
   if (result.error) return fail(res, result);
 
-  const changed = [board && 'uploaded a new board', result.before.title !== result.game.title && `renamed it from "${result.before.title}"`].filter(Boolean);
+  const changed = [
+    board && 'uploaded a new board',
+    result.before.title !== result.game.title && `renamed it from "${result.before.title}"`,
+    result.before.author !== result.game.author && `changed the author from ${result.before.author || 'nobody'} to ${result.game.author}`,
+  ].filter(Boolean);
   actionLog.record(req.user, {
     area: jeopardy.AREA, action: 'update', entity: 'jeopardy game', entityId: result.game.id,
     summary: `Changed the Bible Jeopardy game "${result.game.title}"${changed.length ? `: ${changed.join(', ')}` : ''}`,
-    details: { before: { title: result.before.title, categories: result.before.categoryNames }, after: { title: result.game.title, categories: result.game.categoryNames } },
+    details: {
+      before: { title: result.before.title, author: result.before.author, categories: result.before.categoryNames },
+      after:  { title: result.game.title, author: result.game.author, categories: result.game.categoryNames },
+    },
   });
   res.json({ success: true, game: result.game });
 });

@@ -3,8 +3,9 @@ import Dialog from '../Dialog';
 import JeopardyPlay from './JeopardyPlay';
 
 // Bible Jeopardy: games built in an Excel template and uploaded with a name.
-// Every game has its own permanent link (?page=bible-class&game=12), and the
-// list can be searched by name, by who made it, or by anything on its board.
+// Every game has its own permanent link (?page=bible-class&game=12), names its
+// author, and the list can be searched by name, author, who uploaded it, or
+// anything on its board, and narrowed to one author's games.
 
 const API = '/api/jeopardy';
 const gameLink = id => `${window.location.origin}/?page=bible-class&game=${id}`;
@@ -55,9 +56,10 @@ function TemplateLink({ className = '' }) {
 
 // ─── Uploading a game, new or corrected ───────────────────────────────────────
 
-function UploadDialog({ game = null, onClose, onSaved }) {
+function UploadDialog({ game = null, user = null, onClose, onSaved }) {
   const isNew = !game;
   const [title, setTitle] = useState(game?.title || '');
+  const [author, setAuthor] = useState(game?.author || user?.name || '');
   const [file, setFile] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -66,10 +68,12 @@ function UploadDialog({ game = null, onClose, onSaved }) {
   async function submit(e) {
     e.preventDefault();
     if (!title.trim()) return setError('Give the game a name');
+    if (!author.trim()) return setError('Say who wrote the game');
     if (isNew && !file) return setError('Choose the filled-in template to upload');
     setBusy(true); setError(''); setDetails([]);
     const body = new FormData();
     body.append('title', title.trim());
+    body.append('author', author.trim());
     if (file) body.append('file', file);
     try {
       const json = await call(isNew ? API : `${API}/${game.id}`, { method: isNew ? 'POST' : 'PUT', body });
@@ -86,7 +90,7 @@ function UploadDialog({ game = null, onClose, onSaved }) {
   return (
     <Dialog
       title={isNew ? 'New Bible Jeopardy game' : `Change ${game.title}`}
-      subtitle={isNew ? 'Fill in the template in Excel, then upload it here with a name.' : 'Rename it, or upload a corrected template. Its link stays the same.'}
+      subtitle={isNew ? 'Fill in the template in Excel, then upload it here with a name.' : 'Rename it, change its author, or upload a corrected template. Its link stays the same.'}
       onClose={onClose}
       width="max-w-lg"
     >
@@ -105,6 +109,12 @@ function UploadDialog({ game = null, onClose, onSaved }) {
           <span className={label}>Name of the game <span className="text-red-400" aria-hidden="true">*</span></span>
           <input autoFocus value={title} maxLength={120} onChange={e => setTitle(e.target.value)}
             placeholder="Genesis review — Noah to Abraham" className={field} />
+        </label>
+
+        <label className="block">
+          <span className={label}>Author <span className="text-red-400" aria-hidden="true">*</span></span>
+          <input value={author} maxLength={80} onChange={e => setAuthor(e.target.value)} placeholder="Who wrote the game" className={field} />
+          <span className="block text-xs text-gray-400 mt-1">Whoever wrote the clues, if that is not you.</span>
         </label>
 
         <label className="block">
@@ -137,7 +147,7 @@ function UploadDialog({ game = null, onClose, onSaved }) {
 
 // ─── One game ─────────────────────────────────────────────────────────────────
 
-function GameDetail({ id, onBack, onChanged, onDeleted }) {
+function GameDetail({ id, user, onBack, onChanged, onDeleted, onAuthor }) {
   const [game, setGame] = useState(null);
   const [error, setError] = useState('');
   const [playing, setPlaying] = useState(false);
@@ -173,8 +183,13 @@ function GameDetail({ id, onBack, onChanged, onDeleted }) {
               {dailies > 0 && ` · ${dailies} Daily Double${dailies === 1 ? '' : 's'}`}
               {game.board.final ? ' · Final Jeopardy' : ''}
             </p>
+            <p className="text-sm text-gray-600 mt-1">
+              By{' '}
+              <button type="button" onClick={() => onAuthor(game.author)} title={`All games by ${game.author}`}
+                className="font-medium text-church-navy underline decoration-dotted hover:text-church-gold">{game.author}</button>
+            </p>
             <p className="text-xs text-gray-400 mt-0.5">
-              Made by {game.createdByName || 'a member'} · {shortDate(game.createdAt)}
+              {game.createdByName && game.createdByName !== game.author ? `Uploaded by ${game.createdByName}` : 'Uploaded'} · {shortDate(game.createdAt)}
               {game.updatedAt !== game.createdAt && ` · changed ${shortDate(game.updatedAt)}`}
             </p>
           </div>
@@ -185,7 +200,7 @@ function GameDetail({ id, onBack, onChanged, onDeleted }) {
           {game.canEdit && (
             <>
               <button type="button" onClick={() => setEditing(true)} className="text-sm px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:border-church-navy">
-                Rename or upload a correction
+                Rename, change the author, or upload a correction
               </button>
               <button type="button" onClick={remove} className="text-sm px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50">Delete</button>
             </>
@@ -227,7 +242,7 @@ function GameDetail({ id, onBack, onChanged, onDeleted }) {
       </div>
 
       {editing && (
-        <UploadDialog game={game} onClose={() => setEditing(false)}
+        <UploadDialog game={game} user={user} onClose={() => setEditing(false)}
           onSaved={updated => { setEditing(false); setGame(updated); onChanged(updated); }} />
       )}
     </div>
@@ -236,37 +251,51 @@ function GameDetail({ id, onBack, onChanged, onDeleted }) {
 
 // ─── The list ─────────────────────────────────────────────────────────────────
 
-export default function JeopardyView({ initialGameId = null }) {
+export default function JeopardyView({ user = null, initialGameId = null }) {
   const [games, setGames] = useState(null);
+  const [authors, setAuthors] = useState([]);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  const [author, setAuthor] = useState('');
   const [openId, setOpenId] = useState(initialGameId);
   const [creating, setCreating] = useState(false);
   const timer = useRef(null);
 
-  const load = useCallback(async (q = '') => {
+  const load = useCallback(async (q = '', by = '') => {
+    const params = new URLSearchParams();
+    if (q.trim()) params.set('q', q.trim());
+    if (by) params.set('author', by);
     try {
-      const json = await call(`${API}${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`);
-      setGames(json.games); setError('');
+      const query = params.toString();
+      const json = await call(`${API}${query ? `?${query}` : ''}`);
+      setGames(json.games); setAuthors(json.authors || []); setError('');
     } catch (err) { setError(err.message); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  const reload = () => load(search, author);
+
+  function chooseAuthor(value) {
+    setAuthor(value);
+    load(search, value);
+  }
   useEffect(() => () => clearTimeout(timer.current), []);
 
   function onSearch(value) {
     setSearch(value);
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => load(value), 250);
+    timer.current = setTimeout(() => load(value, author), 250);
   }
 
   if (openId) {
     return (
       <GameDetail
         id={openId}
-        onBack={() => { setOpenId(null); load(search); }}
-        onChanged={() => load(search)}
-        onDeleted={() => { setOpenId(null); load(search); }}
+        user={user}
+        onBack={() => { setOpenId(null); reload(); }}
+        onChanged={reload}
+        onDeleted={() => { setOpenId(null); reload(); }}
+        onAuthor={name => { setOpenId(null); chooseAuthor(name); }}
       />
     );
   }
@@ -284,20 +313,38 @@ export default function JeopardyView({ initialGameId = null }) {
         </div>
       </div>
 
-      <input
-        type="search"
-        value={search}
-        onChange={e => onSearch(e.target.value)}
-        placeholder="Search names, clues or who made it…"
-        aria-label="Search games"
-        className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-church-navy w-full sm:w-96"
-      />
+      <div className="flex items-center gap-2 flex-wrap">
+        <input
+          type="search"
+          value={search}
+          onChange={e => onSearch(e.target.value)}
+          placeholder="Search names, authors or clues…"
+          aria-label="Search games"
+          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-church-navy w-full sm:w-80"
+        />
+        <select
+          value={author}
+          onChange={e => chooseAuthor(e.target.value)}
+          aria-label="Author"
+          className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-church-navy w-full sm:w-56"
+        >
+          <option value="">All authors</option>
+          {/* A filter chosen from a game's page may not be in the list yet. */}
+          {author && !authors.some(a => a.name.toLowerCase() === author.toLowerCase()) && <option value={author}>{author}</option>}
+          {authors.map(a => <option key={a.name} value={a.name}>{a.name} ({a.games})</option>)}
+        </select>
+        {author && (
+          <button type="button" onClick={() => chooseAuthor('')} className="text-xs text-gray-500 underline hover:text-church-navy">
+            Show every author
+          </button>
+        )}
+      </div>
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       {games === null && !error && <p className="text-sm text-gray-400">Loading…</p>}
       {games?.length === 0 && (
         <p className="card text-center text-sm text-gray-400 py-8">
-          {search.trim() ? 'No games match that search.' : 'No games yet. Download the template to make the first one.'}
+          {search.trim() || author ? 'No games match that search.' : 'No games yet. Download the template to make the first one.'}
         </p>
       )}
 
@@ -308,9 +355,10 @@ export default function JeopardyView({ initialGameId = null }) {
               <button type="button" onClick={() => setOpenId(g.id)}
                 className="card w-full h-full text-left hover:border-church-gold transition-colors">
                 <span className="block font-semibold text-church-navy">{g.title}</span>
+                <span className="block text-sm text-gray-600">by {g.author}</span>
                 <span className="block text-xs text-gray-500 mt-1 line-clamp-2">{g.categoryNames.join(' · ')}</span>
                 <span className="block text-xs text-gray-400 mt-2">
-                  {g.clueCount} clues{g.hasFinal ? ' · Final' : ''} · {g.createdByName || 'a member'} · {shortDate(g.updatedAt)}
+                  {g.clueCount} clues{g.hasFinal ? ' · Final' : ''} · {shortDate(g.updatedAt)}
                 </span>
               </button>
             </li>
@@ -319,8 +367,8 @@ export default function JeopardyView({ initialGameId = null }) {
       )}
 
       {creating && (
-        <UploadDialog onClose={() => setCreating(false)}
-          onSaved={game => { setCreating(false); setOpenId(game.id); load(search); }} />
+        <UploadDialog user={user} onClose={() => setCreating(false)}
+          onSaved={game => { setCreating(false); setOpenId(game.id); reload(); }} />
       )}
     </div>
   );

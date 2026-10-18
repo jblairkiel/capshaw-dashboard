@@ -31,6 +31,7 @@ const GAME = [
 // with a Daily Double each, and a Final.
 const JEOPARDY = {
   title: 'Genesis review',
+  author: 'Sample Teacher',
   categories: [
     ['In the Beginning', [
       [100, 'Made on the first day.', 'What is light?'],
@@ -81,7 +82,7 @@ module.exports = {
       final: JEOPARDY.final,
     };
     insert('jeopardy_games', {
-      title: JEOPARDY.title, board: JSON.stringify(board), search_text: searchTextOf(board), created_by_name: 'Sample data',
+      title: JEOPARDY.title, author: JEOPARDY.author, board: JSON.stringify(board), search_text: searchTextOf(board), created_by_name: 'Sample data',
     }, JEOPARDY.title);
 
     for (const [question, answer] of GAME) {

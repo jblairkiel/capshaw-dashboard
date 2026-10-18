@@ -52,8 +52,9 @@ beforeEach(() => {
   KEEPER = addUser('Keeper', { areas: ['bible-quiz'] });
 });
 
-async function upload(user, title, file) {
-  const req = request(buildApp(user)).post('/api/jeopardy').field('title', title);
+async function upload(user, title, file, author) {
+  let req = request(buildApp(user)).post('/api/jeopardy').field('title', title);
+  if (author !== undefined) req = req.field('author', author);
   return file ? req.attach('file', file, 'game.xlsx') : req;
 }
 
@@ -135,12 +136,12 @@ describe('saving games', () => {
   test('a member uploads a game with a name, and it is kept under its own link', async () => {
     const res = await upload(MAKER, '  Genesis review  ', await workbook({ board: BOARD, final: FINAL }));
     expect(res.status).toBe(201);
-    expect(res.body.game).toMatchObject({ title: 'Genesis review', clueCount: 5, hasFinal: true, createdByName: 'Maker', canEdit: true });
+    expect(res.body.game).toMatchObject({ title: 'Genesis review', author: 'Maker', clueCount: 5, hasFinal: true, createdByName: 'Maker', canEdit: true });
 
     const one = await request(buildApp(OTHER)).get(`/api/jeopardy/${res.body.game.id}`);
     expect(one.body.game.board.categories[0].clues[0].answer).toBe('Who is Noah?');
     expect(one.body.game.canEdit).toBe(false);
-    expect(db.prepare('SELECT summary FROM action_log').get().summary).toBe('Made the Bible Jeopardy game "Genesis review"');
+    expect(db.prepare('SELECT summary FROM action_log').get().summary).toBe('Made the Bible Jeopardy game "Genesis review" by Maker');
   });
 
   test('a game needs a name and a file, and a template with mistakes saves nothing', async () => {
@@ -154,15 +155,40 @@ describe('saving games', () => {
 
   test('searching finds a game by its name, who made it, or anything on its board', async () => {
     await upload(MAKER, 'Genesis review', await workbook({ board: BOARD }));
-    await upload(OTHER, 'Gospels', await workbook({ board: [['Miracles', 100, 'Water into wine.', 'What is Cana?', null]] }));
+    await upload(OTHER, 'Gospels', await workbook({ board: [['Miracles', 100, 'Water into wine.', 'What is Cana?', null]] }), 'Sister Ann');
 
     const find = async q => (await request(buildApp(MAKER)).get('/api/jeopardy').query({ q })).body.games.map(g => g.title);
     expect(await find('')).toEqual(['Gospels', 'Genesis review']);
     expect(await find('genesis')).toEqual(['Genesis review']);
     expect(await find('solomon')).toEqual(['Genesis review']);
-    expect(await find('other')).toEqual(['Gospels']);
+    expect(await find('other')).toEqual(['Gospels']);     // who uploaded it
+    expect(await find('sister')).toEqual(['Gospels']);    // its author
     expect(await find('100%')).toEqual([]);
     expect(await find('answer')).toEqual([]);   // a word in how the board is stored, not on it
+  });
+
+  test('a game can be credited to whoever wrote it, which need not be whoever uploads it', async () => {
+    const { game } = (await upload(MAKER, 'Acts review', await workbook({ board: BOARD }), '  Brother Lee  ')).body;
+    expect(game).toMatchObject({ author: 'Brother Lee', createdByName: 'Maker' });
+
+    const changed = await request(buildApp(MAKER)).put(`/api/jeopardy/${game.id}`).field('author', 'Sister Ann');
+    expect(changed.body.game.author).toBe('Sister Ann');
+    expect(db.prepare("SELECT summary FROM action_log WHERE action = 'update'").get().summary)
+      .toMatch(/changed the author from Brother Lee to Sister Ann/);
+    expect((await request(buildApp(MAKER)).put(`/api/jeopardy/${game.id}`).field('author', ' ')).body.error)
+      .toBe('Say who wrote the game');
+  });
+
+  test('the list can be narrowed to one author, and lists every author with their count', async () => {
+    await upload(MAKER, 'Genesis review', await workbook({ board: BOARD }), 'Brother Lee');
+    await upload(MAKER, 'Exodus review', await workbook({ board: BOARD }), 'brother lee');
+    await upload(OTHER, 'Gospels', await workbook({ board: BOARD }), 'Sister Ann');
+
+    const get = query => request(buildApp(MAKER)).get('/api/jeopardy').query(query);
+    expect((await get({ author: 'Brother Lee' })).body.games.map(g => g.title).sort()).toEqual(['Exodus review', 'Genesis review']);
+    expect((await get({ author: 'Sister Ann', q: 'genesis' })).body.games).toEqual([]);
+    expect((await get({ author: 'Sister Ann', q: 'noah' })).body.games.map(g => g.title)).toEqual(['Gospels']);
+    expect((await get({})).body.authors).toEqual([{ name: 'Brother Lee', games: 2 }, { name: 'Sister Ann', games: 1 }]);
   });
 
   test('whoever made it renames it or uploads a correction, keeping the same link', async () => {
