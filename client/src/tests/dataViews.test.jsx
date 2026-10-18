@@ -519,7 +519,7 @@ describe('ServingSchedule', () => {
     render(<ServingSchedule />);
     expect(await screen.findByRole('button', { name: 'Build a month' })).toBeInTheDocument();
     expect(screen.getByText('Setup ▾')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Email everyone their jobs' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Email everyone (PDF)' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Song Leader: Tom Nelson — change' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Opening Prayer: open — change' })).toHaveTextContent('Open — choose someone');
   });
@@ -599,12 +599,19 @@ describe('ServingSchedule', () => {
       '/months/notify': { success: true, emailed: 3, unreachable: ['Lee Park'] },
     });
     render(<ServingSchedule />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Email everyone their jobs' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Email everyone (PDF)' }));
     expect(confirm).toHaveBeenCalled();
-    expect(await screen.findByText(/Emailed 3 men their jobs for April 2025\. No email address on file for Lee Park\./)).toBeInTheDocument();
+    expect(await screen.findByText(/Emailed 3 men their jobs for April 2025, with the schedule as a PDF\. No email address on file for Lee Park\./)).toBeInTheDocument();
     const call = fetchMock.mock.calls.find(([url, o]) => String(url).endsWith('/months/notify') && o?.method === 'POST');
     expect(JSON.parse(call[1].body)).toEqual({ month: 'April 2025' });
     confirm.mockRestore();
+  });
+
+  test('Download PDF is there for everybody, for the month showing', async () => {
+    mockSchedule();
+    render(<ServingSchedule />);
+    const link = await screen.findByRole('link', { name: 'Download PDF' });
+    expect(link).toHaveAttribute('href', '/api/serving/months/pdf?month=April%202025');
   });
 
   // ─── Time away ──────────────────────────────────────────────────────────────

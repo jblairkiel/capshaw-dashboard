@@ -112,8 +112,10 @@ module.exports = {
 
             // Everyone serving hears what they are down for; everyone who has
             // not opted out gets the whole month.
-            const { unreachable } = notify.schedulePublished({ draft, instanceId: instance.id });
-            notify.monthlyReport({ draft, instanceId: instance.id });
+            // Both carry the month as a PDF.
+            const attachments = [notify.rosterAttachment({ month: draft.month, rows: filled })];
+            const { unreachable } = notify.schedulePublished({ draft, instanceId: instance.id, attachments });
+            notify.monthlyReport({ draft, instanceId: instance.id, attachments });
 
             return {
               data: {

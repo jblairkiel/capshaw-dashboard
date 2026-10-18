@@ -258,17 +258,36 @@ router.get('/assignments/:id/candidates', requireApproved, manageOnly, (req, res
   res.json({ success: true, slot: found.slot, candidates: found.candidates });
 });
 
+// ─── GET /api/serving/months/pdf?month= ──────────────────────────────────────
+// The month as a PDF (lib/rosterPdf.js) — "Download PDF". The schedule is for
+// the whole church family to read, so any approved member may have it.
+
+router.get('/months/pdf', requireApproved, (req, res) => {
+  const month = String(req.query?.month || '').trim();
+  const rows = assignmentsIn(month);
+  if (!month || !rows.length) return res.status(404).json({ success: false, error: `There is no schedule for ${month || 'that month'} yet` });
+  const { rosterPdf, pdfFilename } = require('../lib/rosterPdf');
+  const pdf = rosterPdf({ month, rows: rows.map(({ date, service, job, name }) => ({ date, service, job, name })) });
+  res.set('Content-Type', 'application/pdf');
+  res.set('Content-Disposition', `attachment; filename="${pdfFilename(month)}"`);
+  res.set('Cache-Control', 'private, no-store');
+  res.send(pdf);
+});
+
 // ─── POST /api/serving/months/notify  { month } ───────────────────────────────
-// Once the month is as the schedule keeper wants it: each man down for a job
-// is emailed his own, and everyone who has not opted out gets the whole month.
+// "Email everyone (PDF)". Once the month is as the schedule keeper wants it:
+// each man down for a job is emailed his own, and everyone who has not opted
+// out gets the whole month — both with the month attached as a PDF, open slots
+// and all, so what they print is the schedule as it stands.
 
 router.post('/months/notify', requireApproved, manageOnly, (req, res) => {
   const month = String(req.body?.month || '').trim();
   const rows = assignmentsIn(month).filter(a => a.name.trim());
   if (!rows.length) return res.status(400).json({ success: false, error: `Nobody is down for anything in ${month || 'that month'} yet` });
   const draft = { month, rows: rows.map(({ date, service, job, name }) => ({ date, service, job, name })) };
-  const { queued, unreachable } = notify.schedulePublished({ draft, instanceId: 'roster' });
-  notify.monthlyReport({ draft, instanceId: 'roster' });
+  const attachments = [notify.rosterAttachment({ month, rows: assignmentsIn(month).map(({ date, service, job, name }) => ({ date, service, job, name })) })];
+  const { queued, unreachable } = notify.schedulePublished({ draft, instanceId: 'roster', attachments });
+  notify.monthlyReport({ draft, instanceId: 'roster', attachments });
   mailer.drainOutbox().catch(err => console.error('[mail] drain failed:', err.message));
   actionLog.record(req.user, {
     area: AREA, action: 'update', entity: 'serving schedule', entityId: month,

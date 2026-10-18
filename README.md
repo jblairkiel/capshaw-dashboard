@@ -416,6 +416,25 @@ them yet — fill or clear any slot by hand, add a one-off job, and run the
 Monthly Worship Schedule workflow. Running the layout twice never doubles a
 month up: slots that already exist are left alone.
 
+### The month as a PDF
+
+**Email everyone (PDF)** (schedule keeper only, `POST /api/serving/months/notify`)
+emails each man his own jobs for the month and everyone who has not turned off
+"Monthly schedule summary" the whole month — and both carry the month attached
+as a PDF. The Monthly Worship Schedule workflow attaches the same PDF when it
+publishes. **Download PDF** (`GET /api/serving/months/pdf?month=`) gives any
+approved member the same file.
+
+`server/lib/rosterPdf.js` draws it with pdfkit, as the newsletter is drawn: the
+portal's navy banner and gold rule, then a cream card per service in the order
+they happen (Sunday Worship, Sunday Evening, Wednesday, then anything else; a
+job for the whole month last), each job beside who is doing it — open slots in
+amber as *Needs someone*. It is set large (names 17pt, days 19pt) so it reads
+on a phone or printed for the fridge, and a card is never split across pages.
+It is made synchronously (nothing listens to pdfkit's stream, so the finished
+bytes are read straight out of its buffer), which lets the workflow attach it
+inside its publish step. One stored copy is attached to every message.
+
 **Every other member** sees the roster, and that is all they can do with it —
 there is no self sign-up. A slot gets a name in it two ways, and two ways
 only: the Monthly Worship Schedule workflow publishing a generated draft, or
