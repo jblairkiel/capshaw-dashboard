@@ -6,10 +6,16 @@
 // it reads easily on a phone, printed on the fridge, or held at arm's length in
 // the foyer.
 //
+// The page is landscape and laid out as a duty roster: a table for each
+// service, the jobs down the left and that service's dates across the top, so
+// every Sunday of the month reads side by side and the month fits on a page or
+// two. A name too long for its column wraps onto a second line rather than
+// shrinking.
+//
 // Drawn with pdfkit, as the newsletter is (lib/bulletinPdf.js), so it costs the
 // runtime image nothing but the dependency it already has. pdfkit draws rather
-// than flows, so every card is measured before it is placed: a card never
-// splits across a page, and a page break happens between services.
+// than flows, so every row is measured before it is placed: a row never splits
+// across pages, and a table that runs over carries its header with it.
 
 const PDFDocument = require('pdfkit');
 const blackouts = require('./blackouts');
@@ -26,19 +32,24 @@ const THEME = {
   line:  '#e5dccb',
 };
 
-const PAGE = { width: 612, height: 792 };          // US Letter, portrait
-const M = 40;                                      // margin
+const PAGE = { width: 792, height: 612 };          // US Letter, landscape
+const M = 36;                                      // margin
 const W = PAGE.width - M * 2;
+const BOTTOM = PAGE.height - 34;                   // room for the footer, low in the margin
+// The job names down the left, and at most this many dates across: a run of
+// nights longer than that (a gospel meeting) continues in a second table.
+const JOB_COL = 150;
+const MAX_DATES = 5;
 
 // Large on purpose: these are read by everybody, at every age.
 const SIZE = {
   banner:  30,
-  month:   20,
+  month:   24,
   church:  11,
-  day:     19,
-  service: 14,
-  job:     14,
-  name:    17,
+  service: 20,   // each table's title
+  date:    14,   // the dates across the top
+  job:     14,   // the jobs down the left
+  name:    15,   // who is doing each
   footer:  10,
 };
 
@@ -47,7 +58,7 @@ const SANS    = 'Helvetica';
 const SANS_B  = 'Helvetica-Bold';
 const SANS_I  = 'Helvetica-Oblique';
 
-const CARD = { pad: 14, bar: 6, head: 30, row: 27, gap: 14, jobW: 0.42 };
+const CELL = { padX: 8, padY: 5, head: 28, gap: 16, title: 30 };
 
 function longDay(iso, fallback) {
   if (!iso) return fallback;
@@ -77,60 +88,170 @@ function occasionsOf(draft) {
     || a.first - b.first);
 }
 
-// How tall a card is, from how many lines each row wraps to.
-function measureCard(doc, occasion) {
-  const nameW = W - CARD.bar - CARD.pad * 2 - Math.round((W - CARD.bar - CARD.pad * 2) * CARD.jobW);
-  doc.font(SANS_B).fontSize(SIZE.name);
-  const rows = occasion.rows.map(r => Math.max(CARD.row, doc.heightOfString(r.name || 'Needs someone', { width: nameW }) + 8));
-  return { rows, height: CARD.pad + CARD.head + rows.reduce((s, h) => s + h, 0) + CARD.pad - 6 };
+const shortDay = iso => new Date(`${iso}T12:00:00Z`)
+  .toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' });
+
+// The month as tables: one per service, in the order services come (Sunday
+// Worship, Sunday Evening, Wednesday, then anything else), each with its dates
+// across and its jobs down. A job a service needs twice (two Communion
+// Assists) is two rows. A job that belongs to the month rather than a day is a
+// last, two-column table of its own.
+function tablesOf(draft) {
+  const occasions = occasionsOf(draft);
+  const tables = [];
+  const byService = new Map();
+  for (const o of occasions) {
+    if (!o.iso) continue;
+    if (!byService.has(o.service)) {
+      const table = { service: o.service, dates: [], cells: new Map(), rows: [] };
+      byService.set(o.service, table);
+      tables.push(table);
+    }
+    const table = byService.get(o.service);
+    table.dates.push({ iso: o.iso, label: shortDay(o.iso) });
+    const seen = new Map();
+    for (const r of o.rows) {
+      const n = (seen.get(r.job) || 0) + 1;
+      seen.set(r.job, n);
+      const key = `${r.job}#${n}`;
+      if (!table.rows.some(row => row.key === key)) table.rows.push({ key, job: r.job });
+      table.cells.set(`${key}|${o.iso}`, r.name);
+    }
+  }
+  // Services in their usual order, whichever happens first in the month.
+  const order = name => {
+    const i = SERVICES.findIndex(sv => sv.toLowerCase() === String(name || '').toLowerCase());
+    return i < 0 ? SERVICES.length : i;
+  };
+  tables.sort((a, b) => order(a.service) - order(b.service));
+  // A long run of dates is split, so no column gets too narrow to read.
+  const split = [];
+  for (const t of tables) {
+    for (let i = 0; i < t.dates.length; i += MAX_DATES) {
+      split.push({ ...t, dates: t.dates.slice(i, i + MAX_DATES), continued: i > 0 });
+    }
+  }
+  const monthly = occasions.filter(o => !o.iso).flatMap(o => o.rows);
+  if (monthly.length) split.push({ service: 'For the month', monthly });
+  return split;
+}
+
+// How wide each date column is, and how tall each job's row has to be for its
+// longest name.
+function measureTable(doc, table) {
+  if (table.monthly) {
+    const colW = W - JOB_COL;
+    doc.font(SANS_B).fontSize(SIZE.name);
+    const rows = table.monthly.map(r => Math.max(
+      doc.heightOfString(r.name || 'Needs someone', { width: colW - CELL.padX * 2 }),
+      doc.font(SANS).fontSize(SIZE.job).heightOfString(r.job, { width: JOB_COL - CELL.padX * 2 }),
+    ) + CELL.padY * 2);
+    return { colW, rows, height: CELL.title + rows.reduce((a, b) => a + b, 0) };
+  }
+  const colW = (W - JOB_COL) / table.dates.length;
+  const rows = table.rows.map(row => {
+    doc.font(SANS).fontSize(SIZE.job);
+    let h = doc.heightOfString(row.job, { width: JOB_COL - CELL.padX * 2 });
+    doc.font(SANS_B).fontSize(SIZE.name);
+    for (const d of table.dates) {
+      const name = table.cells.get(`${row.key}|${d.iso}`);
+      h = Math.max(h, doc.heightOfString(name || 'Needs someone', { width: colW - CELL.padX * 2 }));
+    }
+    return h + CELL.padY * 2;
+  });
+  return { colW, rows, height: CELL.title + CELL.head + rows.reduce((a, b) => a + b, 0) };
 }
 
 function drawBanner(doc, month) {
-  doc.rect(0, 0, PAGE.width, 112).fill(THEME.navy);
-  doc.rect(0, 112, PAGE.width, 4).fill(THEME.gold);
+  doc.rect(0, 0, PAGE.width, 80).fill(THEME.navy);
+  doc.rect(0, 80, PAGE.width, 4).fill(THEME.gold);
   doc.fillColor(THEME.gold).font(SANS_B).fontSize(SIZE.church)
-    .text('CAPSHAW CHURCH OF CHRIST', M, 26, { width: W, characterSpacing: 1.5 });
+    .text('CAPSHAW CHURCH OF CHRIST', M, 16, { width: W, characterSpacing: 1.5 });
   doc.fillColor('#ffffff').font(SERIF_B).fontSize(SIZE.banner)
-    .text('Worship Schedule', M, 44, { width: W });
+    .text('Worship Schedule', M, 33, { width: W, lineBreak: false });
   doc.fillColor(THEME.gold).font(SERIF_B).fontSize(SIZE.month)
-    .text(month, M, 80, { width: W });
-  return 136;
+    .text(month, M, 37, { width: W, align: 'right', lineBreak: false });
+  return 100;
 }
 
 // Later pages carry a slimmer band, so a loose page still says what it is.
+const RUNNING_HEAD = 62;
+
 function drawRunningHead(doc, month) {
-  doc.rect(0, 0, PAGE.width, 46).fill(THEME.navy);
-  doc.rect(0, 46, PAGE.width, 3).fill(THEME.gold);
+  doc.rect(0, 0, PAGE.width, 44).fill(THEME.navy);
+  doc.rect(0, 44, PAGE.width, 3).fill(THEME.gold);
   doc.fillColor('#ffffff').font(SERIF_B).fontSize(16)
-    .text(`Worship Schedule · ${month}`, M, 16, { width: W });
-  return 66;
+    .text(`Worship Schedule · ${month}`, M, 15, { width: W });
+  return RUNNING_HEAD;
 }
 
-function drawCard(doc, occasion, y, measured) {
-  const x = M;
-  doc.roundedRect(x, y, W, measured.height, 8).fill(THEME.cream);
-  doc.roundedRect(x, y, CARD.bar + 8, measured.height, 8).fill(THEME.gold);
-  doc.rect(x + CARD.bar, y, 8, measured.height).fill(THEME.cream);
+function drawTitle(doc, table, y) {
+  const title = `${table.service}${table.continued ? ' (continued)' : ''}`;
+  doc.fillColor(THEME.navy).font(SERIF_B).fontSize(SIZE.service).text(title, M, y, { width: W, lineBreak: false });
+  doc.rect(M, y + 24, 46, 3).fill(THEME.gold);
+  return y + CELL.title;
+}
 
-  const inner = x + CARD.bar + CARD.pad;
-  const innerW = W - CARD.bar - CARD.pad * 2;
-  const jobW = Math.round(innerW * CARD.jobW);
-
-  const day = occasion.iso ? longDay(occasion.iso) : (occasion.date || 'For the month');
-  doc.fillColor(THEME.navy).font(SERIF_B).fontSize(SIZE.day).text(day, inner, y + CARD.pad, { width: innerW, lineBreak: false });
-  if (occasion.service) {
-    doc.fillColor(THEME.muted).font(SANS).fontSize(SIZE.service)
-      .text(occasion.service, inner, y + CARD.pad + 4, { width: innerW, align: 'right', lineBreak: false });
-  }
-
-  let ry = y + CARD.pad + CARD.head;
-  occasion.rows.forEach((row, i) => {
-    if (i > 0) doc.moveTo(inner, ry - 4).lineTo(inner + innerW, ry - 4).lineWidth(0.5).strokeColor(THEME.line).stroke();
-    doc.fillColor(THEME.text).font(SANS).fontSize(SIZE.job).text(row.job, inner, ry + 2, { width: jobW - 8 });
-    if (row.name) doc.fillColor(THEME.navy).font(SANS_B).fontSize(SIZE.name).text(row.name, inner + jobW, ry, { width: innerW - jobW });
-    else doc.fillColor(THEME.open).font(SANS_I).fontSize(SIZE.name - 1).text('Needs someone', inner + jobW, ry + 1, { width: innerW - jobW });
-    ry += measured.rows[i];
+// The navy row of dates across the top of a table.
+function drawHeader(doc, table, y, colW) {
+  doc.rect(M, y, W, CELL.head).fill(THEME.navy);
+  table.dates.forEach((d, i) => {
+    doc.fillColor('#ffffff').font(SANS_B).fontSize(SIZE.date)
+      .text(d.label, M + JOB_COL + i * colW + CELL.padX, y + 8, { width: colW - CELL.padX * 2, lineBreak: false });
   });
+  return y + CELL.head;
+}
+
+function drawCell(doc, name, x, y, w) {
+  if (name) doc.fillColor(THEME.navy).font(SANS_B).fontSize(SIZE.name).text(name, x + CELL.padX, y + CELL.padY, { width: w - CELL.padX * 2 });
+  else doc.fillColor(THEME.open).font(SANS_I).fontSize(SIZE.name - 1).text('Needs someone', x + CELL.padX, y + CELL.padY + 1, { width: w - CELL.padX * 2 });
+}
+
+// Draws one table from `y`, moving to a new page between rows if it has to.
+// Returns where it ended.
+function drawTable(doc, table, y, month, { pageHasContent = true } = {}) {
+  const m = measureTable(doc, table);
+  const firstRow = table.monthly ? 0 : CELL.head;
+  // A table that would fit whole on a page of its own is not split: it goes
+  // over to the next page instead. Only one too long for any page is split, and
+  // then the title, header and first row always start together.
+  const freshPage = BOTTOM - RUNNING_HEAD;
+  const splitAnyway = m.height > freshPage || !pageHasContent;
+  if ((!splitAnyway && y + m.height > BOTTOM) || y + CELL.title + firstRow + (m.rows[0] || 0) > BOTTOM) {
+    doc.addPage();
+    y = drawRunningHead(doc, month);
+  }
+  y = drawTitle(doc, table, y);
+  if (!table.monthly) y = drawHeader(doc, table, y, m.colW);
+
+  const rows = table.monthly || table.rows;
+  rows.forEach((row, i) => {
+    const h = m.rows[i];
+    if (y + h > BOTTOM) {
+      doc.addPage();
+      y = drawRunningHead(doc, month);
+      // The rest of the table says whose it is, and carries its dates.
+      y = drawTitle(doc, { ...table, continued: true }, y);
+      if (!table.monthly) y = drawHeader(doc, table, y, m.colW);
+    }
+    doc.rect(M, y, W, h).fill(i % 2 ? '#ffffff' : THEME.cream);
+    doc.rect(M, y, 4, h).fill(THEME.gold);
+    doc.fillColor(THEME.text).font(SANS).fontSize(SIZE.job).text(row.job, M + CELL.padX + 4, y + CELL.padY + 1, { width: JOB_COL - CELL.padX * 2 - 4 });
+    if (table.monthly) {
+      drawCell(doc, row.name, M + JOB_COL, y, m.colW);
+    } else {
+      table.dates.forEach((d, c) => {
+        const x = M + JOB_COL + c * m.colW;
+        doc.moveTo(x, y).lineTo(x, y + h).lineWidth(0.5).strokeColor(THEME.line).stroke();
+        const key = `${row.key}|${d.iso}`;
+        // A date that does not have this job at all (a special night that
+        // needs fewer) is left blank, not marked as needing someone.
+        if (table.cells.has(key)) drawCell(doc, table.cells.get(key), x, y, m.colW);
+      });
+    }
+    y += h;
+  });
+  return y + CELL.gap;
 }
 
 function drawFooters(doc, month) {
@@ -143,7 +264,7 @@ function drawFooters(doc, month) {
     doc.page.margins.bottom = 0;
     doc.fillColor(THEME.muted).font(SANS).fontSize(SIZE.footer)
       .text(`Capshaw Church of Christ · Worship schedule for ${month} · Page ${i + 1} of ${range.count}`,
-        M, PAGE.height - M + 12, { width: W, align: 'center', lineBreak: false });
+        M, PAGE.height - 24, { width: W, align: 'center', lineBreak: false });
     doc.page.margins.bottom = bottom;
   }
 }
@@ -154,24 +275,16 @@ function drawFooters(doc, month) {
 // whose publish step runs inside one transaction, attach it to the emails it
 // sends there and then.
 function rosterPdf(draft) {
-  const doc = new PDFDocument({ size: 'LETTER', margin: M, bufferPages: true, info: {
+  const doc = new PDFDocument({ size: 'LETTER', layout: 'landscape', margin: M, bufferPages: true, info: {
     Title: `Worship Schedule: ${draft.month}`, Author: 'Capshaw Church of Christ',
   } });
 
   let y = drawBanner(doc, draft.month);
-  const occasions = occasionsOf(draft);
-  if (!occasions.length) {
+  const tables = tablesOf(draft);
+  if (!tables.length) {
     doc.fillColor(THEME.muted).font(SANS).fontSize(SIZE.name).text('Nothing is on the schedule for this month yet.', M, y + 10, { width: W });
   }
-  for (const occasion of occasions) {
-    const measured = measureCard(doc, occasion);
-    if (y + measured.height > PAGE.height - M - 10) {
-      doc.addPage();
-      y = drawRunningHead(doc, draft.month);
-    }
-    drawCard(doc, occasion, y, measured);
-    y += measured.height + CARD.gap;
-  }
+  tables.forEach((table, i) => { y = drawTable(doc, table, y, draft.month, { pageHasContent: i > 0 }); });
   drawFooters(doc, draft.month);
   doc.end();
 
@@ -183,4 +296,4 @@ function rosterPdf(draft) {
 
 const pdfFilename = month => `Worship Schedule - ${String(month).replace(/[^\w ,.-]/g, '').trim() || 'month'}.pdf`;
 
-module.exports = { THEME, SIZE, occasionsOf, rosterPdf, pdfFilename };
+module.exports = { THEME, SIZE, PAGE, MAX_DATES, occasionsOf, tablesOf, measureTable, rosterPdf, pdfFilename };

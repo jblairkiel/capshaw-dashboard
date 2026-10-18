@@ -425,12 +425,19 @@ as a PDF. The Monthly Worship Schedule workflow attaches the same PDF when it
 publishes. **Download PDF** (`GET /api/serving/months/pdf?month=`) gives any
 approved member the same file.
 
-`server/lib/rosterPdf.js` draws it with pdfkit, as the newsletter is drawn: the
-portal's navy banner and gold rule, then a cream card per service in the order
-they happen (Sunday Worship, Sunday Evening, Wednesday, then anything else; a
-job for the whole month last), each job beside who is doing it — open slots in
-amber as *Needs someone*. It is set large (names 17pt, days 19pt) so it reads
-on a phone or printed for the fridge, and a card is never split across pages.
+`server/lib/rosterPdf.js` draws it with pdfkit, as the newsletter is drawn, on
+**landscape** Letter laid out as a duty roster: under the portal's navy banner
+and gold rule, a table for each service (Sunday Worship, Sunday Evening,
+Wednesday, then anything else; a job for the whole month last), its jobs down
+the left on alternating cream rows and its dates across a navy header, so every
+Sunday of the month reads side by side. A job a service needs twice is two
+rows; a date that does not have a job at all is left blank, and an open slot
+says *Needs someone* in amber. It is set large (names 15pt bold, jobs and dates
+14pt, service titles 20pt); a name too long for its column wraps rather than
+shrinking. A usual month fits on two pages. A table goes over to the next page
+whole when it fits there; only one too long for any page is split, with a
+"(continued)" title and its dates repeated. A run of more than five nights is
+split into tables of five, so no column gets too narrow.
 It is made synchronously (nothing listens to pdfkit's stream, so the finished
 bytes are read straight out of its buffer), which lets the workflow attach it
 inside its publish step. One stored copy is attached to every message.

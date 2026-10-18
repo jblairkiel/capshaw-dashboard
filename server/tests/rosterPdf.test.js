@@ -12,7 +12,7 @@ const request = require('supertest');
 const express = require('express');
 const db = require('../db');
 const mailer = require('../mail/mailer');
-const { rosterPdf, occasionsOf, pdfFilename, SIZE, THEME } = require('../lib/rosterPdf');
+const { rosterPdf, occasionsOf, tablesOf, pdfFilename, SIZE, THEME, MAX_DATES } = require('../lib/rosterPdf');
 const router = require('../routes/serving');
 
 function buildApp(user) {
@@ -70,21 +70,64 @@ describe('the PDF', () => {
     ]);
   });
 
-  test('is a PDF, titled for the month, that runs onto more pages rather than squeezing', () => {
-    const one = rosterPdf({ month: 'November 2026', rows: [{ date: 'November 1', service: 'Sunday AM', job: 'Lead Singing', name: 'Tom Nelson' }] });
+  test('lays each service out as a roster: its jobs down, its dates across', () => {
+    const tables = tablesOf({ month: 'November 2026', rows: [
+      { date: 'November 4', service: 'Wednesday', job: 'Song Leader', name: 'Bo' },
+      { date: 'November 1', service: 'Sunday Worship', job: 'Song Leader', name: 'Al' },
+      { date: 'November 1', service: 'Sunday Worship', job: 'Communion Assist', name: 'Cy' },
+      { date: 'November 1', service: 'Sunday Worship', job: 'Communion Assist', name: '' },
+      { date: 'November 8', service: 'Sunday Worship', job: 'Song Leader', name: 'Di' },
+      { date: '', service: '', job: 'Visual preparation', name: 'Ed' },
+    ] });
+    // Sunday Worship first, whatever happens first in the month.
+    expect(tables.map(t => t.service)).toEqual(['Sunday Worship', 'Wednesday', 'For the month']);
+    const sunday = tables[0];
+    expect(sunday.dates.map(d => d.label)).toEqual(['Sun, Nov 1', 'Sun, Nov 8']);
+    // A job needed twice is two rows.
+    expect(sunday.rows.map(r => r.job)).toEqual(['Song Leader', 'Communion Assist', 'Communion Assist']);
+    expect(sunday.cells.get('Song Leader#1|2026-11-08')).toBe('Di');
+    expect(sunday.cells.get('Communion Assist#2|2026-11-01')).toBe('');
+    // Nov 8 has no communion assists at all: left blank, not "needs someone".
+    expect(sunday.cells.has('Communion Assist#1|2026-11-08')).toBe(false);
+    expect(tables[2].monthly).toEqual([{ job: 'Visual preparation', name: 'Ed' }]);
+  });
+
+  test('a long run of nights is split so no column gets too narrow to read', () => {
+    const rows = [];
+    for (let d = 1; d <= 12; d++) rows.push({ date: `November ${d}`, service: 'Gospel Meeting', job: 'Speaker', name: 'Tom Nelson' });
+    const tables = tablesOf({ month: 'November 2026', rows });
+    expect(tables.map(t => [t.dates.length, !!t.continued])).toEqual([[MAX_DATES, false], [MAX_DATES, true], [2, true]]);
+  });
+
+  test('is a landscape PDF, titled for the month, that runs onto more pages rather than squeezing', () => {
+    const one = rosterPdf({ month: 'November 2026', rows: [{ date: 'November 1', service: 'Sunday Worship', job: 'Song Leader', name: 'Tom Nelson' }] });
     expect(one.subarray(0, 5).toString()).toBe('%PDF-');
     expect(one.toString('latin1')).toContain('(Worship Schedule: November 2026)');
+    expect(one.toString('latin1')).toContain('/MediaBox [0 0 792 612]');
     expect(pages(one)).toBe(1);
 
     const rows = [];
-    for (let d = 1; d <= 30; d++) for (const job of ['Lead Singing', 'Opening Prayer', 'Closing Prayer']) rows.push({ date: `November ${d}`, service: 'Sunday AM', job, name: 'Tom Nelson' });
+    for (let d = 1; d <= 30; d++) for (let j = 0; j < 12; j++) rows.push({ date: `November ${d}`, service: 'Sunday Worship', job: `Job ${j}`, name: 'Fennimore Quarrington' });
     expect(pages(rosterPdf({ month: 'November 2026', rows }))).toBeGreaterThan(3);
   });
 
+  test('a usual month — five Sundays morning and evening, four Wednesdays — fits on two pages', () => {
+    const rows = [];
+    const sunday = ['Song Leader', 'Opening Prayer', 'Scripture Reading', 'Communion', 'Communion Assist', 'Communion Assist', 'Speaker', 'Announcements', 'Closing Prayer', 'Usher'];
+    for (const d of [1, 8, 15, 22, 29]) {
+      for (const job of sunday) rows.push({ date: `November ${d}`, service: 'Sunday Worship', job, name: 'Fennimore Quarrington' });
+      for (const job of ['Song Leader', 'Opening Prayer', 'Closing Prayer']) rows.push({ date: `November ${d}`, service: 'Sunday Evening', job, name: 'Fennimore Quarrington' });
+    }
+    // Wednesday has a column fewer, so most names there fit on one line.
+    for (const d of [4, 11, 18, 25]) for (const job of ['Song Leader', 'Opening Prayer', 'Closing Prayer']) rows.push({ date: `November ${d}`, service: 'Wednesday', job, name: 'Tom Nelson' });
+    expect(pages(rosterPdf({ month: 'November 2026', rows }))).toBe(2);
+  });
+
   test('is set large, in the portal\'s colours', () => {
-    expect(SIZE.name).toBeGreaterThanOrEqual(16);
+    expect(SIZE.name).toBeGreaterThanOrEqual(15);
     expect(SIZE.job).toBeGreaterThanOrEqual(14);
-    expect(SIZE.day).toBeGreaterThanOrEqual(18);
+    expect(SIZE.date).toBeGreaterThanOrEqual(14);
+    expect(SIZE.service).toBeGreaterThanOrEqual(20);
     expect(THEME).toMatchObject({ navy: '#1a2744', gold: '#c9a84c', cream: '#f9f6f0' });
   });
 
