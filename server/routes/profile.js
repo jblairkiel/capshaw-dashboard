@@ -4,6 +4,7 @@ const db      = require('../db');
 const { requireAuth, requireApproved, holdsArea } = require('../middleware/auth');
 const actionLog = require('../lib/actionLog');
 const photoStore = require('../lib/photoStore');
+const directoryVcard = require('../lib/directoryVcard');
 const worship = require('../lib/worship');
 const {
   sameHousehold,
@@ -105,6 +106,25 @@ router.patch('/notifications', requireAuth, (req, res) => {
 
   db.prepare('UPDATE users SET wants_monthly_report = ? WHERE id = ?').run(wanted ? 1 : 0, req.user.id);
   res.json({ success: true, notifications: { monthlyReport: wanted } });
+});
+
+// ─── GET /api/profile/directory.vcf ──────────────────────────────────────────
+// The whole member directory as phone contacts, for any approved member
+// (lib/directoryVcard.js). Opening the file on a phone offers to add them all.
+// Each download is written to the action history: it is the congregation's
+// contact details leaving the site, so it is worth knowing who took a copy.
+
+router.get('/directory.vcf', requireApproved, (req, res) => {
+  const { vcf, count, withPhotos } = directoryVcard.directoryVcf({ photos: req.query.photos !== '0' });
+  actionLog.record(req.user, {
+    area: 'directory', action: 'other', entity: 'member directory',
+    summary: `${req.user.name} added the member directory to their phone (${count} contact${count === 1 ? '' : 's'})`,
+    details: { contacts: count, photos: withPhotos },
+  });
+  res.set('Content-Type', 'text/vcard; charset=utf-8');
+  res.set('Content-Disposition', 'attachment; filename="Capshaw Church Directory.vcf"');
+  res.set('Cache-Control', 'private, no-store');
+  res.send(vcf);
 });
 
 // ─── GET /api/profile/person/:id/photo ────────────────────────────────────────
