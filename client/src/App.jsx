@@ -156,7 +156,7 @@ const ALL_TAB_IDS = new Set([
   ...ADMIN_ITEMS.map(i => i.id),
 ]);
 
-// A generated email points here with ?page=&group=&event=&workflow=&plan=&guest=&tab=&date=&service= (see
+// A generated email points here with ?page=&group=&event=&workflow=&plan=&guest=&game=&tab=&date=&service= (see
 // server/mail/notify.js). Read once on load and then the URL is stripped, so
 // a later remount — impersonation starting or stopping, say — does not jump
 // the person back to the same link a second time.
@@ -180,6 +180,8 @@ function deepLinkFromUrl() {
     planId:     toId(params.get('plan')),
     // A sign-up list's permanent link.
     list:       toId(params.get('list')),
+    // A Bible Jeopardy game's permanent link.
+    gameId:     toId(params.get('game')),
     // A guest's permanent link (the guests email links to each one).
     guestId:    toId(params.get('guest')),
     // A rotation (the "you are next up" email links here).
@@ -464,8 +466,8 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
         </main>
       )}
       {!updating && activeTab === 'bible-class' && (
-        <main className="max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
-          <BibleClassView user={user} />
+        <main className="w-full max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <BibleClassView user={user} initialGameId={deepLink?.page === 'bible-class' ? deepLink.gameId : null} />
         </main>
       )}
       {!updating && activeTab === 'announcements' && (

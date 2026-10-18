@@ -1471,6 +1471,27 @@ function initSchema(db) {
   `);
 
   // ─── Sign-up lists ────────────────────────────────────────────────────────────
+  // Bible Jeopardy boards (lib/jeopardy.js), built in the Excel template and
+  // uploaded by any member. The board is kept whole as JSON — categories, each
+  // with its clues, answers, points and Daily Doubles, and an optional Final —
+  // because it is only ever read and replaced whole. Playing a game is not
+  // stored: teams and scores live in the browser running it.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS jeopardy_games (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      title           TEXT    NOT NULL,
+      board           TEXT    NOT NULL DEFAULT '{"categories":[]}',
+      search_text     TEXT    NOT NULL DEFAULT '',   -- every word on the board, for the search box
+      -- Who wrote the game, as they want it credited. Not always whoever
+      -- uploaded it (created_by), since one teacher may put up another's.
+      author          TEXT    NOT NULL DEFAULT '',
+      created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_by_name TEXT    NOT NULL DEFAULT '',
+      created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
   // Anything the congregation needs people for — a meal train, a work day, a
   // nursery rota — made by any member (lib/signupLists.js). A list has one
   // date or several, and either set items with how many are needed of each,

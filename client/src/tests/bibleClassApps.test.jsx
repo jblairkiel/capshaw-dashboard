@@ -21,7 +21,8 @@ describe('BibleClassView', () => {
   test('lists the available apps and marks the rest coming soon', () => {
     render(<BibleClassView user={APPROVED} />);
     expect(screen.getByText('Question Generator')).toBeInTheDocument();
-    expect(screen.getAllByText('Coming Soon')).toHaveLength(2);
+    expect(screen.getByText('Bible Jeopardy')).toBeInTheDocument();
+    expect(screen.getAllByText('Coming Soon')).toHaveLength(1);
   });
 
   test('opens an app and shows a way back', () => {

@@ -3,6 +3,7 @@ import QuestionGenerator from './QuestionGenerator';
 import QuestionLibrary from './QuestionLibrary';
 import LessonPlanner from './LessonPlanner';
 import BibleQuizView from './BibleQuizView';
+import JeopardyView from './jeopardy/JeopardyView';
 
 // ─── App registry ─────────────────────────────────────────────────────────────
 
@@ -59,10 +60,11 @@ const APPS = [
     ),
   },
   {
-    id:          'trivia-builder',
-    title:       'Bible Trivia Builder',
-    description: 'Create a ready-to-play trivia game from a book, chapter, or topic for class review.',
-    available:   false,
+    id:          'jeopardy',
+    title:       'Bible Jeopardy',
+    description: 'Build a Jeopardy board in an Excel template, upload it, and play it on the classroom screen with teams, Daily Doubles and Final Jeopardy.',
+    component:   JeopardyView,
+    available:   true,
     icon: (
       <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}
@@ -124,8 +126,9 @@ function AppTile({ app, onOpen }) {
 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
-export default function BibleClassView({ user }) {
-  const [activeId, setActiveId] = useState(null);
+export default function BibleClassView({ user, initialGameId = null }) {
+  // A Bible Jeopardy game's permanent link (?page=bible-class&game=12) opens it.
+  const [activeId, setActiveId] = useState(initialGameId ? 'jeopardy' : null);
   const activeApp = APPS.find(a => a.id === activeId);
 
   if (activeApp) {
@@ -147,7 +150,7 @@ export default function BibleClassView({ user }) {
           <span className="text-gray-500">{activeApp.title}</span>
         </div>
 
-        <Component user={user} />
+        <Component user={user} initialGameId={activeId === 'jeopardy' ? initialGameId : null} />
       </div>
     );
   }

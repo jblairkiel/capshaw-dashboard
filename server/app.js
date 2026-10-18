@@ -18,6 +18,7 @@ const announcementRoutes         = require('./routes/announcements');
 const authRoutes                 = require('./routes/auth');
 const welcomeRoutes              = require('./routes/welcome');
 const bibleQuizRoutes            = require('./routes/bibleQuiz');
+const jeopardyRoutes             = require('./routes/jeopardy');
 const songRoutes                 = require('./routes/songTracker');
 const worshipRoutes              = require('./routes/worship');
 const howItWorksRoutes          = require('./routes/howItWorks');
@@ -141,6 +142,7 @@ function createApp() {
   app.use('/api/bible-class',  bibleClassRoutes);
   app.use('/api/game-questions',  gameQuestionRoutes);
   app.use('/api/bible-quiz',      bibleQuizRoutes);
+  app.use('/api/jeopardy',        jeopardyRoutes);
   app.use('/api/lesson-planner',  lessonPlannerRoutes);
   app.use('/api/announcements',   announcementRoutes);
   app.use('/api/songs',           songRoutes);
