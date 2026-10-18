@@ -109,8 +109,10 @@ compose.servingAssignments = ({ draft, mine }) => ({
     '',
     ...mine.map(r => `  ${r.date} · ${r.service} · ${r.job}`),
     '',
-    'If you cannot make one of these, take yourself off it on the Serving',
-    `Schedule and let the coordinator know it needs covering: ${link('assignments')}`,
+    `The whole month's schedule is attached as a PDF.`,
+    '',
+    'If you cannot make one of these, choose "Ask to be replaced" beside it on',
+    `the Serving Schedule, and whoever keeps the schedule will find somebody: ${link('assignments')}`,
   ].join('\n'),
 });
 
@@ -122,7 +124,8 @@ compose.monthlyReport = ({ draft }) => {
     byDate.get(key).push(`    ${row.job}: ${row.name || '(nobody yet)'}`);
   }
   const body = [
-    `Worship assignments for ${draft.month}.`,
+    `Worship assignments for ${draft.month}. The schedule is attached as a PDF,`,
+    'large enough to read on a phone or print for the fridge.',
     '',
     ...[...byDate.entries()].flatMap(([heading, lines]) => [`  ${heading}`, ...lines, '']),
     draft.unfilled?.length ? `${draft.unfilled.length} slot(s) still need somebody.` : '',
@@ -185,7 +188,14 @@ function workflowCompleted({ instance, definition, outcomeId, actorName }) {
 // The roster stores a name, so the address comes from matching that name back
 // to the directory; anybody it cannot match is reported rather than dropped
 // in silence.
-function schedulePublished({ draft, instanceId }) {
+// The month as a PDF (lib/rosterPdf.js), stored once for the outbox to attach
+// to every message about it.
+function rosterAttachment(draft) {
+  const { rosterPdf, pdfFilename } = require('../lib/rosterPdf');
+  return mailer.saveAttachment({ buffer: rosterPdf(draft), filename: pdfFilename(draft.month), contentType: 'application/pdf' });
+}
+
+function schedulePublished({ draft, instanceId, attachments = [] }) {
   const names = [...new Set((draft?.rows || []).map(r => (r.name || '').trim()).filter(Boolean))];
   const queued = [];
   const unreachable = [];
@@ -200,6 +210,7 @@ function schedulePublished({ draft, instanceId }) {
       to: [{ email: person.email, name: person.name }],
       ...compose.servingAssignments({ draft, mine: assignmentsFor(draft, name) }),
       context: `workflow:${instanceId}:schedule`,
+      attachments,
     }));
   }
 
@@ -208,7 +219,7 @@ function schedulePublished({ draft, instanceId }) {
 
 // The whole month, to everyone who has not opted out on My Info. New accounts
 // are opted in, so this reaches the congregation by default.
-function monthlyReport({ draft, instanceId }) {
+function monthlyReport({ draft, instanceId, attachments = [] }) {
   const readers = db.prepare(`
     SELECT name, email FROM users
     WHERE wants_monthly_report = 1 AND email IS NOT NULL AND trim(email) <> ''
@@ -220,6 +231,7 @@ function monthlyReport({ draft, instanceId }) {
     to: readers,
     ...compose.monthlyReport({ draft }),
     context: `workflow:${instanceId}:monthly-report`,
+    attachments,
   });
 }
 
@@ -367,6 +379,6 @@ function worshipPlanSubmitted({ plan, to }) {
 
 module.exports = {
   compose, link, worshipPlanSubmitted, planLines, serviceDay,
-  taskAssigned, workflowCompleted, recipientsForTask, schedulePublished, monthlyReport,
+  taskAssigned, workflowCompleted, recipientsForTask, schedulePublished, monthlyReport, rosterAttachment,
   groupEventPublished, groupEventCancelled, groupEventChanged,
 };

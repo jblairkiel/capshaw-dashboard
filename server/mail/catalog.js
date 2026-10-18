@@ -396,17 +396,17 @@ const EMAILS = [
   // ── Reports ────────────────────────────────────────────────────────────────
   {
     id: 'serving-assignments', category: 'reports',
-    name: 'Your serving jobs for the month',
+    name: 'Your serving jobs for the month (with the schedule as a PDF)',
     audience: 'Each person with a turn that month',
-    trigger: 'The Monthly Worship Schedule is published.',
+    trigger: 'The Monthly Worship Schedule is published, or the schedule keeper chooses "Email everyone (PDF)".',
     like: ['workflow:%:schedule'],
     preview: () => notify.compose.servingAssignments({ draft: SAMPLE.draft, mine: SAMPLE.draft.rows.slice(0, 1) }),
   },
   {
     id: 'monthly-schedule', category: 'reports',
-    name: 'Monthly worship schedule',
+    name: 'Monthly worship schedule (with the schedule as a PDF)',
     audience: 'Everyone who has not turned off "Monthly schedule summary"',
-    trigger: 'The Monthly Worship Schedule is published.',
+    trigger: 'The Monthly Worship Schedule is published, or the schedule keeper chooses "Email everyone (PDF)".',
     like: ['workflow:%:monthly-report'],
     preview: () => notify.compose.monthlyReport({ draft: SAMPLE.draft }),
   },

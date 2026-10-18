@@ -416,6 +416,35 @@ them yet — fill or clear any slot by hand, add a one-off job, and run the
 Monthly Worship Schedule workflow. Running the layout twice never doubles a
 month up: slots that already exist are left alone.
 
+### The month as a PDF
+
+**Email everyone (PDF)** (schedule keeper only, `POST /api/serving/months/notify`)
+emails each man his own jobs for the month and everyone who has not turned off
+"Monthly schedule summary" the whole month — and both carry the month attached
+as a PDF. The Monthly Worship Schedule workflow attaches the same PDF when it
+publishes. **Download PDF** (`GET /api/serving/months/pdf?month=`) gives any
+approved member the same file.
+
+`server/lib/rosterPdf.js` draws it with pdfkit, as the newsletter is drawn, on
+**landscape** Letter laid out as a duty roster: under the portal's navy banner
+and gold rule, a table for each service (Sunday Worship, Sunday Evening,
+Wednesday, then anything else; a job for the whole month last), its jobs down
+the left on alternating cream rows and its dates across a navy header, so every
+Sunday of the month reads side by side. A job a service needs more than once
+(Sunday morning's six communion assists) is that many rows; a date that does
+not have a job at all is left blank, and an open slot says *Needs someone* in
+amber. It is set large (names 13pt bold, jobs and dates 12pt, service titles
+18pt), and every job is one line: a name too long for its column is set a
+point or so smaller, then shortened to an initial (F. Quarrington), and only
+past that cut short. Sunday morning's whole roster fits on the first page, and
+a usual month on two. A table goes over to the next page
+whole when it fits there; only one too long for any page is split, with a
+"(continued)" title and its dates repeated. A run of more than five nights is
+split into tables of five, so no column gets too narrow.
+It is made synchronously (nothing listens to pdfkit's stream, so the finished
+bytes are read straight out of its buffer), which lets the workflow attach it
+inside its publish step. One stored copy is attached to every message.
+
 **Every other member** sees the roster, and that is all they can do with it —
 there is no self sign-up. A slot gets a name in it two ways, and two ways
 only: the Monthly Worship Schedule workflow publishing a generated draft, or

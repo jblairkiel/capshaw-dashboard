@@ -647,10 +647,10 @@ describe('communion assists', () => {
   const build = (body = { month: 'June 2026', services: ['Sunday Worship'] }) => request(buildApp(KEEPER)).post('/api/serving/months').send(body);
   const assistsOn = date => slotsIn('June 2026').filter(s => s.date === date && s.job === 'Communion Assist');
 
-  test('every Sunday morning gets two communion assist slots beside the communion', async () => {
+  test('every Sunday morning gets six communion assist slots beside the communion', async () => {
     await build();
     for (const date of ['June 7', 'June 14', 'June 21', 'June 28']) {
-      expect(assistsOn(date)).toHaveLength(2);
+      expect(assistsOn(date)).toHaveLength(6);
       expect(slotsIn('June 2026').filter(s => s.date === date && s.job === 'Communion')).toHaveLength(1);
     }
   });
@@ -661,10 +661,11 @@ describe('communion assists', () => {
     db.prepare("DELETE FROM job_assignments WHERE job = 'Communion Assist' AND date = 'June 14' AND id = (SELECT max(id) FROM job_assignments WHERE job = 'Communion Assist' AND date = 'June 14')").run();
     const before = slotsIn('June 2026').length;
     const res = await build();
-    expect(res.body.created).toBe(3);
-    expect(slotsIn('June 2026').length).toBe(before + 3);
-    expect(assistsOn('June 7')).toHaveLength(2);
-    expect(assistsOn('June 14')).toHaveLength(2);
+    // All six back on June 7, the one missing on June 14.
+    expect(res.body.created).toBe(7);
+    expect(slotsIn('June 2026').length).toBe(before + 7);
+    expect(assistsOn('June 7')).toHaveLength(6);
+    expect(assistsOn('June 14')).toHaveLength(6);
   });
 
   test('filling never puts the same man on two jobs at one service', async () => {

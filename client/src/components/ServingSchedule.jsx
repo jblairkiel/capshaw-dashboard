@@ -120,7 +120,7 @@ function BuildMonthDialog({ services, initialMonth, onClose, onBuilt }) {
         <p className="text-xs text-gray-500">
           Every service in the month gets a slot for each job it needs. Building again only adds what is
           missing and fills what is still open; a name already there is never moved. Nobody is emailed
-          until you choose Email everyone their jobs.
+          until you choose Email everyone (PDF).
         </p>
 
         {error && <p className="text-sm text-red-600">{error}</p>}
@@ -942,11 +942,11 @@ export default function ServingSchedule({ focus = null }) {
   }
 
   async function emailEveryone() {
-    if (!window.confirm(`Email everyone down for a job in ${month} their jobs, and send the whole month to the congregation?`)) return;
+    if (!window.confirm(`Email everyone down for a job in ${month} their jobs, and send the whole month to the congregation — each with the schedule attached as a PDF?`)) return;
     setEmailing(true); setNotice('');
     try {
       const json = await send(`${API}/months/notify`, { method: 'POST', ...jsonBody({ month }) });
-      setNotice(`Emailed ${json.emailed} ${json.emailed === 1 ? 'man' : 'men'} their jobs for ${month}.${json.unreachable.length ? ` No email address on file for ${json.unreachable.join(', ')}.` : ''}`);
+      setNotice(`Emailed ${json.emailed} ${json.emailed === 1 ? 'man' : 'men'} their jobs for ${month}, with the schedule as a PDF.${json.unreachable.length ? ` No email address on file for ${json.unreachable.join(', ')}.` : ''}`);
     } catch (err) {
       setNotice(err.message);
     } finally {
@@ -997,6 +997,17 @@ export default function ServingSchedule({ focus = null }) {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          {month && all.length > 0 && (
+            <a
+              href={`${API}/months/pdf?month=${encodeURIComponent(month)}`}
+              className="text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600 hover:border-church-gold hover:text-church-navy transition-colors inline-flex items-center gap-1.5"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v12m0 0l-4-4m4 4l4-4M5 20h14" />
+              </svg>
+              Download PDF
+            </a>
+          )}
           {me.directoryId && (
             <button
               onClick={() => setBlockingOut(true)}
@@ -1012,7 +1023,7 @@ export default function ServingSchedule({ focus = null }) {
               {all.some(a => a.name.trim()) && (
                 <button onClick={emailEveryone} disabled={emailing}
                   className="text-sm px-3 py-2 rounded-lg border border-church-navy text-church-navy hover:bg-church-navy hover:text-white transition-colors disabled:opacity-50">
-                  {emailing ? 'Emailing…' : 'Email everyone their jobs'}
+                  {emailing ? 'Emailing…' : 'Email everyone (PDF)'}
                 </button>
               )}
               <details className="relative">
