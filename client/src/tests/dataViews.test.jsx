@@ -1022,35 +1022,164 @@ describe('ServingSchedule', () => {
     ]);
   });
 
-  test('building a month posts the month, the services chosen, and to fill in names', async () => {
-    const fetchMock = mockSchedule({ canManage: true });
+  // The wizard's month, as GET /months/plan describes it.
+  const PLAN = {
+    success: true,
+    month: 'June 2026',
+    services: [
+      { service: 'Sunday Worship', jobs: ['Song Leader', 'Communion Assist', 'Communion Assist'], dates: [
+        { date: 'June 7', iso: '2026-06-07', slots: 0, filled: 0 }, { date: 'June 14', iso: '2026-06-14', slots: 0, filled: 0 },
+      ] },
+      { service: 'Sunday Evening', jobs: ['Song Leader'], dates: [
+        { date: 'June 7', iso: '2026-06-07', slots: 0, filled: 0 }, { date: 'June 14', iso: '2026-06-14', slots: 1, filled: 1 },
+      ] },
+      { service: 'Wednesday', jobs: ['Song Leader'], dates: [{ date: 'June 3', iso: '2026-06-03', slots: 0, filled: 0 }] },
+    ],
+    specials: [{ service: 'Gospel Meeting', dates: ['June 18', 'June 19'], slots: 2, open: 2 }],
+    specialKinds: [{ service: 'Gospel Meeting', jobs: ['Song Leader'] }, { service: 'Singing', jobs: ['Song Leader'] }],
+    maxNights: 14,
+    settings: { services: ['Sunday Worship', 'Sunday Evening', 'Wednesday'], fill: true, fillSpecials: true },
+  };
+  let seeds = 0;
+  const built = (_url, opts) => {
+    const sent = JSON.parse(opts.body);
+    return {
+      success: true, month: 'June 2026', preview: !!sent.preview, seed: sent.seed ?? ++seeds, created: 3, filled: 2, open: 1,
+      assignments: [
+        { id: 1, date: 'June 7', service: 'Sunday Worship', job: 'Song Leader', name: `Draw ${sent.seed ?? seeds}`, isNew: true, justFilled: true },
+        { id: 2, date: 'June 7', service: 'Sunday Worship', job: 'Communion Assist', name: '', isNew: true, justFilled: false },
+        { id: 3, date: 'June 18', service: 'Gospel Meeting', job: 'Song Leader', name: 'Lee Park', isNew: false, justFilled: true },
+      ],
+    };
+  };
+  const posts = fetchMock => fetchMock.mock.calls
+    .filter(([url, opts]) => String(url).endsWith('/months') && opts?.method === 'POST')
+    .map(([, opts]) => JSON.parse(opts.body));
+  const openWizard = async (plan = PLAN) => {
+    const fetchMock = mockSchedule({ canManage: true, jobs: ['Song Leader', 'Communion Assist'] }, { '/months/plan': plan, '/api/serving/months': built });
     render(<ServingSchedule />);
     fireEvent.click(await screen.findByRole('button', { name: 'Build a month' }));
-
     const dialog = screen.getByRole('dialog');
     fireEvent.change(within(dialog).getByLabelText('Month: month'), { target: { value: '5' } });
     fireEvent.change(within(dialog).getByLabelText('Month: year'), { target: { value: '2026' } });
-    fireEvent.click(within(dialog).getByLabelText('Wednesday'));    // leave the Sundays on
-    expect(within(dialog).getByRole('checkbox', { name: /fill in names/i })).toBeChecked();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Build June 2026' }));
+    await within(dialog).findByRole('checkbox', { name: 'Sunday Worship' });
+    return { fetchMock, dialog };
+  };
 
-    await waitFor(() => {
-      const call = fetchMock.mock.calls.find(([url, opts]) => String(url).endsWith('/months') && opts?.method === 'POST');
-      expect(JSON.parse(call[1].body)).toEqual({ month: 'June 2026', services: ['Sunday Worship', 'Sunday Evening'], fill: true });
+  test('the Build a month wizard: dates, then this month\'s jobs, then a preview that is saved as shown', async () => {
+    seeds = 0;
+    const { fetchMock, dialog } = await openWizard();
+    expect(within(dialog).getByRole('list', { name: 'Steps' })).toHaveTextContent('1Dates2Jobs3Preview');
+
+    // Step one: no Wednesday, and no Sunday evening on June 7.
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'Wednesday' }));
+    const evening7 = within(dialog).getByRole('button', { name: 'Sunday Evening, June 7' });
+    fireEvent.click(evening7);
+    expect(evening7).toHaveAttribute('aria-pressed', 'false');
+    expect(within(dialog).getByRole('button', { name: 'Sunday Evening, June 14' })).toHaveTextContent('1/1 built');
+    expect(within(dialog).getByText(/Gospel Meeting \(June 18, June 19; 2 open\)/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Next: jobs' }));
+
+    // Step two: four communion assists this month, kept as the usual from now on.
+    const sunday = within(dialog).getByRole('region', { name: 'Sunday Worship jobs this month' });
+    expect(within(sunday).getByText('The usual jobs')).toBeInTheDocument();
+    fireEvent.change(within(sunday).getByLabelText('Sunday Worship: how many Communion Assist'), { target: { value: '4' } });
+    expect(within(sunday).getByText('Changed for this month')).toBeInTheDocument();
+    fireEvent.click(within(sunday).getByRole('checkbox', { name: /Make these the usual jobs for Sunday Worship/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Next: preview' }));
+
+    // Step three: the month as it would be, nothing saved yet.
+    const preview = await within(dialog).findByRole('region', { name: 'Preview: Sunday Worship' });
+    expect(within(preview).getByText('Draw 1')).toBeInTheDocument();
+    expect(within(preview).getByText('Needs someone')).toBeInTheDocument();
+    expect(within(dialog).getByRole('region', { name: 'Preview: Gospel Meeting' })).toBeInTheDocument();
+    expect(posts(fetchMock)[0]).toEqual({
+      month: 'June 2026', services: ['Sunday Worship', 'Sunday Evening'], skip: ['June 7|Sunday Evening'],
+      jobs: { 'Sunday Worship': ['Song Leader', 'Communion Assist', 'Communion Assist', 'Communion Assist', 'Communion Assist'] },
+      saveJobs: ['Sunday Worship'], fill: true, fillSpecials: true, addSpecials: [], preview: true,
     });
+
+    // A fresh draw, then saving keeps that one.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Shuffle again' }));
+    expect(await within(dialog).findByText('Draw 2')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save June 2026' }));
+    await waitFor(() => expect(posts(fetchMock)).toHaveLength(3));
+    const saved = posts(fetchMock)[2];
+    expect(saved.seed).toBe(2);
+    expect(saved.preview).toBeUndefined();
+    expect(await screen.findByText(/Built June 2026: 3 new slots, 2 filled in, 1 still open/)).toBeInTheDocument();
   });
 
-  test('the keeper can build a month laid out but left empty', async () => {
-    const fetchMock = mockSchedule({ canManage: true });
-    render(<ServingSchedule />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Build a month' }));
-    const dialog = screen.getByRole('dialog');
+  test('the wizard starts from the choices last built with, and can lay a month out empty', async () => {
+    const { fetchMock, dialog } = await openWizard({ ...PLAN, settings: { services: ['Sunday Worship'], fill: true, fillSpecials: false } });
+    expect(within(dialog).getByRole('checkbox', { name: 'Sunday Worship' })).toBeChecked();
+    expect(within(dialog).getByRole('checkbox', { name: 'Wednesday' })).not.toBeChecked();
+    expect(within(dialog).getByRole('checkbox', { name: /special services/ })).not.toBeChecked();
+
     fireEvent.click(within(dialog).getByRole('checkbox', { name: /fill in names/i }));
-    fireEvent.click(within(dialog).getByRole('button', { name: /^Build / }));
-    await waitFor(() => {
-      const call = fetchMock.mock.calls.find(([url, opts]) => String(url).endsWith('/months') && opts?.method === 'POST');
-      expect(JSON.parse(call[1].body).fill).toBe(false);
-    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Next: jobs' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Next: preview' }));
+    await within(dialog).findByRole('region', { name: 'Preview: Sunday Worship' });
+    // Nothing to shuffle when no names are being filled in.
+    expect(within(dialog).queryByRole('button', { name: 'Shuffle again' })).not.toBeInTheDocument();
+    expect(posts(fetchMock)[0]).toMatchObject({ services: ['Sunday Worship'], fill: false, fillSpecials: false, jobs: {} });
+  });
+
+  test('a special service can be added in the wizard, with its own jobs, and is previewed with the month', async () => {
+    const { fetchMock, dialog } = await openWizard({ ...PLAN, settings: { ...PLAN.settings, services: ['Wednesday'] } });
+    const form = within(dialog).getByRole('group', { name: 'Add a special service' });
+    fireEvent.change(within(form).getByLabelText('Which special service'), { target: { value: 'Singing' } });
+    fireEvent.change(within(form).getByLabelText('First night'), { target: { value: '2026-06-15' } });
+    fireEvent.change(within(form).getByLabelText('Last night'), { target: { value: '2026-06-17' } });
+    expect(within(form).getByLabelText('First night')).toHaveAttribute('min', '2026-06-01');
+    expect(within(form).getByLabelText('Last night')).toHaveAttribute('max', '2026-06-30');
+    fireEvent.click(within(form).getByRole('button', { name: 'Add' }));
+    const list = within(dialog).getByRole('list', { name: 'Special services to add' });
+    expect(list).toHaveTextContent('Singing · Mon, Jun 15 – Wed, Jun 17');
+
+    // Its jobs, on the next step: the usual for that kind, changed for this once.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Next: jobs' }));
+    const singing = within(dialog).getByRole('region', { name: 'Singing, Mon, Jun 15 – Wed, Jun 17 jobs this month' });
+    fireEvent.click(within(singing).getByRole('checkbox', { name: 'Singing: Communion Assist' }));
+    expect(within(singing).queryByRole('checkbox', { name: /Make these the usual/ })).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Next: preview' }));
+    await within(dialog).findByRole('region', { name: 'Preview: Gospel Meeting' });
+    expect(posts(fetchMock)[0].addSpecials).toEqual([{ service: 'Singing', from: '2026-06-15', through: '2026-06-17', jobs: ['Song Leader', 'Communion Assist'] }]);
+  });
+
+  test('a special service can be removed again, and one too long is not added', async () => {
+    const { dialog } = await openWizard();
+    const form = within(dialog).getByRole('group', { name: 'Add a special service' });
+    fireEvent.change(within(form).getByLabelText('Which special service'), { target: { value: 'Gospel Meeting' } });
+    fireEvent.change(within(form).getByLabelText('First night'), { target: { value: '2026-06-01' } });
+    fireEvent.change(within(form).getByLabelText('Last night'), { target: { value: '2026-06-30' } });
+    expect(within(form).getByText(/more than 14 nights/)).toBeInTheDocument();
+    expect(within(form).getByRole('button', { name: 'Add' })).toBeDisabled();
+
+    fireEvent.change(within(form).getByLabelText('Last night'), { target: { value: '' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Add' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Gospel Meeting, Mon, Jun 1' }));
+    expect(within(dialog).queryByRole('list', { name: 'Special services to add' })).not.toBeInTheDocument();
+  });
+
+  test('a month of only a special service can be built: every regular service unticked', async () => {
+    const { fetchMock, dialog } = await openWizard({ ...PLAN, settings: { ...PLAN.settings, services: ['Wednesday'] } });
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'Wednesday' }));
+    expect(within(dialog).getByRole('button', { name: 'Next: jobs' })).toBeDisabled();
+    const form = within(dialog).getByRole('group', { name: 'Add a special service' });
+    fireEvent.change(within(form).getByLabelText('Which special service'), { target: { value: 'Gospel Meeting' } });
+    fireEvent.change(within(form).getByLabelText('First night'), { target: { value: '2026-06-18' } });
+    fireEvent.click(within(form).getByRole('button', { name: 'Add' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Next: jobs' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Next: preview' }));
+    await within(dialog).findByRole('region', { name: 'Preview: Gospel Meeting' });
+    expect(posts(fetchMock)[0]).toMatchObject({ services: [], addSpecials: [{ service: 'Gospel Meeting', from: '2026-06-18', through: '2026-06-18', jobs: ['Song Leader'] }] });
+  });
+
+  test('leaving out every date stops the wizard at step one', async () => {
+    const { dialog } = await openWizard({ ...PLAN, settings: { ...PLAN.settings, services: ['Wednesday'] } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Wednesday, June 3' }));
+    expect(within(dialog).getByRole('button', { name: 'Next: jobs' })).toBeDisabled();
   });
 
   test('the setup actions sit in one menu', async () => {

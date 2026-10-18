@@ -6,13 +6,15 @@ import { describeRange, parseMonthLabel } from '../lib/timeAway';
 import DateInput, { MonthInput } from './DateInput';
 import { isoFromMonthDay, monthDayOf, monthLabelOf } from '../lib/dates';
 import { CopyLinkButton } from './upcoming/shared';
+import BuildMonthWizard from './BuildMonthWizard';
 
 // The serving schedule, from both sides of it:
 //
 //   · Everybody sees the month, a card per service, each with its own link.
 //     Nobody can put their own name against a slot; a member down for one
 //     who cannot make it asks to be replaced.
-//   · Whoever looks after the schedule builds a month in one go — laid out and
+//   · Whoever looks after the schedule builds a month with the Build a month
+//     wizard (BuildMonthWizard.jsx) — dates, jobs, then a preview of the month
 //     filled from what the men have said they will do — then clicks any name
 //     to change it, the best fits listed first. Setup holds the rest: the jobs
 //     each service needs, special services, and a one-off job.
@@ -28,19 +30,6 @@ const API = '/api/serving';
 // above the table rather than being dropped into an arbitrary Sunday.
 const MONTHLY_JOBS = new Set(['Visual Preparation']);
 
-const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-];
-
-// The month after this one, as the page's suggestion for "build next month".
-function nextMonthLabel() {
-  const now = new Date();
-  const month = (now.getMonth() + 1) % 12;
-  const year  = now.getFullYear() + (now.getMonth() === 11 ? 1 : 0);
-  return `${MONTH_NAMES[month]} ${year}`;
-}
-
 async function send(url, options = {}) {
   const res  = await fetch(url, { credentials: 'include', ...options });
   const json = await res.json().catch(() => ({}));
@@ -50,90 +39,6 @@ async function send(url, options = {}) {
 
 function jsonBody(body) {
   return { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
-}
-
-// ─── Laying out a month ───────────────────────────────────────────────────────
-
-function BuildMonthDialog({ services, initialMonth, onClose, onBuilt }) {
-  const [month, setMonth]       = useState(initialMonth || nextMonthLabel);
-  const [chosen, setChosen]     = useState(() => new Set(services));
-  const [fill, setFill]         = useState(true);
-  const [busy, setBusy]         = useState(false);
-  const [error, setError]       = useState('');
-
-  function toggle(service) {
-    setChosen(prev => {
-      const next = new Set(prev);
-      if (next.has(service)) next.delete(service); else next.add(service);
-      return next;
-    });
-  }
-
-  async function submit(e) {
-    e.preventDefault();
-    setBusy(true); setError('');
-    try {
-      const json = await send(`${API}/months`, { method: 'POST', ...jsonBody({ month, services: [...chosen], fill }) });
-      onBuilt(json);
-    } catch (err) {
-      setError(err.message);
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Dialog title="Build a month" subtitle="Every service's jobs, filled from what the men have said they will do" onClose={onClose} width="max-w-md">
-      <form onSubmit={submit} className="space-y-4">
-        <div>
-          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Month</span>
-          <MonthInput required value={month} onChange={setMonth} />
-        </div>
-
-        <fieldset className="border-0 p-0 m-0">
-          <legend className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Services to lay out</legend>
-          <div className="space-y-1">
-            {services.map(service => (
-              <label key={service} className="flex items-center gap-2 text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={chosen.has(service)}
-                  onChange={() => toggle(service)}
-                  className="accent-church-gold"
-                />
-                {service}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-
-        <label className="flex items-start gap-2 text-sm text-gray-700">
-          <input type="checkbox" checked={fill} onChange={e => setFill(e.target.checked)} className="accent-church-gold mt-0.5" />
-          <span>
-            Fill in names
-            <span className="block text-xs text-gray-500">
-              From the men who said they are glad or willing to do each job — never one who is away that day,
-              and the turns spread out. Change any name afterwards by clicking it.
-            </span>
-          </span>
-        </label>
-
-        <p className="text-xs text-gray-500">
-          Every service in the month gets a slot for each job it needs. Building again only adds what is
-          missing and fills what is still open; a name already there is never moved. Nobody is emailed
-          until you choose Email everyone (PDF).
-        </p>
-
-        {error && <p className="text-sm text-red-600">{error}</p>}
-
-        <div className="flex justify-end gap-2">
-          <button type="button" onClick={onClose} className="text-sm px-3 py-2 rounded-lg border border-gray-200 text-gray-600">Cancel</button>
-          <button type="submit" disabled={busy || !chosen.size} className="btn-primary text-sm disabled:opacity-50">
-            {busy ? 'Building…' : `Build ${month || 'the month'}`}
-          </button>
-        </div>
-      </form>
-    </Dialog>
-  );
 }
 
 // ─── A special service ────────────────────────────────────────────────────────
@@ -1137,8 +1042,8 @@ export default function ServingSchedule({ focus = null }) {
       )}
 
       {building && (
-        <BuildMonthDialog
-          services={data?.services ?? []}
+        <BuildMonthWizard
+          jobs={data?.jobs ?? []}
           onClose={() => setBuilding(false)}
           onBuilt={json => {
             setBuilding(false); setFocused(null);
