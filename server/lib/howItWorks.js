@@ -246,11 +246,21 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'bible-jeopardy', title: 'Bible Jeopardy', audience: 'everyone',
+    blocks: [
+      { p: '**Grow → Bible Class → Bible Jeopardy** is for review games in class. A game is built in Excel: choose **Download the template**, fill in the **Board** sheet — a category name, then a clue, its answer and its points on each row, up to 6 categories of up to 6 clues — and type **yes** under **Daily Double** beside any clue you like. The **Final** sheet holds Final Jeopardy, or leave it empty.' },
+      { p: '**New game** uploads the filled-in template with a name. If anything needs putting right — a clue with no answer, points that are not a number — you are told which row, and nothing is saved until it reads cleanly. Every game has its own link (**Copy link**), and the list can be searched by a game\'s name, who made it, or anything on its board.' },
+      { chart: flow('A Bible Jeopardy game', ['Download the template', 'Fill it in in Excel', 'Upload it with a name', 'Play it in class']) },
+      { p: '**Playing.** **Play this game** puts the board on the screen; **Full screen** fills the projector. Name the teams (or play without scores), pick a square, show the answer, and give or take its points from each team. A Daily Double asks which team chose it and what they bet first. Final Jeopardy takes each team\'s bet, then the clue, then marks each team right or wrong and names the winner. **Undo last score** takes back a mistake, and a game part way through carries on if the page is refreshed.' },
+      { p: 'Whoever made a game can rename it or upload a corrected template (its link stays the same), or delete it. Whoever holds **Bible Quiz Keeper** can do the same to every game.' },
+    ],
+  },
+  {
     id: 'other-pages', title: 'Everything else', audience: 'everyone',
     blocks: [
       { table: { head: ['Page', 'What it is'], rows: [
         ['Grow → Member Match', 'A game for learning names and faces from the directory photos'],
-        ['Grow → Bible Class', 'Class questions, lesson planning and the Bible Quiz'],
+        ['Grow → Bible Class', 'Class questions, lesson planning, the Bible Quiz and Bible Jeopardy'],
         ['Our Church Family → Birthdays & Anniversaries', 'Whose are coming up, from the church website'],
         ['Our Church Family → Elders & Deacons', 'Who they are and what each looks after'],
         ['Worship → Livestreams', 'The church\'s YouTube channel, newest first'],
