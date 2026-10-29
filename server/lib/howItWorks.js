@@ -256,11 +256,23 @@ const SECTIONS = [
     ],
   },
   {
+    id: 'memory-verses', title: 'Memory Verses', audience: 'everyone',
+    blocks: [
+      { p: '**Grow → Bible Class → Memory Verses** helps anybody learn scripture by heart, at home or in class. Its own how-to sits at the top of the app. The **Library** holds sets of verses on one subject — 14 built in, from First Verses for the youngest classes to The Beatitudes — and any set a member adds. Search it for a word, a reference or a topic, and narrow it by **category**, **difficulty** (beginner, intermediate, advanced), **age group** and **translation**.' },
+      { p: '**Practising.** Open a set and choose **Practise**, then any of five games: **Flash cards** (say the verse, turn the card over to check), **Fill in the blanks** (choose how many words to hide), **First letters**, **Word order** (tap the shuffled words back in order) and **Type it out** (see the words you missed). Each verse you get right comes back later — tomorrow, in 3 days, a week, two weeks — and one you miss comes back first; right three times in a row, it counts as learned. **My practice** shows what is due today, verses learned and your streak of days. Your practice is yours alone.' },
+      { chart: flow('Learning a verse', ['Open a set', 'Play any of the games', 'Right: it comes back later', 'Three in a row: learned']) },
+      { p: '**Making a set.** **Make a new set** takes a title, a category, difficulty and age group, the translation, a few tags, and the verses — typed one at a time or pasted several at once. Everybody can find it. Whoever made a set can change or remove it; a built-in set is an admin\'s to correct and is never removed, but **Make a copy** gives anybody their own version to change.' },
+      { p: '**Classes and scores.** Any member can start a class under **My classes**, add students — from the directory, or a typed name for a child or visitor not in it — and add other teachers. Choose the set the class is learning and, as each student recites, tap the stars: ★★★ word-perfect, ★★ one or two helps, ★ a lot of help. The best score on each verse counts toward the class\'s **board**, for the quarter or all time. Only a class\'s teachers see it. A student — and a parent for a child in their household — sees their own scores under **My scores** and is told on their bell.' },
+      { p: '**Present mode.** **Present** puts any game on a TV or projector in large type for the whole class; nothing played there is saved to anybody\'s practice.' },
+      { note: 'The built-in sets are in the New American Standard Bible (1995), quoted by permission of The Lockman Foundation, whose notice is shown in the app. A member\'s own set can be in any translation they name.' },
+    ],
+  },
+  {
     id: 'other-pages', title: 'Everything else', audience: 'everyone',
     blocks: [
       { table: { head: ['Page', 'What it is'], rows: [
         ['Grow → Member Match', 'A game for learning names and faces from the directory photos'],
-        ['Grow → Bible Class', 'Class questions, lesson planning, the Bible Quiz and Bible Jeopardy'],
+        ['Grow → Bible Class', 'Class questions, lesson planning, the Bible Quiz, Bible Jeopardy and Memory Verses'],
         ['Our Church Family → Birthdays & Anniversaries', 'Whose are coming up, from the church website'],
         ['Our Church Family → Elders & Deacons', 'Who they are and what each looks after'],
         ['Worship → Livestreams', 'The church\'s YouTube channel, newest first'],

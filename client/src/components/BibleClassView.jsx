@@ -4,6 +4,7 @@ import QuestionLibrary from './QuestionLibrary';
 import LessonPlanner from './LessonPlanner';
 import BibleQuizView from './BibleQuizView';
 import JeopardyView from './jeopardy/JeopardyView';
+import MemoryVersesView from './memoryVerses/MemoryVersesView';
 
 // ─── App registry ─────────────────────────────────────────────────────────────
 
@@ -49,9 +50,10 @@ const APPS = [
   },
   {
     id:          'memory-verse',
-    title:       'Memory Verse Helper',
-    description: 'Activities, fill-in-the-blank worksheets, and tips to help students memorize scripture.',
-    available:   false,
+    title:       'Memory Verses',
+    description: 'Flash cards and memory games from a searchable library of verse sets — practise at home, or score recitations in class.',
+    component:   MemoryVersesView,
+    available:   true,
     icon: (
       <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8}

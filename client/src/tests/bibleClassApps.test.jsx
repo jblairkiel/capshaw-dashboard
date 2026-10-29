@@ -18,11 +18,12 @@ afterEach(() => { vi.unstubAllGlobals(); });
 // ─── BibleClassView — the launcher ────────────────────────────────────────────
 
 describe('BibleClassView', () => {
-  test('lists the available apps and marks the rest coming soon', () => {
+  test('lists the apps, every one of them ready to open', () => {
     render(<BibleClassView user={APPROVED} />);
     expect(screen.getByText('Question Generator')).toBeInTheDocument();
     expect(screen.getByText('Bible Jeopardy')).toBeInTheDocument();
-    expect(screen.getAllByText('Coming Soon')).toHaveLength(1);
+    expect(screen.getByText('Memory Verses')).toBeInTheDocument();
+    expect(screen.queryByText('Coming Soon')).not.toBeInTheDocument();
   });
 
   test('opens an app and shows a way back', () => {
@@ -38,10 +39,11 @@ describe('BibleClassView', () => {
     expect(screen.getByText('Powered by AI')).toBeInTheDocument();
   });
 
-  test('a "coming soon" tile does not open', () => {
+  test('Memory Verses opens from its tile', async () => {
+    mockFetch(() => Promise.resolve({ json: () => Promise.resolve({ success: true }) }));
     render(<BibleClassView user={APPROVED} />);
-    fireEvent.click(screen.getByText('Memory Verse Helper').closest('div.card'));
-    expect(screen.queryByText('Bible Class Apps')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('Memory Verses').closest('div.card'));
+    expect(screen.getByText('Bible Class Apps')).toBeInTheDocument();
   });
 });
 

@@ -46,6 +46,7 @@ const mailDeliveryRoutes         = require('./routes/mailDelivery');
 const signupRoutes               = require('./routes/signups');
 const communionPrepRoutes        = require('./routes/communionPrep');
 const rotationRoutes             = require('./routes/rotations');
+const memoryVerseRoutes          = require('./routes/memoryVerses');
 const paths                      = require('./lib/paths');
 const { requireSiteAuth, limitPending } = require('./middleware/auth');
 const { applyImpersonation }     = require('./middleware/impersonation');
@@ -172,6 +173,7 @@ function createApp() {
   app.use('/api/signups',         signupRoutes);
   app.use('/api/communion-prep',  communionPrepRoutes);
   app.use('/api/rotations',       rotationRoutes);
+  app.use('/api/memory-verses',   memoryVerseRoutes);
 
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
