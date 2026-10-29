@@ -44,6 +44,8 @@ const KINDS = {
   'signup-changed':         'A sign-up you are on, or made, changed',
   'group-changed':          'You were taken off a church group, or it stopped meeting',
   'areas-changed':          'What you look after on the portal changed',
+  'memory-score':           'A teacher scored a memory verse you (or your child) recited',
+  'memory-class':           'You (or your child) were added to a memory verse class, or asked to teach one',
 };
 
 const KIND_IDS = Object.keys(KINDS);
@@ -58,6 +60,7 @@ const PAGE_FOR_SUBJECT = {
   'song-request': 'upcoming',
   'bible-quiz-flag': 'bible-class',
   'rotation':     'rotations',
+  'memory-class': 'bible-class',
 };
 
 function pageForSubject(subjectType) {

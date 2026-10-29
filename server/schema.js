@@ -1564,6 +1564,120 @@ function initSchema(db) {
   );
   DEFAULT_MAIL_GROUPS.forEach((g, i) => insertGroup.run(g.key, g.name, g.description, i));
 
+  // ─── Memory Verses ────────────────────────────────────────────────────────────
+  // Bible Class → Memory Verses (lib/memoryVerses). A library of verse sets
+  // every member can search, practise and add to; each member's own practice;
+  // and classes a teacher scores recitations for.
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_sets (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      slug            TEXT    UNIQUE,                 -- the built-in sets' own name (lib/memoryVerses/defaults.js)
+      title           TEXT    NOT NULL,
+      description     TEXT    NOT NULL DEFAULT '',
+      category        TEXT    NOT NULL DEFAULT 'Other',
+      difficulty      TEXT    NOT NULL DEFAULT 'beginner',   -- beginner | intermediate | advanced
+      audience        TEXT    NOT NULL DEFAULT 'everyone',   -- children | youth | adults | everyone
+      translation     TEXT    NOT NULL DEFAULT '',
+      tags            TEXT    NOT NULL DEFAULT '[]',
+      built_in        INTEGER NOT NULL DEFAULT 0,
+      created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_by_name TEXT    NOT NULL DEFAULT '',
+      created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS memory_verses (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      set_id     INTEGER NOT NULL REFERENCES memory_sets(id) ON DELETE CASCADE,
+      position   INTEGER NOT NULL DEFAULT 0,
+      reference  TEXT    NOT NULL,
+      text       TEXT    NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_verses_set ON memory_verses(set_id, position);
+
+    -- Each member's own practice, verse by verse: which box of the review
+    -- ladder it is in and when it is next due. Nobody else sees it.
+    CREATE TABLE IF NOT EXISTS memory_progress (
+      user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      verse_id       INTEGER NOT NULL REFERENCES memory_verses(id) ON DELETE CASCADE,
+      box            INTEGER NOT NULL DEFAULT 0,
+      correct        INTEGER NOT NULL DEFAULT 0,
+      attempts       INTEGER NOT NULL DEFAULT 0,
+      last_practiced TEXT    NOT NULL DEFAULT '',
+      due_on         TEXT    NOT NULL DEFAULT '',
+      PRIMARY KEY (user_id, verse_id)
+    );
+
+    -- The days a member practised, for their streak.
+    CREATE TABLE IF NOT EXISTS memory_practice_days (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      day     TEXT    NOT NULL,
+      PRIMARY KEY (user_id, day)
+    );
+
+    CREATE TABLE IF NOT EXISTS memory_classes (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      name            TEXT    NOT NULL,
+      description     TEXT    NOT NULL DEFAULT '',
+      archived        INTEGER NOT NULL DEFAULT 0,
+      created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      created_by_name TEXT    NOT NULL DEFAULT '',
+      created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS memory_class_teachers (
+      class_id INTEGER NOT NULL REFERENCES memory_classes(id) ON DELETE CASCADE,
+      user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      PRIMARY KEY (class_id, user_id)
+    );
+
+    -- A student is somebody in the directory, or a name typed in (a child or a
+    -- visitor who is not in it).
+    CREATE TABLE IF NOT EXISTS memory_class_students (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      class_id     INTEGER NOT NULL REFERENCES memory_classes(id) ON DELETE CASCADE,
+      directory_id INTEGER REFERENCES directory(id) ON DELETE SET NULL,
+      name         TEXT    NOT NULL,
+      added_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_class_students ON memory_class_students(class_id);
+
+    -- One recitation, marked by a teacher: 3 stars word-perfect, 2 with one or
+    -- two helps, 1 with a lot of help.
+    CREATE TABLE IF NOT EXISTS memory_scores (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      class_id       INTEGER NOT NULL REFERENCES memory_classes(id) ON DELETE CASCADE,
+      student_id     INTEGER NOT NULL REFERENCES memory_class_students(id) ON DELETE CASCADE,
+      set_id         INTEGER REFERENCES memory_sets(id) ON DELETE SET NULL,
+      verse_id       INTEGER REFERENCES memory_verses(id) ON DELETE SET NULL,
+      reference      TEXT    NOT NULL DEFAULT '',
+      stars          INTEGER NOT NULL CHECK (stars BETWEEN 1 AND 3),
+      note           TEXT    NOT NULL DEFAULT '',
+      scored_on      TEXT    NOT NULL,
+      scored_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      scored_by_name TEXT    NOT NULL DEFAULT '',
+      created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_scores_class ON memory_scores(class_id, scored_on);
+  `);
+
+  // The sets every congregation starts with, each put in once by its slug.
+  const memoryDefaults = require('./lib/memoryVerses/defaults');
+  const hasSet = db.prepare('SELECT 1 FROM memory_sets WHERE slug = ?');
+  const addSet = db.prepare(`
+    INSERT INTO memory_sets (slug, title, description, category, difficulty, audience, translation, tags, built_in, created_by_name)
+    VALUES (@slug, @title, @description, @category, @difficulty, @audience, @translation, @tags, 1, 'Built in')
+  `);
+  const addVerse = db.prepare('INSERT INTO memory_verses (set_id, position, reference, text) VALUES (?, ?, ?, ?)');
+  db.transaction(() => {
+    for (const set of memoryDefaults.SETS) {
+      if (hasSet.get(set.slug)) continue;
+      const id = addSet.run({ ...set, translation: memoryDefaults.TRANSLATION, tags: JSON.stringify(set.tags || []) }).lastInsertRowid;
+      set.verses.forEach((verse, i) => addVerse.run(id, i, verse.reference, verse.text));
+    }
+  })();
+
 }
 
 module.exports = { initSchema };

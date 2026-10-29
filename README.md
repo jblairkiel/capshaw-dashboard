@@ -785,6 +785,59 @@ because nobody ever heard of it.
 
 ---
 
+## Memory Verses
+
+**Grow → Bible Class → Memory Verses** (`client/src/components/memoryVerses/`,
+`server/lib/memoryVerses/`, `server/routes/memoryVerses.js` at
+`/api/memory-verses`) is a library of verse sets with memory games, a
+member's own practice, and classes whose recitations a teacher scores. Every
+approved member can use all of it. Its how-to sits at the top of the app
+(`HowTo.jsx`); closing it is remembered on that device.
+
+- **Library** (`memory_sets`, `memory_verses`). Searched by title,
+  description, tags, category, and every verse's reference and words, and
+  filtered by category, difficulty (beginner / intermediate / advanced), age
+  group (children / youth / adults; *everyone* suits every age) and
+  translation. Any member adds a set. Whoever made it, or an admin, changes or
+  removes it. Changing a set keeps practice and scores on the verses whose
+  reference stayed the same.
+- **Built-in sets** (`server/lib/memoryVerses/defaults.js`). There are 14,
+  written once at start-up by `slug` (`schema.js`), so an admin's corrections
+  stick and a set added to the list later appears on the next start. They
+  can't be removed; anybody can **Make a copy**. Never change a slug.
+- **Practice** (`memory_progress`, `memory_practice_days`). There are five
+  games: flash cards, fill in the blanks, first letters, word order and type
+  it out. Their rules are in `games.js`. Each verse finished posts to
+  `/practice` and moves up a review ladder (due again in 0, 1, 3, 7, 14 or 30
+  days); a miss sends it back to the bottom. Rung 3 counts as learned. Streaks
+  count days in a row, and aren't broken until a whole day is missed. Practice
+  is private, and isn't written to the history of changes. **Present** mode,
+  for a TV or projector, records nothing.
+- **Classes** (`memory_classes`, `memory_class_teachers`,
+  `memory_class_students`, `memory_scores`). Any member starts one and
+  teaches it, and can add co-teachers (the last one can't leave). Students
+  come from the directory or are a typed name. A recitation gets 1–3 stars,
+  and the board counts each student's best stars per verse, for the quarter or
+  all time. Only a class's teachers see it. A student sees their own scores
+  under **My scores**, and so does anybody in their household (same address,
+  `lib/people.js`), so a parent sees a child's. The student's account is told
+  on the bell (`memory-score`, `memory-class`); for a child without one, the
+  household's accounts are told.
+
+**The translation.** The built-in sets are NASB 1995, under The Lockman
+Foundation's permission to quote up to 500 verses without asking, provided
+their notice (`NOTICE` in `defaults.js`) is shown. The app shows it on every
+screen. The sets come to under 100 verses, and a test keeps them under 150.
+Lockman's terms also say the quoted verses must not make up 25% or more of the
+work they appear in. A memory-verse app is mostly verses, so confirm with
+Lockman (www.lockman.org) before relying on the allowance. Check any change to
+the verse text against a printed NASB.
+
+**Sample data** (`seed/generators/memoryVerses.js`) adds two member-made sets
+and two classes of directory people with a few weeks of scores. The classes are
+given to the site's first admin. No account is ever made up to teach them, and
+nobody's own practice is made up.
+
 ## Rotations
 
 **Our Church Family → Rotations** is for anything the church takes in turns —
