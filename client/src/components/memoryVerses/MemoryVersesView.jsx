@@ -28,6 +28,19 @@ async function send(url, options = {}) {
   return json;
 }
 
+// What the page reads from /meta and /me, filled in where an answer leaves
+// something out, so a partial answer shows an empty tab rather than breaking
+// the page.
+const withMeta = json => ({
+  categories: [], difficulties: [], audiences: [], translations: [], defaultTranslation: '', notice: '', ...json,
+});
+const withMe = json => ({
+  ...json,
+  practice: { practiced: 0, learned: 0, streak: 0, practisedToday: false, due: [], sets: [], ...json?.practice },
+  scores: json?.scores || [],
+  classes: json?.classes || [],
+});
+
 const TABS = [['library', 'Library'], ['practice', 'My practice'], ['classes', 'My classes'], ['scores', 'My scores']];
 const field = 'border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:border-church-gold';
 
@@ -287,9 +300,9 @@ export default function MemoryVersesView({ user }) {
   const [allSets, setAllSets] = useState([]);
   const [error, setError] = useState('');
 
-  const loadMe = useCallback(() => send(`${API}/me`).then(setMe).catch(err => setError(err.message)), []);
+  const loadMe = useCallback(() => send(`${API}/me`).then(json => setMe(withMe(json))).catch(err => setError(err.message)), []);
   useEffect(() => {
-    send(`${API}/meta`).then(setMeta).catch(err => setError(err.message));
+    send(`${API}/meta`).then(json => setMeta(withMeta(json))).catch(err => setError(err.message));
     loadMe();
   }, [loadMe]);
   useEffect(() => {

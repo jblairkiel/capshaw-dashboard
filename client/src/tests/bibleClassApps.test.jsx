@@ -40,10 +40,15 @@ describe('BibleClassView', () => {
   });
 
   test('Memory Verses opens from its tile', async () => {
-    mockFetch(() => Promise.resolve({ json: () => Promise.resolve({ success: true }) }));
+    mockFetch(url => Promise.resolve({ json: () => Promise.resolve(
+      String(url).includes('/sets') ? { success: true, sets: [] } : { success: true },
+    ) }));
     render(<BibleClassView user={APPROVED} />);
     fireEvent.click(screen.getByText('Memory Verses').closest('div.card'));
     expect(screen.getByText('Bible Class Apps')).toBeInTheDocument();
+    // An answer with nothing in it still draws the page, with empty tabs.
+    expect(await screen.findByRole('tab', { name: 'My practice' })).toBeInTheDocument();
+    expect(await screen.findByText(/No sets match/)).toBeInTheDocument();
   });
 });
 
