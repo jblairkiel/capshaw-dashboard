@@ -134,6 +134,41 @@ function cleanFields(body) {
   return values;
 }
 
+// ─── The services a guest can be recorded at ──────────────────────────────────
+//
+// Nearly every guest comes on a Sunday morning, a Sunday evening or a
+// Wednesday night, so those three are offered as one-tap buttons; everything
+// else on the church's list of services comes under Other. Each is recorded by
+// the list's own name ("Sunday AM Worship"), not a nickname, because that is
+// what Record Keeping matches a guest visit against.
+//
+// Which three are the everyday ones is read from the list — the day it is
+// held, and AM or PM in its name or song-tracker name — so renaming a service
+// on Admin moves the button with it.
+const EVERYDAY = [
+  { label: 'Sun AM', weekday: 0, words: /\b(am|morning)\b/i },
+  { label: 'Sun PM', weekday: 0, words: /\b(pm|evening|night)\b/i },
+  { label: 'Wed PM', weekday: 3, words: /./ },
+];
+
+function guestServices() {
+  const all = db.prepare(`
+    SELECT name, weekday, song_names FROM service_types WHERE active = 1 ORDER BY sort_order, name
+  `).all();
+  const taken = new Set();
+  const everyday = [];
+  for (const slot of EVERYDAY) {
+    const fits = all.filter(s => !taken.has(s.name) && s.weekday === slot.weekday &&
+      slot.words.test(`${s.name} ${s.song_names || ''}`) && !/singing|class/i.test(s.name));
+    // A worship service before a Bible study held the same morning.
+    const pick = fits.find(s => /worship/i.test(s.name)) || fits[0];
+    if (!pick) continue;
+    taken.add(pick.name);
+    everyday.push({ label: slot.label, name: pick.name });
+  }
+  return { everyday, other: all.filter(s => !taken.has(s.name)).map(s => s.name) };
+}
+
 // ─── GET /api/visitors ────────────────────────────────────────────────────────
 
 // GET /api/visitors/mail-lists — where the guests at a service can be emailed,
@@ -160,7 +195,7 @@ router.get('/', (req, res) => {
     followUp: followUpFrom(follow.get(String(row.id)) || []),
   }));
 
-  res.json({ success: true, visitors, canManage: holdsArea(req.user, AREA) });
+  res.json({ success: true, visitors, services: guestServices(), canManage: holdsArea(req.user, AREA) });
 });
 
 router.get('/:id', (req, res) => {

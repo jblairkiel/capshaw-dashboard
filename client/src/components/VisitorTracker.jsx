@@ -3,6 +3,7 @@ import Dialog from './Dialog';
 import WorkflowDialogButton from './WorkflowDialogButton';
 import { useIsNarrow } from '../lib/useMediaQuery';
 import DateInput from './DateInput';
+import GuestServicePicker from './GuestServicePicker';
 import { fromIso } from '../lib/dates';
 
 // Our guests: who they are, how to reach them, and when they have been with us.
@@ -462,7 +463,7 @@ function GuestEntry({ entry, guests, onChange, onRemove, onUseExisting }) {
   );
 }
 
-function RecordGuests({ guests, onClose, onSaved }) {
+function RecordGuests({ guests, services, onClose, onSaved }) {
   const [date, setDate]       = useState(todayMdy);
   const [service, setService] = useState('');
   const [entries, setEntries] = useState([]);
@@ -484,14 +485,6 @@ function RecordGuests({ guests, onClose, onSaved }) {
       .catch(() => {});   // No lists, no email; recording still works.
     return () => { live = false; };
   }, []);
-
-  // The services already used, so the same one is spelled the same way each
-  // week — the record-keeping check matches on the name.
-  const services = useMemo(() => {
-    const names = new Set();
-    for (const g of guests) for (const v of g.visits || []) if (v.service) names.add(v.service);
-    return [...names].sort();
-  }, [guests]);
 
   const chosen  = new Set(entries.filter(e => e.id != null).map(e => e.id));
   const q       = search.trim().toLowerCase();
@@ -530,6 +523,7 @@ function RecordGuests({ guests, onClose, onSaved }) {
   async function submit(e, withEmail = false) {
     e.preventDefault();
     if (!date.trim()) return setError('Choose the date of the service');
+    if (!service.trim()) return setError('Choose the service');
     if (!entries.length) return setError('Add at least one guest');
     if (entries.some(en => !en.values.name.trim())) return setError('Every guest needs a name');
 
@@ -567,25 +561,16 @@ function RecordGuests({ guests, onClose, onSaved }) {
       width="max-w-2xl"
     >
       <form onSubmit={submit} className="space-y-5">
-        {/* The service */}
-        <div className="grid grid-cols-2 gap-3">
-          <label className="block">
+        {/* The service: the day, then which of that day's services */}
+        <div className="space-y-3">
+          <label className="block sm:w-1/2">
             <span className={label}>Date <span className="text-red-400" aria-hidden="true">*</span></span>
             <DateInput format="mdy" value={date} onChange={setDate} className={field} />
           </label>
-          <label className="block">
-            <span className={label}>Service</span>
-            <input
-              value={service}
-              list="guest-services"
-              placeholder="Sun AM"
-              onChange={e => setService(e.target.value)}
-              className={field}
-            />
-            <datalist id="guest-services">
-              {services.map(s => <option key={s} value={s} />)}
-            </datalist>
-          </label>
+          <div>
+            <span className={`${label} block mb-1`}>Service <span className="text-red-400" aria-hidden="true">*</span></span>
+            <GuestServicePicker services={services} value={service} onChange={setService} />
+          </div>
         </div>
 
         {/* Finding somebody who has been before, or starting somebody new */}
@@ -711,7 +696,7 @@ function RecordGuests({ guests, onClose, onSaved }) {
 
 // ─── One guest, in full ───────────────────────────────────────────────────────
 
-function GuestDetail({ guest, canManage, user, onClose, onChanged, onEdit, onFollowUpDone }) {
+function GuestDetail({ guest, services, canManage, user, onClose, onChanged, onEdit, onFollowUpDone }) {
   const [visit, setVisit] = useState({ date: '', service: '' });
   const [busy, setBusy]   = useState(false);
   const [error, setError] = useState('');
@@ -721,6 +706,7 @@ function GuestDetail({ guest, canManage, user, onClose, onChanged, onEdit, onFol
   async function addVisit(e) {
     e.preventDefault();
     if (!visit.date.trim()) return setError('A visit needs a date');
+    if (!visit.service.trim()) return setError('Choose the service');
     setBusy(true); setError('');
     try {
       const json = await send(`${API}/${guest.id}/visits`, { method: 'POST', ...jsonBody(visit) });
@@ -852,25 +838,21 @@ function GuestDetail({ guest, canManage, user, onClose, onChanged, onEdit, onFol
           <h4 className="text-sm font-semibold text-church-navy mb-2">Visit history</h4>
           {/* Recording a visit comes first: it is what the section is opened for. */}
           {canManage && (
-            <form onSubmit={addVisit} className="flex items-end gap-2 mb-3 flex-wrap">
+            <form onSubmit={addVisit} className="space-y-2 mb-3 rounded-xl border border-gray-200 p-3">
               <label className="block">
                 <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Date</span>
                 <DateInput
                   format="mdy"
                   value={visit.date}
                   onChange={date => setVisit(v => ({ ...v, date }))}
-                  className="mt-1 block w-40 bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold"
+                  className="mt-1 block w-44 bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold"
                 />
               </label>
-              <label className="block">
-                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Service</span>
-                <input
-                  value={visit.service}
-                  placeholder="Sun AM"
-                  onChange={e => setVisit(v => ({ ...v, service: e.target.value }))}
-                  className="mt-1 block w-36 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-church-gold"
-                />
-              </label>
+              <div>
+                <span className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Service</span>
+                <GuestServicePicker compact services={services} value={visit.service}
+                  onChange={service => setVisit(v => ({ ...v, service }))} />
+              </div>
               <button type="submit" disabled={busy} className="btn-primary text-sm disabled:opacity-50">Record a visit</button>
             </form>
           )}
@@ -1066,6 +1048,7 @@ function FollowUpBoard({ guests, user, onOpen, onFollowUpDone }) {
 export default function VisitorTracker({ user, initialGuestId = null }) {
   const [guests, setGuests]   = useState([]);
   const [canManage, setCanManage] = useState(false);
+  const [services, setServices] = useState(null);   // { everyday, other } for the service buttons
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
   const [search, setSearch]   = useState('');
@@ -1084,6 +1067,7 @@ export default function VisitorTracker({ user, initialGuestId = null }) {
       const json = await send(API);
       setGuests(json.visitors.map(summarise));
       setCanManage(json.canManage);
+      setServices(json.services || null);
       setError('');
     } catch (err) {
       setError(err.message);
@@ -1304,6 +1288,7 @@ export default function VisitorTracker({ user, initialGuestId = null }) {
       {open && !editing && (
         <GuestDetail
           guest={open}
+          services={services}
           canManage={canManage}
           user={user}
           onFollowUpDone={load}
@@ -1316,6 +1301,7 @@ export default function VisitorTracker({ user, initialGuestId = null }) {
       {recording && (
         <RecordGuests
           guests={guests}
+          services={services}
           onClose={() => setRecording(false)}
           onSaved={({ date, service, added, returning, emailed }) => {
             setRecording(false);
