@@ -205,6 +205,36 @@ describe('/api/records/contributions', () => {
 // ─── Guests ───────────────────────────────────────────────────────────────────
 
 describe('/api/visitors', () => {
+  describe('the services a guest can be recorded at', () => {
+    const services = async () => (await request(buildApp(MEMBER)).get('/api/visitors')).body.services;
+    let saved;
+    beforeEach(() => { saved = db.prepare('SELECT * FROM service_types').all(); });
+    afterEach(() => {
+      db.prepare('DELETE FROM service_types').run();
+      const put = db.prepare('INSERT INTO service_types (id, name, sort_order, active, created_at, tracking, weekday, song_names) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+      for (const r of saved) put.run(r.id, r.name, r.sort_order, r.active, r.created_at, r.tracking, r.weekday, r.song_names);
+    });
+
+    test('Sunday morning and evening and Wednesday night are the everyday three, by their own names', async () => {
+      expect(await services()).toEqual({
+        everyday: [
+          { label: 'Sun AM', name: 'Sunday AM Worship' },
+          { label: 'Sun PM', name: 'Sunday PM Worship' },
+          { label: 'Wed PM', name: 'Wednesday Bible Study' },
+        ],
+        other: ['Sunday Bible Study', 'Gospel Meeting', 'Monthly Singing'],
+      });
+    });
+
+    test('a renamed service keeps its button, and a retired one is no longer offered', async () => {
+      db.prepare("UPDATE service_types SET name = 'Lord''s Day Evening' WHERE name = 'Sunday PM Worship'").run();
+      db.prepare("UPDATE service_types SET active = 0 WHERE name = 'Monthly Singing'").run();
+      const { everyday, other } = await services();
+      expect(everyday[1]).toEqual({ label: 'Sun PM', name: "Lord's Day Evening" });
+      expect(other).not.toContain('Monthly Singing');
+    });
+  });
+
   test('a guest carries their name and details, not just visit dates', async () => {
     const created = await request(buildApp(GUESTS))
       .post('/api/visitors')
