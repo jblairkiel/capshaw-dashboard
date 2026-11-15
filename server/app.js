@@ -50,6 +50,8 @@ const memoryVerseRoutes          = require('./routes/memoryVerses');
 const paths                      = require('./lib/paths');
 const { requireSiteAuth, limitPending } = require('./middleware/auth');
 const { applyImpersonation }     = require('./middleware/impersonation');
+const { noteVisits }             = require('./lib/portalUsage');
+const usageRoutes                = require('./routes/usage');
 const { requireTrustedOrigin }   = require('./middleware/csrf');
 const rateLimit                  = require('express-rate-limit');
 
@@ -134,6 +136,9 @@ function createApp() {
   // an account still waiting for approval reaches only the sign-in routes and
   // the page that tells it who to contact.
   app.use('/api', apiRateLimit, requireTrustedOrigin(allowedOrigins), requireSiteAuth, applyImpersonation, limitPending);
+  // Who used the portal today, for the weekly reports (lib/portalUsage.js).
+  app.use('/api', noteVisits);
+  app.use('/api/usage', usageRoutes);
 
   app.use('/api/auth', authRoutes);
   app.use('/api/welcome', welcomeRoutes);

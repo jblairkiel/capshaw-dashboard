@@ -294,6 +294,16 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
   const openSignup = useCallback(id => { setActiveTab('signups'); setSignupFocus(id); }, []);
   const [siteData,    setSiteData]    = useState(null);
 
+  // Which pages members open, counted for the weekly reports. Never waited
+  // on, and an admin viewing as somebody else is not counted as them.
+  useEffect(() => {
+    if (!user || user.role === 'pending' || impersonatedBy) return;
+    fetch('/api/usage/page', {
+      method: 'POST', credentials: 'include', keepalive: true,
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ page: activeTab }),
+    }).catch(() => {});
+  }, [activeTab, user, impersonatedBy]);
+
   useEffect(() => {
     // The sign-ups and rotations pages keep their own permanent links in the
     // address bar.

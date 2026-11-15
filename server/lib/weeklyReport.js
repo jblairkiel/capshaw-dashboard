@@ -13,6 +13,8 @@
 const db = require('../db');
 const { addDays, sundayOf, churchToday } = require('./recordKeeping');
 const { parseAnyDate } = require('./contributions');
+const { labelOf } = require('./portalUsage');
+const { areaLabel } = require('./areas');
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -119,6 +121,59 @@ function followUpsIn(from, to) {
     SELECT id, status, outcome, created_at, completed_at FROM workflow_instances
      WHERE definition_id = 'visitor-follow-up' AND (date(created_at) BETWEEN ? AND ? OR date(completed_at) BETWEEN ? AND ?)
   `).all(from, to, from, to);
+}
+
+// ─── The portal itself ────────────────────────────────────────────────────────
+//
+// Who used the portal and what they did there. Visits and page opens are
+// recorded from when that recording began (lib/portalUsage.js); the rest is
+// read from what the portal already keeps — changes made, RSVPs, sign-ups,
+// song requests, comments, Bible class games, emails sent.
+
+const count = (sql, ...args) => db.prepare(sql).get(...args).n;
+
+function activeIn(from, to) {
+  return count('SELECT COUNT(DISTINCT user_id) n FROM portal_visits WHERE day BETWEEN ? AND ?', from, to);
+}
+
+// Members who used the portal each week, from `fromSunday` to `toSaturday`.
+function weeklyActive(fromSunday, toSaturday) {
+  const weeks = [];
+  for (let s = fromSunday; s <= toSaturday; s = addDays(s, 7)) weeks.push({ start: s, members: activeIn(s, addDays(s, 6)) });
+  return weeks;
+}
+
+function portalIn(from, to) {
+  const members = activeIn(from, to);
+  const onPhone = count('SELECT COUNT(DISTINCT user_id) n FROM portal_visits WHERE day BETWEEN ? AND ? AND phone = 1', from, to);
+  const pages = db.prepare(`
+    SELECT page, SUM(views) AS views, COUNT(DISTINCT user_id) AS people FROM portal_page_views
+     WHERE day BETWEEN ? AND ? GROUP BY page ORDER BY views DESC, page LIMIT 8
+  `).all(from, to).map(p => ({ page: p.page, label: labelOf(p.page), views: p.views, people: p.people }));
+  const changes = db.prepare(`
+    SELECT area, COUNT(*) AS n FROM action_log WHERE date(created_at) BETWEEN ? AND ? GROUP BY area ORDER BY n DESC
+  `).all(from, to).map(r => ({ area: r.area, label: r.area ? areaLabel(r.area) : 'Elsewhere', changes: r.n }));
+  return {
+    members,
+    onPhone,
+    phoneShare: members ? round1((onPhone / members) * 100) : null,
+    accounts: count("SELECT COUNT(*) n FROM users WHERE role IN ('approved', 'admin')"),
+    newAccounts: count("SELECT COUNT(*) n FROM users WHERE role IN ('approved', 'admin') AND date(coalesce(approved_at, created_at)) BETWEEN ? AND ?", from, to),
+    pages,
+    pageViews: count('SELECT COALESCE(SUM(views), 0) n FROM portal_page_views WHERE day BETWEEN ? AND ?', from, to),
+    changes: changes.reduce((n, c) => n + c.changes, 0),
+    changedBy: count('SELECT COUNT(DISTINCT user_id) n FROM action_log WHERE date(created_at) BETWEEN ? AND ?', from, to),
+    changesByArea: changes.slice(0, 8),
+    did: {
+      rsvps: count("SELECT COUNT(*) n FROM group_event_rsvps WHERE date(responded_at) BETWEEN ? AND ?", from, to),
+      signups: count('SELECT COUNT(*) n FROM signup_entries WHERE date(created_at) BETWEEN ? AND ?', from, to),
+      songRequests: count('SELECT COUNT(*) n FROM song_requests WHERE date(created_at) BETWEEN ? AND ?', from, to),
+      comments: count('SELECT COUNT(*) n FROM event_comments WHERE deleted_at IS NULL AND date(created_at) BETWEEN ? AND ?', from, to),
+      quizGames: count('SELECT COUNT(*) n FROM bible_quiz_games WHERE finished_at IS NOT NULL AND date(finished_at) BETWEEN ? AND ?', from, to),
+      versePracticers: count('SELECT COUNT(DISTINCT user_id) n FROM memory_practice_days WHERE day BETWEEN ? AND ?', from, to),
+      emails: count("SELECT COUNT(*) n FROM mail_outbox WHERE status = 'sent' AND date(sent_at) BETWEEN ? AND ?", from, to),
+    },
+  };
 }
 
 // ─── Attendance ───────────────────────────────────────────────────────────────
@@ -250,9 +305,16 @@ function weekReport({ start, end }) {
     };
   });
 
+  // The portal: this week, against the four before, and a trend.
+  const portal = portalIn(start, end);
+  const prior = weeklyActive(addDays(start, -28), addDays(start, -1)).map(w => w.members);
+  portal.avg4 = prior.some(Boolean) ? round1(avg(prior)) : null;
+  portal.trend = weeklyActive(addDays(start, -77), end).map(w => w.members);
+
   return {
     start, end,
     attendance: { services, headline, total: services.reduce((n, s) => n + s.count, 0) },
+    portal,
     giving, guests, roll, songs, meetings, serving, followUps, engagement, days,
   };
 }
@@ -388,9 +450,16 @@ function yearReport({ end }) {
     signups: db.prepare('SELECT COUNT(*) n FROM signup_entries WHERE date(created_at) BETWEEN ? AND ?').get(start, end).n,
   };
 
+  const portal = portalIn(start, end);
+  portal.weeks = weeklyActive(firstSunday, end);
+  const counted = portal.weeks.filter(w => w.members);
+  portal.weeklyAverage = counted.length ? round1(avg(counted.map(w => w.members))) : null;
+  portal.since = db.prepare('SELECT MIN(day) AS d FROM portal_visits').get().d;
+
   return {
     start, end, year,
     attendance: { services: perService, weeks, serviceNames },
+    portal,
     giving, guests, roll, songs, groups, serving, followUps, engagement,
   };
 }

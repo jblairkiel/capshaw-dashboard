@@ -1471,6 +1471,27 @@ function initSchema(db) {
   `);
 
   // ─── Sign-up lists ────────────────────────────────────────────────────────────
+  // How the portal is used (lib/portalUsage.js), for the weekly reports: who
+  // used it each day, on a phone or a computer, and how often each page was
+  // opened. Nothing about what was read or typed.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS portal_visits (
+      user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      day      TEXT    NOT NULL,                 -- church date, 2026-11-08
+      phone    INTEGER NOT NULL DEFAULT 0,
+      computer INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, day)
+    );
+    CREATE INDEX IF NOT EXISTS idx_portal_visits_day ON portal_visits(day);
+    CREATE TABLE IF NOT EXISTS portal_page_views (
+      day     TEXT    NOT NULL,
+      page    TEXT    NOT NULL,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      views   INTEGER NOT NULL DEFAULT 1,
+      PRIMARY KEY (day, page, user_id)
+    );
+  `);
+
   // Bible Jeopardy boards (lib/jeopardy.js), built in the Excel template and
   // uploaded by any member. The board is kept whole as JSON — categories, each
   // with its clues, answers, points and Daily Doubles, and an optional Final —

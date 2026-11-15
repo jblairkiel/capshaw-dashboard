@@ -61,6 +61,8 @@ const NOT_FILLED = {
   worship_reminders: 'Which song leaders have been reminded about which service. A made-up entry would stop a real reminder being sent.',
   scheduled_jobs: 'When the weekly reminders last went out. A made-up entry would stop a real one being sent.',
   user_areas: 'Who may do what, which follows from the accounts.',
+  portal_visits: 'Who used the portal on which day, which follows from the accounts, and made-up visits would pass for real use in the weekly reports.',
+  portal_page_views: 'Which pages members opened. Same reason as portal_visits.',
   action_log: 'Append-only, and the record of what really happened. Filling it would be a lie about the past, and removing a batch would tear pages out of it.',
   mail_outbox: 'Mail waiting to be sent. Anything put here is liable to actually go out.',
   service_jobs: 'The jobs each service needs, which the schedule keeper sets. Made-up ones would change what a real month is built with.',
