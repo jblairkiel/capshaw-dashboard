@@ -592,10 +592,10 @@ function analyticalWeek(doc, { week }) {
   if (!week.songs.length) { text(doc, 'No songs recorded yet.', M + half + 20, ky, { size: 8, color: C.muted }); ky += 14; }
   y = Math.max(ey, ky) + 10;
 
-  // The rest, in one line.
-  const f = week.followUps; const e = week.engagement;
-  heading(doc, 'Follow-ups & members online', M, y, W);
-  text(doc, `Guest follow-ups: ${f.started} started, ${f.reached} reached, ${f.unreached} could not be reached, ${f.open} still open.   Bible Quiz: ${e.quizGames} games by ${e.quizPlayers} members.   Memory verses: ${e.versesScored} said in class.   Sign-ups: ${e.signups}.`,
+  // Guest follow-ups, in one line.
+  const f = week.followUps;
+  heading(doc, 'Guest follow-ups', M, y, W);
+  text(doc, `${f.started} started, ${f.reached} reached, ${f.unreached} could not be reached, ${f.open} still open.   Memory verses said in class: ${week.engagement.versesScored}.`,
     M, y + 22, { size: 8, color: C.ink2, width: W, lineGap: 2 });
 }
 
@@ -632,16 +632,161 @@ function analyticalYear(doc, { week, year }) {
   y += 22 + Math.max(year.songs.top.length * 12, Math.min(8, year.groups.byGroup.length + 1) * 12) + 10;
 
   const s = year.serving; const f = year.followUps; const e = year.engagement;
-  heading(doc, 'Serving, follow-ups and members online', M, y, W);
-  text(doc, `Serving: ${num(s.filled)} of ${num(s.jobs)} jobs filled (${pct(s.fillRate)}) by ${num(s.people)} men.   Follow-ups: ${num(f.finished)} finished, ${num(f.reached)} reached (${pct(f.rate)}).   Bible Quiz: ${num(e.quizGames)} games by ${num(e.quizPlayers)} members.   Memory verses: ${num(e.versesScored)}.   Sign-ups: ${num(e.signups)}.`,
+  heading(doc, 'Serving and follow-ups', M, y, W);
+  text(doc, `Serving: ${num(s.filled)} of ${num(s.jobs)} jobs filled (${pct(s.fillRate)}) by ${num(s.people)} men.   Follow-ups: ${num(f.finished)} finished, ${num(f.reached)} reached (${pct(f.rate)}).   Memory verses said in class: ${num(e.versesScored)}.`,
     M, y + 22, { size: 8, color: C.ink2, width: W, lineGap: 2 });
+}
+
+// The portal pages run on to another page when a list is long.
+function room(doc, y, need, frame) {
+  if (y + need <= PAGE.height - 44) return y;
+  doc.addPage();
+  return banner(doc, frame);
+}
+
+// What members did on the portal, as a row of figures.
+function didRow(doc, did, x, y, w) {
+  const items = [
+    ['RSVPs', did.rsvps], ['Song requests', did.songRequests], ['Bible Quiz games', did.quizGames],
+    ['Practised verses', did.versePracticers], ['Sign-ups', did.signups], ['Comments', did.comments], ['Emails sent', did.emails],
+  ];
+  const cw = w / items.length;
+  items.forEach(([label, n], i) => {
+    text(doc, num(n), x + i * cw, y, { size: 12, font: BOLD, color: n ? C.ink : C.axis });
+    text(doc, label, x + i * cw, y + 14, { size: 6.5, color: C.ink2, width: cw - 4, oneLine: true });
+  });
+  return y + 30;
+}
+
+// Records kept by area, and the busiest record keepers, side by side.
+function keepersBlock(doc, p, x, y, w, frame) {
+  y = room(doc, y, 150, frame);
+  const half = w / 2 - 10;
+  let ay = heading(doc, 'Records kept, by area', x, y, half, `${num(p.changes)} changes`);
+  ay = p.changesByArea.length
+    ? table(doc, [{ title: 'Area', width: half - 60 }, { title: 'Changes', width: 60, align: 'right' }],
+      p.changesByArea.map(a => [a.label, num(a.changes)]), x, ay, { maxRows: 10 })
+    : (text(doc, 'Nothing changed.', x, ay, { size: 8, color: C.muted }), ay + 14);
+  let ky = heading(doc, 'Busiest record keepers', x + half + 20, y, half, `${num(p.changedBy)} people`);
+  ky = p.keepers.length
+    ? table(doc, [{ title: 'Name', width: half - 110, bold: true }, { title: 'Changes', width: 55, align: 'right' }, { title: 'Areas', width: 55, align: 'right' }],
+      p.keepers.map(k => [k.name, num(k.changes), num(k.areas)]), x + half + 20, ky, { maxRows: 10 })
+    : (text(doc, 'Nobody made a change.', x + half + 20, ky, { size: 8, color: C.muted }), ky + 14);
+  return Math.max(ay, ky) + 10;
+}
+
+function analyticalWeekPortal(doc, { week }) {
+  const frame = { report: 'Weekly Analytical Report', period: 'This week', range: weekLabel(week.start, week.end) };
+  let y = banner(doc, frame);
+  const p = week.portal;
+
+  // The headline figures against the four weeks before.
+  const half = W / 2 - 10;
+  y = heading(doc, 'On the portal', M, y, half, `${num(p.accounts)} have an account`);
+  const figures = table(doc, [{ title: '', width: 150 }, { title: 'This week', width: 60, align: 'right', bold: true }, { title: '4-week avg', width: half - 210, align: 'right' }], [
+    ['Members who used the portal', num(p.members), num(p.avg4)],
+    ['   on a phone', `${num(p.onPhone)}`, ''],
+    ['   on a computer', `${num(p.onComputer)}`, ''],
+    ['Pages opened', num(p.pageViews), ''],
+    ['Changes made', num(p.changes), ''],
+    ['Inactive 30+ days', p.inactive === null ? '—' : num(p.inactive.length), ''],
+  ], M, y);
+  let dy = heading(doc, 'Busiest days', M + half + 20, y - 22, half, 'members each day');
+  weekdayColumns(doc, p.weekdays.days, M + half + 20, dy + 4, half, 66);
+  y = Math.max(figures, dy + 96) + 10;
+
+  // Each day of the week, and which pages were opened.
+  let ey = heading(doc, 'Each day', M, y, half);
+  ey = table(doc, [
+    { title: 'Day', width: half - 172 }, { title: 'Members', width: 46, align: 'right', bold: true }, { title: 'Phone', width: 40, align: 'right' },
+    { title: 'Computer', width: 46, align: 'right' }, { title: 'Pages', width: 40, align: 'right' },
+  ], p.daily.map(dd => [`${dd.weekday.slice(0, 3)}, ${dayMonth(dd.date)}`, num(dd.members), num(dd.phone), num(dd.computer), num(dd.opens)]), M, ey);
+  let gy = heading(doc, 'Pages opened', M + half + 20, y, half, 'times · members');
+  gy = p.pages.length
+    ? table(doc, [{ title: 'Page', width: half - 100 }, { title: 'Opened', width: 50, align: 'right', bold: true }, { title: 'Members', width: 50, align: 'right' }],
+      p.pages.map(pg => [pg.label, num(pg.views), num(pg.people)]), M + half + 20, gy)
+    : (text(doc, 'No pages counted yet.', M + half + 20, gy, { size: 8, color: C.muted }), gy + 14);
+  y = Math.max(ey, gy) + 10;
+  y = heading(doc, 'What members did', M, room(doc, y, 60, frame), W);
+  y = didRow(doc, p.did, M, y, W) + 8;
+
+  y = keepersBlock(doc, p, M, y, W, frame);
+
+  // Who has not been on the portal for a month, by name.
+  y = room(doc, y, 80, frame);
+  if (p.inactive === null) {
+    y = heading(doc, 'Inactive 30+ days', M, y, W);
+    text(doc, 'Listed once the portal has counted 30 days of visits.', M, y, { size: 8, color: C.muted });
+    return;
+  }
+  y = heading(doc, `Inactive 30+ days (${p.inactive.length})`, M, y, W, 'members with an account not on the portal in 30 days');
+  if (!p.inactive.length) { text(doc, 'Every member has used the portal in the last 30 days.', M, y, { size: 8, color: C.muted }); return; }
+  const per = 2; const colW = W / per - 10;
+  const rows = Math.ceil(p.inactive.length / per);
+  let start = 0;
+  while (start < rows) {
+    const fits = Math.max(1, Math.floor((PAGE.height - 50 - y) / 14) - 1);
+    const take = Math.min(fits, rows - start);
+    for (let c = 0; c < per; c++) {
+      const slice = p.inactive.slice(c * rows + start, c * rows + start + take);
+      if (slice.length) table(doc, [{ title: 'Name', width: colW - 100, bold: true }, { title: 'Last on', width: 100, align: 'right' }],
+        slice.map(m => [m.name, m.lastVisit ? dayMonth(m.lastVisit) : 'not since counting began']), M + c * (colW + 20), y);
+    }
+    start += take;
+    if (start < rows) { doc.addPage(); y = banner(doc, frame); y = heading(doc, 'Inactive 30+ days, continued', M, y, W); }
+  }
+}
+
+function analyticalYearPortal(doc, { week, year }) {
+  const frame = { report: 'Weekly Analytical Report', period: `${year.year} so far`, range: `January 1 – ${longDate(week.end)}` };
+  let y = banner(doc, frame);
+  const p = year.portal;
+
+  y = heading(doc, 'On the portal, month by month', M, y, W, p.since ? `visits and pages counted since ${longDate(p.since)}` : 'visits not counted yet');
+  y = table(doc, [
+    { title: 'Month', width: 80 }, { title: 'Members', width: 90, align: 'right', bold: true }, { title: 'Member-days', width: 100, align: 'right' },
+    { title: 'Pages opened', width: 100, align: 'right' }, { title: 'Changes made', width: 100, align: 'right' },
+  ], p.byMonth.map(m => [m.month, m.members ? num(m.members) : '—', m.visits ? num(m.visits) : '—', m.opens ? num(m.opens) : '—', num(m.changes)]), M, y, { rowH: 13 }) + 4;
+  text(doc, 'Members: how many used the portal that month. Member-days: each member counted once for each day they used it.', M, y, { size: 7, color: C.muted, width: W });
+  y += 18;
+
+  // Weekly members, and the busiest days.
+  const left = W * 0.62 - 10; const right = W - left - 20;
+  const weeks = p.since ? p.weeks.filter(w => w.start >= addDaysIso(p.since, -6)) : [];
+  let wy = heading(doc, 'Members on the portal, each week', M, y, left, p.weeklyAverage ? `average ${num(p.weeklyAverage)}` : '');
+  if (weeks.length) columns(doc, weeks.map(w => w.members), M, wy + 8, left, 70, { labels: weeks.map(w => (d(w.start).getUTCDate() <= 7 ? SHORT[d(w.start).getUTCMonth()] : '')), average: p.weeklyAverage });
+  else text(doc, 'Not counted yet.', M, wy, { size: 8, color: C.muted });
+  let by = heading(doc, 'Busiest days', M + left + 20, y, right);
+  weekdayColumns(doc, p.weekdays.days, M + left + 20, by + 8, right, 62);
+  y += 120;
+
+  const half = W / 2 - 10;
+  let gy = heading(doc, 'Pages opened', M, y, half, `${num(p.pageViews)} in all`);
+  gy = p.pages.length
+    ? table(doc, [{ title: 'Page', width: half - 100 }, { title: 'Opened', width: 50, align: 'right', bold: true }, { title: 'Members', width: 50, align: 'right' }],
+      p.pages.map(pg => [pg.label, num(pg.views), num(pg.people)]), M, gy)
+    : (text(doc, 'No pages counted yet.', M, gy, { size: 8, color: C.muted }), gy + 14);
+  let ay = heading(doc, 'Records kept, by area', M + half + 20, y, half, `${num(p.changes)} changes`);
+  ay = table(doc, [{ title: 'Area', width: half - 60 }, { title: 'Changes', width: 60, align: 'right' }],
+    p.changesByArea.map(a => [a.label, num(a.changes)]), M + half + 20, ay, { maxRows: 8 });
+  y = Math.max(gy, ay) + 10;
+
+  let ky = heading(doc, 'Busiest record keepers', M, y, half, `${num(p.changedBy)} people`);
+  table(doc, [{ title: 'Name', width: half - 110, bold: true }, { title: 'Changes', width: 55, align: 'right' }, { title: 'Areas', width: 55, align: 'right' }],
+    p.keepers.map(k => [k.name, num(k.changes), num(k.areas)]), M, ky, { maxRows: 8 });
+  const dy = heading(doc, 'What members did this year', M + half + 20, y, half);
+  table(doc, [{ title: '', width: half - 60 }, { title: '', width: 60, align: 'right', bold: true }], [
+    ['RSVPs to group meetings', num(p.did.rsvps)], ['Song requests', num(p.did.songRequests)],
+    ['Bible Quiz games', num(p.did.quizGames)], ['Members who practised memory verses', num(p.did.versePracticers)],
+    ['Sign-ups', num(p.did.signups)], ['Comments', num(p.did.comments)], ['Emails sent', num(p.did.emails)],
+  ], M + half + 20, dy - 14);
 }
 
 // ─── Making the files ─────────────────────────────────────────────────────────
 
 const KINDS = {
   summary:    { title: 'Weekly Summary', pages: [summaryWeek, summaryYear] },
-  analytical: { title: 'Weekly Analytical Report', pages: [analyticalWeek, analyticalYear] },
+  analytical: { title: 'Weekly Analytical Report', pages: [analyticalWeek, analyticalWeekPortal, analyticalYear, analyticalYearPortal] },
 };
 
 // The PDF as a Buffer, made synchronously (see lib/rosterPdf.js for why).

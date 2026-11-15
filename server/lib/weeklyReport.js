@@ -174,6 +174,7 @@ function byWeekdayIn(from, to) {
 function portalIn(from, to) {
   const members = activeIn(from, to);
   const onPhone = count('SELECT COUNT(DISTINCT user_id) n FROM portal_visits WHERE day BETWEEN ? AND ? AND phone = 1', from, to);
+  const onComputer = count('SELECT COUNT(DISTINCT user_id) n FROM portal_visits WHERE day BETWEEN ? AND ? AND computer = 1', from, to);
   const pages = db.prepare(`
     SELECT page, SUM(views) AS views, COUNT(DISTINCT user_id) AS people FROM portal_page_views
      WHERE day BETWEEN ? AND ? GROUP BY page ORDER BY views DESC, page LIMIT 8
@@ -181,9 +182,18 @@ function portalIn(from, to) {
   const changes = db.prepare(`
     SELECT area, COUNT(*) AS n FROM action_log WHERE date(created_at) BETWEEN ? AND ? GROUP BY area ORDER BY n DESC
   `).all(from, to).map(r => ({ area: r.area, label: r.area ? areaLabel(r.area) : 'Elsewhere', changes: r.n }));
+  // Who kept the records: the people behind the changes, busiest first.
+  const keepers = db.prepare(`
+    SELECT COALESCE(u.name, a.user_name) AS name, COUNT(*) AS n, COUNT(DISTINCT a.area) AS areas
+      FROM action_log a LEFT JOIN users u ON u.id = a.user_id
+     WHERE date(a.created_at) BETWEEN ? AND ? AND a.user_id IS NOT NULL
+     GROUP BY a.user_id ORDER BY n DESC, name LIMIT 10
+  `).all(from, to).map(k => ({ name: k.name || 'A member', changes: k.n, areas: k.areas }));
   return {
     members,
     onPhone,
+    onComputer,
+    keepers,
     phoneShare: members ? round1((onPhone / members) * 100) : null,
     accounts: count("SELECT COUNT(*) n FROM users WHERE role IN ('approved', 'admin')"),
     inactive: inactiveAt(to),
@@ -192,7 +202,7 @@ function portalIn(from, to) {
     pageViews: count('SELECT COALESCE(SUM(views), 0) n FROM portal_page_views WHERE day BETWEEN ? AND ?', from, to),
     changes: changes.reduce((n, c) => n + c.changes, 0),
     changedBy: count('SELECT COUNT(DISTINCT user_id) n FROM action_log WHERE date(created_at) BETWEEN ? AND ?', from, to),
-    changesByArea: changes.slice(0, 8),
+    changesByArea: changes.slice(0, 12),
     did: {
       rsvps: count("SELECT COUNT(*) n FROM group_event_rsvps WHERE date(responded_at) BETWEEN ? AND ?", from, to),
       signups: count('SELECT COUNT(*) n FROM signup_entries WHERE date(created_at) BETWEEN ? AND ?', from, to),
@@ -339,6 +349,11 @@ function weekReport({ start, end }) {
   const prior = weeklyActive(addDays(start, -28), addDays(start, -1)).map(w => w.members);
   portal.avg4 = prior.some(Boolean) ? round1(avg(prior)) : null;
   portal.trend = weeklyActive(addDays(start, -77), end).map(w => w.members);
+  portal.daily = Array.from({ length: 7 }, (_, i) => {
+    const day = addDays(start, i);
+    const v = db.prepare('SELECT COUNT(*) AS members, COALESCE(SUM(phone), 0) AS phone, COALESCE(SUM(computer), 0) AS computer FROM portal_visits WHERE day = ?').get(day);
+    return { date: day, weekday: WEEKDAYS[i], ...v, opens: count('SELECT COALESCE(SUM(views), 0) n FROM portal_page_views WHERE day = ?', day) };
+  });
 
   return {
     start, end,
@@ -484,6 +499,17 @@ function yearReport({ end }) {
   const counted = portal.weeks.filter(w => w.members);
   portal.weeklyAverage = counted.length ? round1(avg(counted.map(w => w.members))) : null;
   portal.since = db.prepare('SELECT MIN(day) AS d FROM portal_visits').get().d;
+  portal.byMonth = Array.from({ length: monthOf(end) + 1 }, (_, i) => {
+    const from = `${year}-${String(i + 1).padStart(2, '0')}-01`;
+    const to = i === monthOf(end) ? end : addDays(i === 11 ? `${year + 1}-01-01` : `${year}-${String(i + 2).padStart(2, '0')}-01`, -1);
+    return {
+      month: MONTHS[i],
+      members: activeIn(from, to),
+      visits: count('SELECT COUNT(*) n FROM portal_visits WHERE day BETWEEN ? AND ?', from, to),
+      opens: count('SELECT COALESCE(SUM(views), 0) n FROM portal_page_views WHERE day BETWEEN ? AND ?', from, to),
+      changes: count('SELECT COUNT(*) n FROM action_log WHERE date(created_at) BETWEEN ? AND ?', from, to),
+    };
+  });
 
   return {
     start, end, year,
