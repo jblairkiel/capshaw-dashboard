@@ -1471,6 +1471,43 @@ function initSchema(db) {
   `);
 
   // ─── Sign-up lists ────────────────────────────────────────────────────────────
+  // When each weekly report is emailed (mail/weeklyReports.js): the day of
+  // the week (0 = Sunday) and the time, church time, set by an admin. Each
+  // report covers the week ending on the Saturday before it is sent — or that
+  // day's own week, when it is sent on a Saturday.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS report_settings (
+      kind       TEXT    PRIMARY KEY,           -- summary | analytical
+      weekday    INTEGER NOT NULL DEFAULT 0,
+      send_time  TEXT    NOT NULL DEFAULT '15:00',
+      enabled    INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_by TEXT    NOT NULL DEFAULT ''
+    );
+    INSERT OR IGNORE INTO report_settings (kind) VALUES ('summary'), ('analytical');
+  `);
+
+  // How the portal is used (lib/portalUsage.js), for the weekly reports: who
+  // used it each day, on a phone or a computer, and how often each page was
+  // opened. Nothing about what was read or typed.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS portal_visits (
+      user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      day      TEXT    NOT NULL,                 -- church date, 2026-11-08
+      phone    INTEGER NOT NULL DEFAULT 0,
+      computer INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, day)
+    );
+    CREATE INDEX IF NOT EXISTS idx_portal_visits_day ON portal_visits(day);
+    CREATE TABLE IF NOT EXISTS portal_page_views (
+      day     TEXT    NOT NULL,
+      page    TEXT    NOT NULL,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      views   INTEGER NOT NULL DEFAULT 1,
+      PRIMARY KEY (day, page, user_id)
+    );
+  `);
+
   // Bible Jeopardy boards (lib/jeopardy.js), built in the Excel template and
   // uploaded by any member. The board is kept whole as JSON — categories, each
   // with its clues, answers, points and Daily Doubles, and an optional Final —
