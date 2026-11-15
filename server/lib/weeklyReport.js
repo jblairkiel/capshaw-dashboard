@@ -143,6 +143,34 @@ function weeklyActive(fromSunday, toSaturday) {
   return weeks;
 }
 
+// Members with an account who have not used the portal in the 30 days up to
+// `to`. Only meaningful once visits have been counted for 30 days; before that
+// it is null rather than everybody.
+function inactiveAt(to) {
+  const since = db.prepare('SELECT MIN(day) AS d FROM portal_visits').get().d;
+  const cutoff = addDays(to, -29);
+  if (!since || since > cutoff) return null;
+  return db.prepare(`
+    SELECT u.id, u.name,
+           (SELECT MAX(day) FROM portal_visits v WHERE v.user_id = u.id AND v.day <= ?) AS last_day
+      FROM users u
+     WHERE u.role IN ('approved', 'admin') AND date(u.created_at) <= ?
+  `).all(to, cutoff)
+    .filter(u => !u.last_day || u.last_day < cutoff)
+    .map(u => ({ name: u.name, lastVisit: u.last_day || null }))
+    .sort((a, b) => (a.lastVisit || '').localeCompare(b.lastVisit || '') || a.name.localeCompare(b.name));
+}
+
+// Member-visits on each day of the week, Sunday first, and the busiest.
+function byWeekdayIn(from, to) {
+  const days = Array(7).fill(0);
+  for (const r of db.prepare(`
+    SELECT CAST(strftime('%w', day) AS INTEGER) AS wd, COUNT(*) AS n FROM portal_visits WHERE day BETWEEN ? AND ? GROUP BY wd
+  `).all(from, to)) days[r.wd] = r.n;
+  const top = Math.max(...days);
+  return { days, busiest: top ? days.indexOf(top) : null };
+}
+
 function portalIn(from, to) {
   const members = activeIn(from, to);
   const onPhone = count('SELECT COUNT(DISTINCT user_id) n FROM portal_visits WHERE day BETWEEN ? AND ? AND phone = 1', from, to);
@@ -158,7 +186,8 @@ function portalIn(from, to) {
     onPhone,
     phoneShare: members ? round1((onPhone / members) * 100) : null,
     accounts: count("SELECT COUNT(*) n FROM users WHERE role IN ('approved', 'admin')"),
-    newAccounts: count("SELECT COUNT(*) n FROM users WHERE role IN ('approved', 'admin') AND date(coalesce(approved_at, created_at)) BETWEEN ? AND ?", from, to),
+    inactive: inactiveAt(to),
+    weekdays: byWeekdayIn(from, to),
     pages,
     pageViews: count('SELECT COALESCE(SUM(views), 0) n FROM portal_page_views WHERE day BETWEEN ? AND ?', from, to),
     changes: changes.reduce((n, c) => n + c.changes, 0),
@@ -470,4 +499,4 @@ function build({ date } = {}) {
   return { week: weekReport(week), year: yearReport(week) };
 }
 
-module.exports = { build, weekOf, lastWeek, weekReport, yearReport, MONTHS };
+module.exports = { build, weekOf, lastWeek, weekReport, yearReport, MONTHS, WEEKDAYS };

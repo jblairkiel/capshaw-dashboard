@@ -205,6 +205,23 @@ function runningLine(doc, values, x, y, w, h, { labelEnd, compare } = {}) {
   if (labelEnd) text(doc, labelEnd, lx - 150, ly - 15, { size: 9, font: BOLD, width: 144, align: 'right' });
 }
 
+// The days of the week, Sunday first: member-visits on each, the busiest in
+// the accent and named underneath.
+function weekdayColumns(doc, days, x, y, w, h) {
+  const names = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+  const full = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const max = Math.max(1, ...days);
+  const top = days.indexOf(Math.max(...days));
+  const slot = w / 7; const bw = Math.min(16, slot * 0.6);
+  rule(doc, x, y + h, w, C.axis);
+  days.forEach((v, i) => {
+    const bh = v ? Math.max(2, (v / max) * h) : 0;
+    if (bh) doc.save().roundedRect(x + i * slot + (slot - bw) / 2, y + h - bh, bw, bh, 2).fill(i === top ? C.accent : C.context).restore();
+    text(doc, names[i], x + i * slot, y + h + 3, { size: 7, font: i === top ? BOLD : SANS, color: i === top ? C.ink : C.muted, width: slot, align: 'center' });
+  });
+  if (Math.max(...days)) text(doc, `Busiest: ${full[top]}`, x, y + h + 14, { size: 7.5, font: BOLD, color: C.ink2, width: w, align: 'center' });
+}
+
 // Ranked horizontal bars, one hue, value at the tip.
 function rankedBars(doc, rows, x, y, w, { labelW = 150, rowH = 15, format = num } = {}) {
   const max = Math.max(1, ...rows.map(r => r.value));
@@ -321,9 +338,13 @@ function banner(doc, { report, period, range }) {
   doc.rect(0, 0, PAGE.width, 70).fill(C.navy);
   doc.rect(0, 70, PAGE.width, 3).fill(C.gold);
   text(doc, 'CAPSHAW CHURCH OF CHRIST', M, 16, { size: 8, font: BOLD, color: C.gold });
-  text(doc, report, M, 29, { size: 20, font: BOLD, color: '#ffffff' });
-  text(doc, period, M, 20, { size: 13, font: BOLD, color: '#ffffff', width: W, align: 'right' });
-  text(doc, range, M, 38, { size: 9, color: '#d8dbe3', width: W, align: 'right' });
+  // Which period this page is, set beside the title so it is seen first.
+  text(doc, report, M, 28, { size: 20, font: BOLD, color: '#ffffff' });
+  doc.font(BOLD).fontSize(20);
+  const after = M + doc.widthOfString(report) + 10;
+  doc.save().rect(after, 29, 1.5, 18).fill(C.gold).restore();
+  text(doc, period, after + 11, 28, { size: 20, font: BOLD, color: C.gold });
+  text(doc, range, M, 33, { size: 10.5, color: '#d8dbe3', width: W, align: 'right' });
   return 90;
 }
 
@@ -378,7 +399,9 @@ function summaryWeek(doc, { week, year }) {
   [
     { label: 'On a phone', value: pct(p.phoneShare), note: p.members ? `${num(p.onPhone)} of ${num(p.members)} members` : '', meter: p.phoneShare },
     { label: 'Changes made', value: num(p.changes), note: `by ${num(p.changedBy)} member${p.changedBy === 1 ? '' : 's'} keeping records` },
-    { label: 'New accounts', value: num(p.newAccounts), note: 'approved this week' },
+    p.inactive === null
+      ? { label: 'Inactive 30+ days', value: '—', note: 'counted once the portal has 30 days of visits' }
+      : { label: 'Inactive 30+ days', value: num(p.inactive.length), note: `of ${num(p.accounts)} members with an account` },
   ].forEach((t, i) => {
     const x = px2 + i * (rest + 8);
     statTile(doc, x, y, rest, 78, { label: t.label, value: t.value, note: t.note });
@@ -386,23 +409,26 @@ function summaryWeek(doc, { week, year }) {
   });
   y += 92;
 
-  const half = W / 2 - 10;
-  let ly = heading(doc, 'Most-opened pages', M, y, half, 'times opened');
-  if (p.pages.length) rankedBars(doc, p.pages.slice(0, 6).map(pg => ({ label: pg.label, value: pg.views })), M, ly, half, { labelW: 110, rowH: 15 });
+  const left = W * 0.6 - 10; const right = W - left - 20;
+  let ly = heading(doc, 'Most-opened pages', M, y, left, 'times opened');
+  if (p.pages.length) rankedBars(doc, p.pages.slice(0, 6).map(pg => ({ label: pg.label, value: pg.views })), M, ly, left, { labelW: 120, rowH: 15 });
   else text(doc, 'No pages counted yet.', M, ly, { size: 8, color: C.muted });
-  let ry = heading(doc, 'What members did', M + half + 20, y, half);
+  let dy = heading(doc, 'Busiest days', M + left + 20, y, right, 'members each day');
+  weekdayColumns(doc, p.weekdays.days, M + left + 20, dy + 4, right, 58);
+  y = ly + 6 * 15 + 6;
+
+  y = heading(doc, 'What members did', M, y, W);
   const did = [
-    ['RSVPs to group meetings', p.did.rsvps], ['Song requests', p.did.songRequests],
-    ['Bible Quiz games', p.did.quizGames], ['Practised memory verses', p.did.versePracticers, 'members'],
-    ['Sign-ups', p.did.signups], ['Comments', p.did.comments], ['Emails sent', p.did.emails],
+    ['RSVPs', p.did.rsvps], ['Song requests', p.did.songRequests], ['Bible Quiz games', p.did.quizGames],
+    ['Practised verses', p.did.versePracticers], ['Sign-ups', p.did.signups], ['Comments', p.did.comments], ['Emails sent', p.did.emails],
   ];
-  did.forEach(([label, n, unit], i) => {
-    const col = i % 2; const row = Math.floor(i / 2);
-    const x = M + half + 20 + col * (half / 2); const yy = ry + row * 23;
-    text(doc, num(n), x, yy, { size: 12, font: BOLD, color: n ? C.ink : C.axis });
-    text(doc, unit ? `${label} (${unit})` : label, x, yy + 13, { size: 6.5, color: C.ink2, width: half / 2 - 6, oneLine: true });
+  const dw = W / did.length;
+  did.forEach(([label, n], i) => {
+    const x = M + i * dw;
+    text(doc, num(n), x, y, { size: 13, font: BOLD, color: n ? C.ink : C.axis });
+    text(doc, label, x, y + 15, { size: 6.5, color: C.ink2, width: dw - 4, oneLine: true });
   });
-  y = Math.max(ly + 6 * 15, ry + 4 * 23) + 8;
+  y += 34;
 
   // The rest of the week in small cards.
   const cards = [
@@ -465,15 +491,19 @@ function summaryYear(doc, { week, year }) {
   // The portal through the year.
   const p = year.portal;
   const weeks = p.since ? p.weeks.filter(w => w.start >= addDaysIso(p.since, -6)) : [];
-  let wy = heading(doc, 'Members on the portal, each week', M, y, half, p.since ? `counted since ${dayMonth(p.since)}` : '');
+  const c1 = 200; const c2 = 130; const c3 = W - c1 - c2 - 40;
+  let wy = heading(doc, 'Members on the portal, each week', M, y, c1);
   if (weeks.length) {
-    columns(doc, weeks.map(w => w.members), M, wy + 8, half, 70, {
+    columns(doc, weeks.map(w => w.members), M, wy + 8, c1, 70, {
       labels: weeks.map(w => (d(w.start).getUTCDate() <= 7 ? SHORT[d(w.start).getUTCMonth()] : '')), average: p.weeklyAverage,
     });
+    text(doc, `counted since ${dayMonth(p.since)}`, M, wy + 94, { size: 6.5, color: C.muted });
   } else text(doc, 'Not counted yet.', M, wy, { size: 8, color: C.muted });
-  let py = heading(doc, 'Most-opened pages', M + half + 20, y, half, `${num(p.pageViews)} opened in all`);
-  if (p.pages.length) rankedBars(doc, p.pages.slice(0, 6).map(pg => ({ label: pg.label, value: pg.views })), M + half + 20, py, half, { labelW: 110, rowH: 14 });
-  y += 120;
+  let by = heading(doc, 'Busiest days', M + c1 + 20, y, c2);
+  weekdayColumns(doc, p.weekdays.days, M + c1 + 20, by + 8, c2, 62);
+  let py = heading(doc, 'Most-opened pages', M + c1 + c2 + 40, y, c3);
+  if (p.pages.length) rankedBars(doc, p.pages.slice(0, 6).map(pg => ({ label: pg.label, value: pg.views })), M + c1 + c2 + 40, py, c3, { labelW: 92, rowH: 14 });
+  y += 136;
 
   // A line of the rest.
   y = heading(doc, 'Also this year', M, y, W);
@@ -481,7 +511,9 @@ function summaryYear(doc, { week, year }) {
   const items = [
     ['Serving jobs filled', s.jobs ? pct(s.fillRate) : '—', s.jobs ? `${num(s.filled)} of ${num(s.jobs)} by ${num(s.people)} men` : ''],
     ['Guests reached', f.finished ? pct(f.rate) : '—', `${num(f.reached)} of ${num(f.finished)} follow-ups`],
-    ['Member roll call', pct(year.roll.rate), 'of members marked were present'],
+    p.inactive === null
+      ? ['Inactive 30+ days', '—', 'counted once the portal has 30 days of visits']
+      : ['Inactive 30+ days', num(p.inactive.length), `of ${num(p.accounts)} members with an account`],
     ['Changes on the portal', num(p.changes), `by ${num(p.changedBy)} members keeping records`],
   ];
   const iw = W / 4;
