@@ -163,7 +163,7 @@ describe('App — the Church Office and Admin menus', () => {
     await screen.findByText(portalFooter);
     expect(menu('Admin')).toHaveLength(0);
     fireEvent.click(menu('Church Office')[0]);
-    expect(screen.getAllByRole('button', { name: 'Record Keeping' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'Reports & Record Keeping' }).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Members & Access' })).not.toBeInTheDocument();
   });
 

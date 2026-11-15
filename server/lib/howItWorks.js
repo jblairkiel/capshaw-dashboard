@@ -316,7 +316,7 @@ const SECTIONS = [
   {
     id: 'admin-record-keeping', title: 'Record Keeping', audience: 'admins',
     blocks: [
-      { p: '**Church Office → Record Keeping** (for admins, and anyone given Reports & Record Keeping) checks, week by week, that the records are being kept:' },
+      { p: '**Church Office → Reports & Record Keeping**, on its **Record Keeping** tab (for admins, and anyone given Reports & Record Keeping), checks week by week that the records are being kept:' },
       { list: [
         '**Songs** and **guests** for every tracked service — Sunday morning and Wednesday evening every week; Sunday evening and gospel meetings in the weeks they are held',
         '**The roll call** of members at each of those services, from the first roll anybody took',
@@ -326,6 +326,19 @@ const SECTIONS = [
       { p: 'A gap links to the page that fills it. When there was genuinely nothing to record — no guests, or the service did not happen — mark it so, and it stops being reported. Which services are tracked, and on which day, is under **Which services are tracked**.' },
       { chart: flow('The Monday reminder', ['Monday, 9:00 AM', 'Report finds gaps', 'Each keeper is emailed', 'They fill the gaps']) },
       { p: 'Each person hears only about what they look after; whoever holds Reports & Record Keeping hears about all of it. Nothing is sent when nothing is missing. **Send reminder now** sends it straight away.' },
+    ],
+  },
+  {
+    id: 'weekly-reports', title: 'The weekly reports', audience: 'admins',
+    blocks: [
+      { p: 'Two reports go out by email each week as a PDF, each covering Sunday to Saturday and then the year so far:' },
+      { table: { head: ['Report', 'What it is', 'Who gets it'], rows: [
+        ['Weekly Summary', 'The week at a glance: attendance against the four weeks before, the contribution, guests, the portal (members who used it, on a phone, changes made, inactive members, busiest days, most-opened pages, what members did), the roll call, serving and follow-ups; then the year in charts', 'Whoever holds **Weekly Summary Report**'],
+        ['Weekly Analytical Report', 'The detail behind it: every service against the four weeks before and last year, guests by name, members missing three in a row, open serving jobs, meetings and songs; the portal day by day and page by page, records kept by area and by whom, and members inactive 30+ days by name; then the year month by month', 'Whoever holds **Weekly Analytical Report**'],
+      ] } },
+      { p: 'A report nobody holds goes to the admins. Both are also on **Church Office → Reports & Record Keeping**, each on its own tab, for any week — with **Download PDF** for the same file the email carries. The summary never names anybody; the analytical report does.' },
+      { p: '**When they are sent.** An admin sets the day and time for each on the **Settings** tab (Sunday at 3:00 PM unless changed), or turns one off, and **Send now** sends the week just ended straight away. A report sent on a Saturday covers that week; on any other day, the week that ended the Saturday before.' },
+      { p: '**How the portal is counted.** From the day the reports began, the portal notes each member once a day they use it (and whether on a phone or a computer) and how often each page is opened — never what anybody read or typed. An admin viewing the portal as somebody else is not counted as them. Inactive members are listed once 30 days have been counted.' },
     ],
   },
   {

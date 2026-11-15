@@ -21,7 +21,7 @@ import MobileNav from './components/MobileNav';
 import InboxView from './components/InboxView';
 import MailGroupsView from './components/MailGroupsView';
 import EmailsView from './components/EmailsView';
-import RecordKeepingView from './components/RecordKeepingView';
+import ReportsPage from './components/reports/ReportsPage';
 import ServiceRosterView from './components/ServiceRosterView';
 import ActionHistoryView from './components/ActionHistoryView';
 import WeeklyBulletinView from './components/WeeklyBulletinView';
@@ -103,10 +103,13 @@ const PROFILE_GROUP = {
 // member sees the pages for the areas they hold and nothing else. The server
 // checks the same thing on every request — this only decides what is worth
 // showing.
+// Reports & Record Keeping is for whoever keeps the records or receives a weekly report.
+const REPORT_AREAS = ['records', 'summary-report', 'analytical-report'];
+
 const OFFICE_ITEMS = [
   { id: 'directory',         label: 'Member Directory',  when: user => hasArea(user, 'directory') },
   { id: 'member-attendance', label: 'Member Attendance', when: user => hasArea(user, 'member-attendance') },
-  { id: 'record-keeping',    label: 'Record Keeping',    when: user => hasArea(user, 'records') },
+  { id: 'record-keeping',    label: 'Reports & Record Keeping', when: user => REPORT_AREAS.some(a => hasArea(user, a)) },
   { id: 'bulletin',          label: 'Weekly Newsletter', when: user => hasArea(user, 'bulletin') },
   { id: 'mail-groups',       label: 'Email Groups',      when: user => hasArea(user, 'mail-groups') },
   { id: 'emails',            label: 'Emails',            when: user => hasArea(user, 'mail-groups') },
@@ -592,9 +595,9 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
           <EmailsView />
         </main>
       )}
-      {!updating && activeTab === 'record-keeping' && hasArea(user, 'records') && (
+      {!updating && activeTab === 'record-keeping' && REPORT_AREAS.some(a => hasArea(user, a)) && (
         <main className="max-w-5xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1 w-full">
-          <RecordKeepingView onGoToPage={goTo} />
+          <ReportsPage user={user} onGoToPage={goTo} initialTab={deepLink?.page === 'record-keeping' ? deepLink.tab : null} />
         </main>
       )}
       {!updating && activeTab === 'member-attendance' && hasArea(user, 'member-attendance') && (
