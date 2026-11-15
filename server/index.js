@@ -73,6 +73,17 @@ app.listen(PORT, () => {
   remindCommunion();
   setInterval(remindCommunion, REMINDER_TICK_MS);
 
+  // The weekly reports, on the day and at the time an admin set for each.
+  // Each is claimed against the moment it was due, so ticking often is safe.
+  const weeklyReports = require('./mail/weeklyReports');
+  const sendReports = () => {
+    try {
+      for (const r of weeklyReports.tick()) console.log(`[reports] ${r.kind} for the week of ${r.week} sent to ${r.sent}`);
+    } catch (err) { console.error('[reports] weekly report failed:', err.message); }
+  };
+  sendReports();
+  setInterval(sendReports, REMINDER_TICK_MS);
+
   // A week before somebody's dated turn on a rotation. Claimed on the turn
   // before it is sent, so ticking often is safe.
   const rotationReminders = require('./mail/rotations');

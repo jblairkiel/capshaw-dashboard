@@ -126,6 +126,18 @@ const AREAS = [
     page:  'Record Keeping',
     description: 'See which services are missing their songs, guests or contribution, mark a service as having nothing to record, and set which services are tracked.',
   },
+  {
+    id:    'summary-report',
+    label: 'Weekly Summary Report',
+    page:  'Reports & Record Keeping',
+    description: 'Receive the Weekly Summary by email each week — attendance, giving, guests and the portal at a glance, for the week and the year so far — and see it on the Weekly Summary tab.',
+  },
+  {
+    id:    'analytical-report',
+    label: 'Weekly Analytical Report',
+    page:  'Reports & Record Keeping',
+    description: 'Receive the Weekly Analytical Report by email each week — the detail behind the summary, including guests and inactive members by name — and see it on the Analytical Report tab.',
+  },
 ];
 
 const AREA_IDS = AREAS.map(a => a.id);

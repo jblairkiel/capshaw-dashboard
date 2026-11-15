@@ -16,6 +16,7 @@ const leaderReminders = require('./worshipReminders');
 const communionPrep = require('./communionPrep');
 const signupMail = require('./signups');
 const guestMail = require('./guests');
+const weeklyReports = require('./weeklyReports');
 const rotationMail = require('./rotations');
 const notices = require('./notices');
 
@@ -68,6 +69,13 @@ const SAMPLE = {
       { check: 'contribution', date: '2026-09-27', service: '' },
       { check: 'head-count', date: '2026-09-27', service: 'Sample Group: Fellowship meal' },
     ],
+  },
+  report: {
+    week: {
+      start: '2026-11-08', end: '2026-11-14',
+      attendance: { headline: { service: 'Sunday AM Worship', count: 212, avg4: 200 } },
+      giving: { amount: 4338 }, guests: { visits: 3 }, portal: { members: 41 },
+    },
   },
   bulletin: {
     sunday: '2026-10-04', masthead: 'Capshaw Church of Christ', sundayLabel: 'Sunday, October 4, 2026',
@@ -409,6 +417,22 @@ const EMAILS = [
     trigger: 'The Monthly Worship Schedule is published, or the schedule keeper chooses "Email everyone (PDF)".',
     like: ['workflow:%:monthly-report'],
     preview: () => notify.compose.monthlyReport({ draft: SAMPLE.draft }),
+  },
+  {
+    id: 'weekly-summary', category: 'reports',
+    name: 'Weekly Summary',
+    audience: 'Whoever holds Weekly Summary Report (the admins, if nobody does)',
+    trigger: 'Each week on the day and at the time an admin sets on Reports & Record Keeping → Settings (Sunday at 3 PM unless changed). The two-page PDF is attached: the week, then the year so far.',
+    like: ['weekly-report:summary:%'],
+    preview: () => weeklyReports.compose.weeklyReport({ kind: 'summary', data: SAMPLE.report }),
+  },
+  {
+    id: 'weekly-analytical', category: 'reports',
+    name: 'Weekly Analytical Report',
+    audience: 'Whoever holds Weekly Analytical Report (the admins, if nobody does)',
+    trigger: 'Each week on the day and at the time an admin sets on Reports & Record Keeping → Settings (Sunday at 3 PM unless changed). The PDF is attached: the week and its portal page, then the year so far and its portal page.',
+    like: ['weekly-report:analytical:%'],
+    preview: () => weeklyReports.compose.weeklyReport({ kind: 'analytical', data: SAMPLE.report }),
   },
   {
     id: 'records-reminder', category: 'reports',

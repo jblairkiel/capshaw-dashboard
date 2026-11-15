@@ -63,6 +63,7 @@ const NOT_FILLED = {
   user_areas: 'Who may do what, which follows from the accounts.',
   portal_visits: 'Who used the portal on which day, which follows from the accounts, and made-up visits would pass for real use in the weekly reports.',
   portal_page_views: 'Which pages members opened. Same reason as portal_visits.',
+  report_settings: 'When each weekly report is emailed, which an admin sets. A batch must not change or take away when real reports go out.',
   action_log: 'Append-only, and the record of what really happened. Filling it would be a lie about the past, and removing a batch would tear pages out of it.',
   mail_outbox: 'Mail waiting to be sent. Anything put here is liable to actually go out.',
   service_jobs: 'The jobs each service needs, which the schedule keeper sets. Made-up ones would change what a real month is built with.',

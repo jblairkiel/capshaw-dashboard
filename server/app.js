@@ -52,6 +52,7 @@ const { requireSiteAuth, limitPending } = require('./middleware/auth');
 const { applyImpersonation }     = require('./middleware/impersonation');
 const { noteVisits }             = require('./lib/portalUsage');
 const usageRoutes                = require('./routes/usage');
+const reportRoutes               = require('./routes/reports');
 const { requireTrustedOrigin }   = require('./middleware/csrf');
 const rateLimit                  = require('express-rate-limit');
 
@@ -139,6 +140,7 @@ function createApp() {
   // Who used the portal today, for the weekly reports (lib/portalUsage.js).
   app.use('/api', noteVisits);
   app.use('/api/usage', usageRoutes);
+  app.use('/api/reports', reportRoutes);
 
   app.use('/api/auth', authRoutes);
   app.use('/api/welcome', welcomeRoutes);
