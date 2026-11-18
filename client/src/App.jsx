@@ -37,7 +37,7 @@ import MailDeliveryView from './components/MailDeliveryView';
 import CommunionPrepView from './components/CommunionPrepView';
 import RotationsView from './components/RotationsView';
 import SignupsView from './components/SignupsView';
-import { hasWriteAccess, isAdmin, hasArea } from './lib/roles';
+import { isAdmin, hasArea } from './lib/roles';
 
 const API = '/api/members';
 
@@ -344,7 +344,6 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
     }
   }, []);
 
-  const canWrite = hasWriteAccess(user);
   const admin    = isAdmin(user);
   const GROUPS = [
     ...BASE_GROUPS,
@@ -394,7 +393,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
                 Updated {lastUpdated}
               </span>
             )}
-            {canWrite && (
+            {admin && (
               <button
                 onClick={handleUpdate}
                 disabled={updating}
@@ -450,11 +449,11 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
             </svg>
             <h2 className="text-lg font-semibold text-church-navy mb-2">Nothing here yet</h2>
             <p className="text-gray-500 text-sm mb-4">
-              {canWrite
+              {admin
                 ? <>Choose <strong>Refresh</strong> to pull the latest from capshawchurch.org.</>
                 : <>This page fills in once the church office refreshes it from capshawchurch.org.</>}
             </p>
-            {canWrite && (
+            {admin && (
               <button onClick={handleUpdate} className="btn-primary">Refresh from capshawchurch.org</button>
             )}
           </div>
@@ -607,7 +606,7 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       )}
       {!updating && activeTab === 'directory' && hasArea(user, 'directory') && (
         <main className="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
-          <DirectoryView />
+          <DirectoryView canSync={admin} />
         </main>
       )}
       {!updating && activeTab === 'bulletin' && hasArea(user, 'bulletin') && (

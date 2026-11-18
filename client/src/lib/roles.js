@@ -26,14 +26,14 @@ export const ROLES = [
     id:          'approved',
     label:       'Member',
     badge:       'Member',
-    description: 'Bible class and lesson tools, refreshing the site, their own household\'s details and worship preferences, and signing up for serving jobs. Anything more is granted one area at a time.',
+    description: 'Bible class and lesson tools, their own household\'s details and worship preferences, and signing up for serving jobs. Anything more is granted one area at a time.',
     tone:        'bg-green-100 text-green-700',
   },
   {
     id:          'admin',
     label:       'Admin',
     badge:       'Admin',
-    description: 'Everything: every area below, managing who may sign in, the action history, and editing every database table directly.',
+    description: 'Everything: every area below, refreshing the site from capshawchurch.org, managing who may sign in, the action history, and editing every database table directly.',
     tone:        'bg-church-gold/20 text-church-navy',
   },
 ];

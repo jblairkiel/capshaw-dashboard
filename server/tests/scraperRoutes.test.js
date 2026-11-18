@@ -214,15 +214,18 @@ describe('GET /api/members/data', () => {
 // ─── POST /update ─────────────────────────────────────────────────────────────
 
 describe('POST /api/members/update', () => {
-  test('401 signed out, 403 while pending', async () => {
+  test('401 signed out, 403 while pending, 403 for a member who is not an admin', async () => {
     expect((await request(buildApp(null)).post('/api/members/update')).status).toBe(401);
     expect((await request(buildApp(PENDING)).post('/api/members/update')).status).toBe(403);
+    const member = await request(buildApp(MEMBER)).post('/api/members/update');
+    expect(member.status).toBe(403);
+    expect(member.body.error).toBe('Admin access required');
   });
 
   test('parses every page and writes what it found', async () => {
     serveSite();
 
-    const res = await request(buildApp(MEMBER)).post('/api/members/update');
+    const res = await request(buildApp(ADMIN)).post('/api/members/update');
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
     expect(res.body.lastUpdated).toBeTruthy();
@@ -238,7 +241,7 @@ describe('POST /api/members/update', () => {
 
   test('also writes the JSON backup', async () => {
     serveSite();
-    await request(buildApp(MEMBER)).post('/api/members/update');
+    await request(buildApp(ADMIN)).post('/api/members/update');
 
     const backup = JSON.parse(fs.readFileSync(process.env.CAPSHAW_DATA_FILE, 'utf8'));
     expect(backup.sermons[0].title).toBe('Faith That Works');
@@ -248,7 +251,7 @@ describe('POST /api/members/update', () => {
   test('fails outright when the site bounces the scraper to the login page', async () => {
     serveSite({ '/members/attendance': page('', { url: 'https://capshawchurch.org/members/login' }) });
 
-    const res = await request(buildApp(MEMBER)).post('/api/members/update');
+    const res = await request(buildApp(ADMIN)).post('/api/members/update');
     expect(res.status).toBe(500);
     expect(res.body.error).toMatch(/Session expired or login failed/);
     // Nothing is written on a failed sign-in
@@ -258,7 +261,7 @@ describe('POST /api/members/update', () => {
   test('a section that will not load is a warning, and the rest still saves', async () => {
     serveSite({ '/members/sermons': new Error('socket hang up') });
 
-    const res = await request(buildApp(MEMBER)).post('/api/members/update');
+    const res = await request(buildApp(ADMIN)).post('/api/members/update');
     expect(res.status).toBe(200);
     expect(res.body.warnings).toContain('sermons: fetch error — socket hang up');
     expect(db.prepare('SELECT COUNT(*) AS n FROM attendance').get().n).toBeGreaterThan(0);
@@ -267,14 +270,14 @@ describe('POST /api/members/update', () => {
   test('a section the church site has disabled is reported as not found', async () => {
     serveSite({ '/members/deacons': page('<h1>Page Not Found</h1>') });
 
-    const { body } = await request(buildApp(MEMBER)).post('/api/members/update');
+    const { body } = await request(buildApp(ADMIN)).post('/api/members/update');
     expect(body.warnings.some(w => w.startsWith('deacons: page not found (404)'))).toBe(true);
   });
 
   test('a 404 status counts as not found even without the page text', async () => {
     serveSite({ '/members/visitor-tracker': page('', { status: 404 }) });
 
-    const { body } = await request(buildApp(MEMBER)).post('/api/members/update');
+    const { body } = await request(buildApp(ADMIN)).post('/api/members/update');
     expect(body.warnings.some(w => w.startsWith('visitors: page not found (404)'))).toBe(true);
   });
 
@@ -285,14 +288,14 @@ describe('POST /api/members/update', () => {
     const unreadable = `<html><body>${'<div>something the parser does not know</div>'.repeat(80)}</body></html>`;
     serveSite({ '/members/visitor-tracker': page(unreadable) });
 
-    const { body } = await request(buildApp(MEMBER)).post('/api/members/update');
+    const { body } = await request(buildApp(ADMIN)).post('/api/members/update');
     expect(body.warnings.some(w => w.startsWith('visitors: the page loaded but nothing could be read'))).toBe(true);
   });
 
   test('a section that is genuinely empty is not reported as a parse miss', async () => {
     serveSite({ '/members/visitor-tracker': page('<h2>Visitor Tracker</h2><p>No visitors recorded.</p>') });
 
-    const { body } = await request(buildApp(MEMBER)).post('/api/members/update');
+    const { body } = await request(buildApp(ADMIN)).post('/api/members/update');
     expect(body.warnings.some(w => w.startsWith('visitors:'))).toBe(false);
   });
 
@@ -308,7 +311,7 @@ describe('POST /api/members/update', () => {
       </div>`;
 
     serveSite({ '/members/visitor-tracker': page(tracker) });
-    await request(buildApp(MEMBER)).post('/api/members/update');
+    await request(buildApp(ADMIN)).post('/api/members/update');
 
     expect(db.prepare('SELECT name, phone, address, city, state, zip FROM visitors').get()).toEqual({
       name: 'Ray Ann Boyd', phone: '(256) 777-4009',
@@ -332,7 +335,7 @@ describe('POST /api/members/update', () => {
       .run('Ray Ann Boyd', 'ray@example.com', '(000) 000-0000', 'Sat with the Carters');
 
     serveSite({ '/members/visitor-tracker': page(tracker) });
-    await request(buildApp(MEMBER)).post('/api/members/update');
+    await request(buildApp(ADMIN)).post('/api/members/update');
 
     expect(db.prepare('SELECT email, phone, notes FROM visitors').get()).toEqual({
       email: 'ray@example.com', phone: '(256) 777-4009', notes: 'Sat with the Carters',
@@ -365,7 +368,7 @@ describe('POST /api/members/update', () => {
       '/members/visitor-tracker?range=all&page=3': page(`${filter('all')}${guest('Marcus Reed')}`),
     });
 
-    const res = await request(buildApp(MEMBER)).post('/api/members/update');
+    const res = await request(buildApp(ADMIN)).post('/api/members/update');
     expect(res.status).toBe(200);
 
     expect(db.prepare('SELECT name FROM visitors ORDER BY name').all().map(v => v.name))
@@ -384,7 +387,7 @@ describe('POST /api/members/update', () => {
       '/members/visitor-tracker?page=2': page('', { status: 500 }),
     });
 
-    const { body } = await request(buildApp(MEMBER)).post('/api/members/update');
+    const { body } = await request(buildApp(ADMIN)).post('/api/members/update');
 
     expect(db.prepare('SELECT name FROM visitors').all().map(v => v.name)).toEqual(['Dana Whitfield']);
     expect(body.warnings.some(w => w.includes('page=2') && w.includes('some guests may be missing'))).toBe(true);
@@ -402,7 +405,7 @@ describe('POST /api/members/update', () => {
       '/members/visitor-tracker?page=2': page(`${guest('Sam Ford')}${bothWays}`),
     });
 
-    const { body } = await request(buildApp(MEMBER)).post('/api/members/update');
+    const { body } = await request(buildApp(ADMIN)).post('/api/members/update');
 
     expect(body.warnings.filter(w => w.startsWith('visitors:'))).toEqual([]);
     expect(db.prepare('SELECT name FROM visitors ORDER BY name').all().map(v => v.name))
@@ -425,7 +428,7 @@ describe('POST /api/members/update', () => {
       .run('Visitor Notes', 'Kept because somebody wrote this');
 
     serveSite({ '/members/visitor-tracker': page(tracker) });
-    await request(buildApp(MEMBER)).post('/api/members/update');
+    await request(buildApp(ADMIN)).post('/api/members/update');
 
     // The three the parser would never produce go, address and phone and all,
     // because the tracker put those there rather than a person. The one
@@ -448,7 +451,7 @@ describe('POST /api/members/update', () => {
     db.prepare('INSERT INTO visitor_visits (visitor_id, date, service) VALUES (?,?,?)').run(misread, '09/13/26', 'Sun AM');
 
     serveSite({ '/members/visitor-tracker': page(tracker) });
-    const res = await request(buildApp(MEMBER)).post('/api/members/update');
+    const res = await request(buildApp(ADMIN)).post('/api/members/update');
     expect(res.status).toBe(200);
 
     expect(db.prepare('SELECT name, comments FROM visitors').all()).toEqual([
@@ -472,7 +475,7 @@ describe('POST /api/members/update', () => {
     db.prepare('INSERT INTO visitors (name, notes) VALUES (?, ?)').run('Last on 08/30/26', 'Sat with the Carters');
 
     serveSite({ '/members/visitor-tracker': page(tracker) });
-    await request(buildApp(MEMBER)).post('/api/members/update');
+    await request(buildApp(ADMIN)).post('/api/members/update');
 
     // The untouched one goes; the one somebody wrote a note on stays.
     expect(db.prepare('SELECT name FROM visitors ORDER BY name').all().map(v => v.name))
@@ -484,7 +487,7 @@ describe('POST /api/members/update', () => {
     db.prepare('INSERT INTO visitors (name) VALUES (?)').run('Last on 09/13/26');
 
     serveSite({ '/members/visitor-tracker': page('<h2>Visitor Tracker</h2><p>No visitors recorded.</p>') });
-    await request(buildApp(MEMBER)).post('/api/members/update');
+    await request(buildApp(ADMIN)).post('/api/members/update');
 
     expect(db.prepare('SELECT COUNT(*) AS n FROM visitors').get().n).toBe(1);
   });
@@ -501,7 +504,7 @@ describe('POST /api/members/update', () => {
       .run('Just moved from Foley, AL', 'Rang them on Tuesday');
 
     serveSite({ '/members/visitor-tracker': page(tracker) });
-    await request(buildApp(MEMBER)).post('/api/members/update');
+    await request(buildApp(ADMIN)).post('/api/members/update');
 
     expect(db.prepare('SELECT name FROM visitors ORDER BY name').all().map(v => v.name))
       .toEqual(['Just moved from Foley, AL', 'Pat Lane']);
@@ -512,7 +515,7 @@ describe('POST /api/members/update', () => {
     db.prepare('INSERT INTO sermons (date, title, speaker) VALUES (?,?,?)').run('2024-12-01', 'Kept from before', 'Ray Harris');
     serveSite({ '/members/sermons': new Error('gateway timeout') });
 
-    await request(buildApp(MEMBER)).post('/api/members/update');
+    await request(buildApp(ADMIN)).post('/api/members/update');
     expect(db.prepare('SELECT title FROM sermons').get().title).toBe('Kept from before');
   });
 
@@ -521,7 +524,7 @@ describe('POST /api/members/update', () => {
     serveSite();
     scrapeDirectory.mockRejectedValue(new Error('no families found on /members/directory'));
 
-    const res = await request(buildApp(MEMBER)).post('/api/members/update');
+    const res = await request(buildApp(ADMIN)).post('/api/members/update');
     expect(res.status).toBe(200);
     expect(res.body.warnings).toContain('directory: scrape failed — no families found on /members/directory');
     // An empty directory would prune everyone; the existing row must survive
@@ -536,7 +539,7 @@ describe('POST /api/members/update', () => {
       summary: { families: 2, people: 1, photos: 0, photosReused: 0, noPhoto: 0, photoErrors: 0 },
     });
 
-    const { body } = await request(buildApp(MEMBER)).post('/api/members/update');
+    const { body } = await request(buildApp(ADMIN)).post('/api/members/update');
     expect(body.warnings).toContain('family 2 (Nelson): HTTP 404');
   });
 
@@ -549,7 +552,7 @@ describe('POST /api/members/update', () => {
     }));
     serveSite();
 
-    await request(buildApp(MEMBER)).post('/api/members/update');
+    await request(buildApp(ADMIN)).post('/api/members/update');
 
     const { known } = scrapeDirectory.mock.calls[0][0];
     expect(known.get('1')).toEqual({ file: 'abc.jpg', version: 'v1' });
@@ -563,7 +566,7 @@ describe('POST /api/members/update', () => {
       .run('March 2025', 'March 2', 'AM', 'Usher', 'Lee Park');
     serveSite({ '/members/job-assignments': new Error('timed out') });
 
-    await request(buildApp(MEMBER)).post('/api/members/update');
+    await request(buildApp(ADMIN)).post('/api/members/update');
     // Clearing the roster because a fetch failed is exactly the bug guarded here
     expect(db.prepare('SELECT name FROM job_assignments').get().name).toBe('Lee Park');
   });
@@ -578,12 +581,12 @@ describe('POST /api/members/update', () => {
         : Promise.resolve(page('')));
 
     // .then() is what actually sends a supertest request
-    const first = request(buildApp(MEMBER)).post('/api/members/update').then(r => r);
+    const first = request(buildApp(ADMIN)).post('/api/members/update').then(r => r);
     try {
       // Give the first request time to take the lock
       await new Promise(r => setTimeout(r, 20));
 
-      const second = await request(buildApp(MEMBER)).post('/api/members/update');
+      const second = await request(buildApp(ADMIN)).post('/api/members/update');
       expect(second.status).toBe(409);
       expect(second.body.error).toMatch(/already in progress/);
 

@@ -144,10 +144,16 @@ describe('DirectoryView', () => {
     expect(await screen.findByText('Admin access required')).toBeInTheDocument();
   });
 
-  test('invites the first import when the directory is empty', async () => {
+  test('invites an admin to the first import when the directory is empty', async () => {
+    mockApi({ rows: [] });
+    render(<DirectoryView canSync />);
+    expect(await screen.findByText(/click "Sync from Site" to import/i)).toBeInTheDocument();
+  });
+
+  test('a member sees an empty directory without being told to sync', async () => {
     mockApi({ rows: [] });
     render(<DirectoryView />);
-    expect(await screen.findByText(/click "Sync from Site" to import/i)).toBeInTheDocument();
+    expect(await screen.findByText('No directory entries yet.')).toBeInTheDocument();
   });
 });
 
@@ -337,9 +343,16 @@ describe('DirectoryView — changing the directory', () => {
 // ─── Syncing ──────────────────────────────────────────────────────────────────
 
 describe('DirectoryView — syncing from the church site', () => {
+  test('members who are not admins get no Sync button', async () => {
+    mockApi();
+    render(<DirectoryView />);
+    await screen.findByText('Harris Family');
+    expect(screen.queryByRole('button', { name: /Sync from Site/i })).toBeNull();
+  });
+
   test('runs the scrape, reloads, and clears whatever was filtered', async () => {
     const fetchMock = mockApi();
-    render(<DirectoryView />);
+    render(<DirectoryView canSync />);
     await screen.findByText('Harris Family');
 
     fireEvent.change(screen.getByPlaceholderText(/Search name, address/i), { target: { value: 'Nelson' } });
@@ -353,7 +366,7 @@ describe('DirectoryView — syncing from the church site', () => {
 
   test('reports a sync that failed', async () => {
     mockApi({ sync: { success: false, error: 'Session expired' } });
-    render(<DirectoryView />);
+    render(<DirectoryView canSync />);
     await screen.findByText('Harris Family');
 
     fireEvent.click(screen.getByRole('button', { name: /Sync from Site/i }));
@@ -368,7 +381,7 @@ describe('DirectoryView — syncing from the church site', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<DirectoryView />);
+    render(<DirectoryView canSync />);
     await screen.findByText('Harris Family');
     fireEvent.click(screen.getByRole('button', { name: /Sync from Site/i }));
 
