@@ -91,8 +91,8 @@ describe('when they are sent', () => {
 
   test('moving the day does not set it off at once, and a report switched off is not sent', () => {
     mail.tick(at('2026-11-14', '12:00'));
-    mail.updateSetting('summary', { weekday: 1, time: '09:00' }, ADMIN);
-    mail.updateSetting('analytical', { enabled: false }, ADMIN);
+    mail.updateSetting('summary', { weekday: 1, time: '09:00' }, ADMIN, at('2026-11-14', '12:00'));
+    mail.updateSetting('analytical', { enabled: false }, ADMIN, at('2026-11-14', '12:00'));
     expect(mail.tick(at('2026-11-15', '15:05'))).toEqual([]);
     expect(mail.tick(at('2026-11-16', '09:01')).map(s => s.kind)).toEqual(['summary']);
   });

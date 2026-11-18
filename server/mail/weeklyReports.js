@@ -62,7 +62,7 @@ function lastDue(setting, now = new Date()) {
   return addDays(today, -back);
 }
 
-function updateSetting(kind, { weekday, time, enabled }, user) {
+function updateSetting(kind, { weekday, time, enabled }, user, now = new Date()) {
   const current = settingFor(kind);
   if (!current) return { error: 'No such report', status: 404 };
   const next = {
@@ -81,7 +81,7 @@ function updateSetting(kind, { weekday, time, enabled }, user) {
   db.prepare(`
     INSERT INTO scheduled_jobs (name, last_key, last_run_at) VALUES (?, ?, NULL)
     ON CONFLICT(name) DO UPDATE SET last_key = excluded.last_key
-  `).run(jobName(kind), lastDue(next));
+  `).run(jobName(kind), lastDue(next, now));
   return { before: current, setting: settingFor(kind) };
 }
 
