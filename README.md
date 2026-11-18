@@ -1967,11 +1967,15 @@ scrape cache together; `CAPSHAW_UPLOAD_DIR` moves the uploads. See
 ### In front of it
 
 The container publishes on `127.0.0.1:3001` and expects something in front of
-it terminating TLS — the existing nginx does exactly this, unchanged. Two
-things that proxy must do, or sign-in silently fails:
+it terminating TLS — the existing nginx does exactly this. Three things that
+proxy must do, or sign-in silently fails or is shared:
 
 - Pass `X-Forwarded-Proto`, since the session cookie is `secure` in production
   and the app trusts the proxy to say whether the request arrived over HTTPS.
+- Set `X-Forwarded-For` (and `X-Real-IP`) to `$remote_addr`, or every visitor
+  shares one sign-in rate limit. [`deploy/nginx/capshaw.conf`](deploy/nginx/capshaw.conf)
+  has both, plus `server_tokens off`. The app trusts one proxy hop; set
+  `TRUST_PROXY` (a hop count, `loopback`, a subnet, or `false`) if yours differs.
 - Send an `Origin` (or `Referer`) header on API requests: any mutating request
   from an origin outside the allowed list is refused before it reaches a route.
 
@@ -2180,9 +2184,12 @@ pm2 save
 pm2 startup   # follow the printed command to enable auto-start on reboot
 ```
 
-**nginx config** (`/etc/nginx/sites-available/capshaw`):
+**nginx config** (`/etc/nginx/sites-available/capshaw`, kept in the repo as
+[`deploy/nginx/capshaw.conf`](deploy/nginx/capshaw.conf)):
 
 ```nginx
+server_tokens off;
+
 server {
     server_name capshaw.jblairkiel.com;
 
@@ -2193,11 +2200,22 @@ server {
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
         proxy_cache_bypass $http_upgrade;
+
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
 
+The three `X-` headers are not optional. Without `X-Forwarded-For` every
+visitor reaches the app as nginx itself, so the sign-in rate limit is one
+bucket shared by the whole congregation, and the app logs a
+`[rateLimit] ... no X-Forwarded-For header` warning to say so.
+`server_tokens off` stops nginx announcing its version on every response.
+
 ```bash
+sudo cp deploy/nginx/capshaw.conf /etc/nginx/sites-available/capshaw
 sudo ln -s /etc/nginx/sites-available/capshaw /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 

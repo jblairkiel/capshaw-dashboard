@@ -17,6 +17,24 @@ const DEFAULT_WINDOW_MS = 15 * 60 * 1000;
 // another, so a long-running process cannot grow a bucket per address forever.
 const SWEEP_AT = 5000;
 
+// A proxy is trusted but sent no X-Forwarded-For: req.ip is then the proxy's
+// own address, so every visitor is counted as one and a single busy minute
+// locks everybody out of signing in. Said once per process, in the log, so a
+// misconfigured nginx is noticed rather than felt.
+let warnedNoForwardedFor = false;
+function warnIfProxyForwardsNoAddress(req) {
+  if (warnedNoForwardedFor) return;
+  if (!req.app || !req.app.get('trust proxy')) return;
+  if (req.headers['x-forwarded-for']) return;
+  warnedNoForwardedFor = true;
+  console.warn(
+    `[rateLimit] A request reached ${req.originalUrl || req.url} through a trusted proxy ` +
+    'with no X-Forwarded-For header, so every visitor shares one rate limit. ' +
+    'Add "proxy_set_header X-Forwarded-For $remote_addr;" to the nginx site ' +
+    '(see deploy/nginx/capshaw.conf).'
+  );
+}
+
 function rateLimit({ max, windowMs = DEFAULT_WINDOW_MS, message }) {
   const hits = new Map();   // key → { count, resetAt }
 
@@ -28,8 +46,10 @@ function rateLimit({ max, windowMs = DEFAULT_WINDOW_MS, message }) {
 
   const middleware = function (req, res, next) {
     const now = Date.now();
-    // Behind nginx this is the real caller, because index.js trusts the proxy.
+    // Behind nginx this is the real caller, because app.js trusts the proxy
+    // and nginx sets X-Forwarded-For to the address it saw.
     const key = req.ip || req.connection?.remoteAddress || 'unknown';
+    warnIfProxyForwardsNoAddress(req);
 
     if (hits.size > SWEEP_AT) sweep(now);
 
@@ -54,7 +74,7 @@ function rateLimit({ max, windowMs = DEFAULT_WINDOW_MS, message }) {
   };
 
   // For tests, and for anything that wants a clean slate.
-  middleware.reset = () => hits.clear();
+  middleware.reset = () => { hits.clear(); warnedNoForwardedFor = false; };
   return middleware;
 }
 
