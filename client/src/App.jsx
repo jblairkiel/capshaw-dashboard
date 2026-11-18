@@ -37,6 +37,7 @@ import MailDeliveryView from './components/MailDeliveryView';
 import CommunionPrepView from './components/CommunionPrepView';
 import RotationsView from './components/RotationsView';
 import SignupsView from './components/SignupsView';
+import MyWeekView from './components/MyWeekView';
 import { isAdmin, hasArea } from './lib/roles';
 
 const API = '/api/members';
@@ -92,6 +93,7 @@ const PROFILE_GROUP = {
   id: 'me',
   label: 'My Church',
   items: [
+    { id: 'my-week',       label: 'My Week' },
     { id: 'profile',       label: 'My Household & Preferences' },
     { id: 'inbox',         label: 'My Inbox' },
     { id: 'how-it-works',  label: 'How It Works' },
@@ -209,7 +211,7 @@ const STANDALONE_TABS = new Set([
   'directory', 'profile', 'inbox', 'mail-groups', 'emails', 'record-keeping', 'livestreams',
   'visitors', 'leadership', 'action-history','service-roster', 'bulletin',
   'groups', 'bug-reports', 'how-it-works', 'member-match', 'contributions', 'member-attendance', 'mail-delivery',
-  'communion-prep', 'signups', 'rotations',
+  'communion-prep', 'signups', 'rotations', 'my-week',
 ]);
 
 // ─── Nav dropdown ──────────────────────────────────────────────────────────────
@@ -276,7 +278,8 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
   // clicking anywhere else in the nav after landing must behave exactly like
   // it always has.
   const [deepLink] = useState(deepLinkFromUrl);
-  const [activeTab,   setActiveTab]   = useState(deepLink?.page || 'upcoming');
+  // Everyone lands on their own week; a link from an email still lands where it points.
+  const [activeTab,   setActiveTab]   = useState(deepLink?.page || 'my-week');
   const [upcomingTab, setUpcomingTab] = useState(deepLink?.page === 'upcoming' && deepLink.tab || 'order');
   const [rosterTab,   setRosterTab]   = useState(deepLink?.page === 'service-roster' && deepLink.tab || 'scheduled');
   // Which sign-up the Sign-Ups page opens on: its permanent link, or one
@@ -295,6 +298,12 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
     setRotationFocus(null);
   }, []);
   const openSignup = useCallback(id => { setActiveTab('signups'); setSignupFocus(id); }, []);
+  // My Week opens the page a row came from, on that sign-up or rotation when it has one.
+  const openFromWeek = useCallback(({ page, list, rotation }) => {
+    goTo(page);
+    if (list) setSignupFocus(list);
+    if (rotation) setRotationFocus(rotation);
+  }, [goTo]);
   const [siteData,    setSiteData]    = useState(null);
 
   // Which pages members open, counted for the weekly reports. Never waited
@@ -472,6 +481,11 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
       )}
 
       {/* Standalone tabs (no scraped data needed) */}
+      {!updating && activeTab === 'my-week' && (
+        <main className="w-full max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
+          <MyWeekView onOpen={openFromWeek} />
+        </main>
+      )}
       {!updating && activeTab === 'upcoming' && (
         <main className="w-full max-w-6xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
           <UpcomingServiceView user={user} tab={upcomingTab} onTabChange={setUpcomingTab} initialPlanId={deepLink?.planId} initialSelection={deepLink?.service} />
