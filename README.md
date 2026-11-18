@@ -1950,14 +1950,11 @@ named volume over:
 | `/data/members.json` | The cached copy of the last scrape |
 | `/data/uploads` | Uploaded orders of service |
 
-**This volume is the backup.** Nothing else on the host holds congregation
-data, and an image never contains any of it.
-
-```bash
-# Back it up
-docker run --rm -v capshaw-dashboard_capshaw-data:/data -v "$PWD":/backup \
-  busybox tar czf /backup/capshaw-data.tar.gz -C /data .
-```
+**This volume is what has to be backed up.** Nothing else on the host holds
+congregation data, and an image never contains any of it. A nightly job backs
+it up, keeps two weeks on the droplet and sends an encrypted copy off it, and
+one command restores it — installing that, and restoring, are in
+[scripts/backup/README.md](scripts/backup/README.md).
 
 Outside a container the app writes to `server/data` and `server/uploads`
 exactly as it always has. `CAPSHAW_DATA_DIR` moves the database, photos and
