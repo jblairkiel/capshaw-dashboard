@@ -146,6 +146,16 @@ function initSchema(db) {
     UNIQUE(provider, provider_id)
   );
 
+  -- Signed-in sessions (server/lib/sessionStore.js), kept here rather than in
+  -- server memory so a restart or a deploy does not sign everybody out.
+  -- sess is express-session's JSON; expires_at is milliseconds since the epoch.
+  CREATE TABLE IF NOT EXISTS sessions (
+    sid        TEXT    PRIMARY KEY,
+    sess       TEXT    NOT NULL,
+    expires_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+
   CREATE INDEX IF NOT EXISTS idx_questions_set  ON questions(set_id);
   CREATE INDEX IF NOT EXISTS idx_sets_grade     ON question_sets(grade);
 
