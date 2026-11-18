@@ -193,7 +193,9 @@ function FamilyCard({ family, onEdit, onDelete }) {
 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
-export default function DirectoryView() {
+// Sync from Site runs the same capshawchurch.org refresh as the header's
+// Refresh button, which only admins may start, so only admins see it.
+export default function DirectoryView({ canSync = false }) {
   const [allMembers, setAllMembers] = useState([]);
   const [families,   setFamilies]   = useState([]);
   const [loading,    setLoading]    = useState(true);
@@ -285,17 +287,19 @@ export default function DirectoryView() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleSync}
-            disabled={syncing}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${syncing ? 'border-gray-300 text-gray-400 cursor-not-allowed' : 'border-church-gold text-church-gold hover:bg-church-gold hover:text-church-navy'}`}
-          >
-            {syncing
-              ? <span className="animate-spin w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full inline-block" />
-              : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-            }
-            {syncing ? 'Syncing…' : 'Sync from Site'}
-          </button>
+          {canSync && (
+            <button
+              onClick={handleSync}
+              disabled={syncing}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${syncing ? 'border-gray-300 text-gray-400 cursor-not-allowed' : 'border-church-gold text-church-gold hover:bg-church-gold hover:text-church-navy'}`}
+            >
+              {syncing
+                ? <span className="animate-spin w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full inline-block" />
+                : <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+              }
+              {syncing ? 'Syncing…' : 'Sync from Site'}
+            </button>
+          )}
           <button onClick={() => setModal('new')} className="btn-primary text-sm flex items-center gap-1.5">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
             Add Member
@@ -349,7 +353,7 @@ export default function DirectoryView() {
           <p className="text-sm">
             {search || letter
               ? 'No families match your search.'
-              : 'No directory entries yet — click "Sync from Site" to import.'}
+              : (canSync ? 'No directory entries yet — click "Sync from Site" to import.' : 'No directory entries yet.')}
           </p>
         </div>
       ) : (
