@@ -56,6 +56,18 @@ const reportRoutes               = require('./routes/reports');
 const { requireTrustedOrigin }   = require('./middleware/csrf');
 const rateLimit                  = require('express-rate-limit');
 
+// TRUST_PROXY: unset → one hop in production, none elsewhere; "false"/"0" →
+// trust nothing; a number → that many hops; anything else is handed to
+// Express as is (an address, a subnet, "loopback", a comma-separated list).
+function parseTrustProxy(value, isProd) {
+  if (value === undefined || value === '') return isProd ? 1 : false;
+  const v = String(value).trim();
+  if (v === 'false' || v === '0') return false;
+  if (v === 'true') return true;
+  if (/^\d+$/.test(v)) return Number(v);
+  return v;
+}
+
 function createApp() {
   const isProd = process.env.NODE_ENV === 'production';
 
@@ -77,8 +89,15 @@ function createApp() {
   // a fresh volume should not need anybody to mkdir before the app will start.
   paths.ensure();
 
-  // Trust nginx reverse proxy so req.protocol, req.ip, and secure cookies work correctly
-  if (isProd) app.set('trust proxy', 1);
+  // Trust the one nginx in front of us, so req.protocol, req.ip and secure
+  // cookies describe the visitor rather than the proxy. That only holds if
+  // nginx *sets* X-Forwarded-For to the address it saw (deploy/nginx/
+  // capshaw.conf): without it every visitor arrives as nginx and shares one
+  // sign-in rate limit, and a header the visitor typed is passed through
+  // untouched and believed. TRUST_PROXY overrides the hop count (or takes any
+  // value Express accepts, e.g. "loopback") for a different arrangement.
+  const trustProxy = parseTrustProxy(process.env.TRUST_PROXY, isProd);
+  if (trustProxy !== false) app.set('trust proxy', trustProxy);
 
   // Standard hardening headers (CSP, X-Content-Type-Options, no X-Powered-By,
   // etc). The app has no cross-origin scripts, fonts, or images to allow, so
@@ -216,4 +235,4 @@ function createApp() {
   return app;
 }
 
-module.exports = { createApp };
+module.exports = { createApp, parseTrustProxy };
