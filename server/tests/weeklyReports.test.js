@@ -91,8 +91,16 @@ describe('when they are sent', () => {
 
   test('moving the day does not set it off at once, and a report switched off is not sent', () => {
     mail.tick(at('2026-11-14', '12:00'));
-    mail.updateSetting('summary', { weekday: 1, time: '09:00' }, ADMIN);
-    mail.updateSetting('analytical', { enabled: false }, ADMIN);
+    // updateSetting reads the clock itself, so the change is made on the same
+    // simulated Saturday — on the real date the "moment just passed" would be
+    // a later Monday, and this test started failing once that Monday came.
+    jest.useFakeTimers({ now: at('2026-11-14', '12:01'), doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'] });
+    try {
+      mail.updateSetting('summary', { weekday: 1, time: '09:00' }, ADMIN);
+      mail.updateSetting('analytical', { enabled: false }, ADMIN);
+    } finally {
+      jest.useRealTimers();
+    }
     expect(mail.tick(at('2026-11-15', '15:05'))).toEqual([]);
     expect(mail.tick(at('2026-11-16', '09:01')).map(s => s.kind)).toEqual(['summary']);
   });
