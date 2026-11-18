@@ -1,0 +1,13 @@
+# Installed by scripts/backup/README.md → "Install on the droplet".
+[Unit]
+Description=Run the Capshaw portal backup every night
+
+[Timer]
+# 3:15 in the morning, droplet time (set with timedatectl). Persistent means a
+# night the droplet was off is caught up when it next boots.
+OnCalendar=*-*-* 03:15:00
+RandomizedDelaySec=10min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
