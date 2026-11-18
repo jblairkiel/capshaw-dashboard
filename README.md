@@ -81,6 +81,11 @@ of the portal, not even the `/display` announcement board.
 A lobby screen showing `/display` therefore needs to be signed in once as a
 member — the session cookie lasts seven days.
 
+Sessions are kept in the database (the `sessions` table, through
+`server/lib/sessionStore.js`), not in the server's memory, so a restart or a
+deploy leaves everybody signed in. Signing out deletes the row; an expired
+row is never read and is swept out hourly.
+
 There are three ways in: Google, Facebook, and an email address with a
 password. The first two are unchanged. The third is described below.
 
@@ -1950,14 +1955,11 @@ named volume over:
 | `/data/members.json` | The cached copy of the last scrape |
 | `/data/uploads` | Uploaded orders of service |
 
-**This volume is the backup.** Nothing else on the host holds congregation
-data, and an image never contains any of it.
-
-```bash
-# Back it up
-docker run --rm -v capshaw-dashboard_capshaw-data:/data -v "$PWD":/backup \
-  busybox tar czf /backup/capshaw-data.tar.gz -C /data .
-```
+**This volume is what has to be backed up.** Nothing else on the host holds
+congregation data, and an image never contains any of it. A nightly job backs
+it up, keeps two weeks on the droplet and sends an encrypted copy off it, and
+one command restores it — installing that, and restoring, are in
+[scripts/backup/README.md](scripts/backup/README.md).
 
 Outside a container the app writes to `server/data` and `server/uploads`
 exactly as it always has. `CAPSHAW_DATA_DIR` moves the database, photos and
@@ -1967,11 +1969,15 @@ scrape cache together; `CAPSHAW_UPLOAD_DIR` moves the uploads. See
 ### In front of it
 
 The container publishes on `127.0.0.1:3001` and expects something in front of
-it terminating TLS — the existing nginx does exactly this, unchanged. Two
-things that proxy must do, or sign-in silently fails:
+it terminating TLS — the existing nginx does exactly this. Three things that
+proxy must do, or sign-in silently fails or is shared:
 
 - Pass `X-Forwarded-Proto`, since the session cookie is `secure` in production
   and the app trusts the proxy to say whether the request arrived over HTTPS.
+- Set `X-Forwarded-For` (and `X-Real-IP`) to `$remote_addr`, or every visitor
+  shares one sign-in rate limit. [`deploy/nginx/capshaw.conf`](deploy/nginx/capshaw.conf)
+  has both, plus `server_tokens off`. The app trusts one proxy hop; set
+  `TRUST_PROXY` (a hop count, `loopback`, a subnet, or `false`) if yours differs.
 - Send an `Origin` (or `Referer`) header on API requests: any mutating request
   from an origin outside the allowed list is refused before it reaches a route.
 
@@ -2180,9 +2186,12 @@ pm2 save
 pm2 startup   # follow the printed command to enable auto-start on reboot
 ```
 
-**nginx config** (`/etc/nginx/sites-available/capshaw`):
+**nginx config** (`/etc/nginx/sites-available/capshaw`, kept in the repo as
+[`deploy/nginx/capshaw.conf`](deploy/nginx/capshaw.conf)):
 
 ```nginx
+server_tokens off;
+
 server {
     server_name capshaw.jblairkiel.com;
 
@@ -2193,11 +2202,22 @@ server {
         proxy_set_header Connection 'upgrade';
         proxy_set_header Host $host;
         proxy_cache_bypass $http_upgrade;
+
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
 
+The three `X-` headers are not optional. Without `X-Forwarded-For` every
+visitor reaches the app as nginx itself, so the sign-in rate limit is one
+bucket shared by the whole congregation, and the app logs a
+`[rateLimit] ... no X-Forwarded-For header` warning to say so.
+`server_tokens off` stops nginx announcing its version on every response.
+
 ```bash
+sudo cp deploy/nginx/capshaw.conf /etc/nginx/sites-available/capshaw
 sudo ln -s /etc/nginx/sites-available/capshaw /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 

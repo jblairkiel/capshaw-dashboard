@@ -46,6 +46,42 @@ describe('rateLimit', () => {
     expect((await from('10.0.0.1')).status).toBe(429);
   });
 
+  test('with one trusted hop, a forwarded address the visitor typed cannot dodge the limit', async () => {
+    const app = express();
+    // What production runs (app.js): trust exactly one proxy. If nginx ever
+    // appends instead of overwriting, Express takes the address nginx added,
+    // not whatever the visitor put in front of it.
+    app.set('trust proxy', 1);
+    app.use('/try', rateLimit({ max: 1 }), (req, res) => res.json({ success: true }));
+
+    const spoofed = typed => request(app).get('/try').set('X-Forwarded-For', `${typed}, 203.0.113.7`);
+
+    expect((await spoofed('1.1.1.1')).status).toBe(200);
+    expect((await spoofed('2.2.2.2')).status).toBe(429);
+  });
+
+  test('warns once when a trusted proxy forwards no address', async () => {
+    const limiter = rateLimit({ max: 100 });
+    const app = express();
+    app.set('trust proxy', 1);
+    app.use('/try', limiter, (req, res) => res.json({ success: true }));
+
+    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      limiter.reset();
+      await request(app).get('/try').set('X-Forwarded-For', '10.0.0.1');
+      expect(warn).not.toHaveBeenCalled();
+
+      await request(app).get('/try');
+      await request(app).get('/try');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0][0]).toMatch(/X-Forwarded-For/);
+    } finally {
+      warn.mockRestore();
+      limiter.reset();
+    }
+  });
+
   test('reset clears everything it has counted', async () => {
     const limiter = rateLimit({ max: 1 });
     const app = express();

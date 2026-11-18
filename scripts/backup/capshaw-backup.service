@@ -1,0 +1,15 @@
+# Installed by scripts/backup/README.md → "Install on the droplet".
+[Unit]
+Description=Capshaw portal nightly backup (database, photos, uploads) with off-server copy
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+# The deploy user: the one in the docker group that owns /var/www/capshaw-dashboard.
+User=deploy
+EnvironmentFile=-/etc/capshaw-backup.env
+ExecStart=/var/www/capshaw-dashboard/scripts/backup/capshaw-backup.sh
+# A backup should not compete with members using the site.
+Nice=10
+IOSchedulingClass=idle

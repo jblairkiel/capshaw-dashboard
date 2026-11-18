@@ -1,7 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const router  = express.Router();
-const { requireApproved, requireAdmin } = require('../middleware/auth');
+const { requireAdmin } = require('../middleware/auth');
 const { syncDirectory } = require('../lib/directorySync');
 const fs      = require('fs');
 const path    = require('path');
@@ -567,7 +567,10 @@ async function runUpdate() {
 }
 
 // POST /api/members/update
-router.post('/update', requireApproved, async (req, res) => {
+// Admins only: a refresh signs in to capshawchurch.org with the church's own
+// login and reads every section, so it is not something any member should be
+// able to set off (or set off over and over). The four-hourly job runs it too.
+router.post('/update', requireAdmin, async (req, res) => {
   if (_updateInProgress) {
     return res.status(409).json({ success: false, error: 'Update already in progress' });
   }
