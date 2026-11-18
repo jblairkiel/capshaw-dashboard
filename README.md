@@ -81,6 +81,11 @@ of the portal, not even the `/display` announcement board.
 A lobby screen showing `/display` therefore needs to be signed in once as a
 member — the session cookie lasts seven days.
 
+Sessions are kept in the database (the `sessions` table, through
+`server/lib/sessionStore.js`), not in the server's memory, so a restart or a
+deploy leaves everybody signed in. Signing out deletes the row; an expired
+row is never read and is swept out hourly.
+
 There are three ways in: Google, Facebook, and an email address with a
 password. The first two are unchanged. The third is described below.
 

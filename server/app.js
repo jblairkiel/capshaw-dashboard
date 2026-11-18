@@ -55,6 +55,7 @@ const usageRoutes                = require('./routes/usage');
 const reportRoutes               = require('./routes/reports');
 const { requireTrustedOrigin }   = require('./middleware/csrf');
 const rateLimit                  = require('express-rate-limit');
+const { SqliteSessionStore }     = require('./lib/sessionStore');
 
 // TRUST_PROXY: unset → one hop in production, none elsewhere; "false"/"0" →
 // trust nothing; a number → that many hops; anything else is handed to
@@ -114,7 +115,12 @@ function createApp() {
   app.use(cors({ origin: allowedOrigins, credentials: true }));
   app.use(express.json());
 
+  // Sessions are rows in the database, not entries in this process's memory,
+  // so a member stays signed in across a restart or a deploy.
+  const sessionStore = new SqliteSessionStore(require('./db'));
+
   app.use(session({
+    store: sessionStore,
     secret: sessionSecret,
     resave: false,
     saveUninitialized: false,
