@@ -14,6 +14,15 @@ function householdKey(person) {
   return key || `_${person.id}`;
 }
 
+// ─── Photos ───────────────────────────────────────────────────────────────────
+
+// A person's face, wherever one is shown: their own photo when they have one,
+// otherwise their family's. Everything written before individual photos
+// existed has only the family photo, and keeps showing it.
+function photoOf(person) {
+  return (person?.own_photo || '').trim() || (person?.photo || '').trim();
+}
+
 function sameHousehold(a, b) {
   return !!a && !!b && householdKey(a) === householdKey(b);
 }
@@ -71,6 +80,7 @@ module.exports = {
   GENDERS,
   isGender,
   sameHousehold,
+  photoOf,
   WORSHIP_ROLES,
   PREFERENCE_LEVELS,
   isWorshipRole,

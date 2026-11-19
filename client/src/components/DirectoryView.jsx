@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import WorshipPreferences from './WorshipPreferences';
 import PersonPhoto from './PersonPhoto';
+import { OwnPhotoEditor, FamilyPhoto, FamilyPhotoEditor } from './PhotoEditor';
 
 // Adding somebody to the directory and removing them go through /api/records,
 // which is gated on the Member Directory area rather than on being an admin.
@@ -12,6 +13,26 @@ const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 function getLastName(fullName) {
   const parts = fullName.trim().split(/\s+/);
   return parts.length > 1 ? parts[parts.length - 1] : parts[0];
+}
+
+// A directory row carries its photo filenames (`photo` is the family's,
+// `own_photo` the person's); the photo components want the profile API's
+// shape, which says only whether there is one of each. A row that already
+// came back from the profile API is in that shape already.
+const version = file => (file ? file.slice(0, 12) : '');
+function asPerson(m) {
+  if (!('photo' in m) && !('own_photo' in m)) return m;
+  const { photo = '', own_photo = '', ...rest } = m;
+  const face = own_photo || photo;
+  return {
+    ...rest,
+    has_photo:        !!face,
+    has_own_photo:    !!own_photo,
+    has_family_photo: !!photo,
+    photo_version:        version(face),
+    own_photo_version:    version(own_photo),
+    family_photo_version: version(photo),
+  };
 }
 
 // Group flat member list into families by shared address
@@ -42,7 +63,7 @@ function groupByFamily(members) {
 
 const PROFILE_API = '/api/profile';
 
-function MemberModal({ member, onSave, onClose }) {
+function MemberModal({ member, onSave, onPhotoSaved, onClose }) {
   const isNew = !member?.id;
   const FIELDS = [
     { key: 'name',    label: 'Name',         placeholder: 'First Last' },
@@ -113,6 +134,12 @@ function MemberModal({ member, onSave, onClose }) {
           </button>
         </div>
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+          {person && (
+            <div className="pb-4 border-b border-gray-100">
+              <OwnPhotoEditor person={person} canEdit onSaved={p => { setPerson(p); onPhotoSaved?.(p); }} />
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-3">
             {FIELDS.map(f => (
               <label key={f.key} className="block">
@@ -146,23 +173,71 @@ function MemberModal({ member, onSave, onClose }) {
 
 // ─── Family card ──────────────────────────────────────────────────────────────
 
-function FamilyCard({ family, onEdit, onDelete }) {
+// ─── Family photo modal ───────────────────────────────────────────────────────
+
+function FamilyPhotoModal({ family, onSaved, onClose }) {
+  // Anybody in the household will do: the server finds the rest by address.
+  const person = family.members.find(m => m.has_family_photo) ?? family.members[0];
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <h3 className="font-semibold text-church-navy">{family.familyName} Family photo</h3>
+          <button onClick={onClose} aria-label="Close" className="text-gray-400 hover:text-gray-600">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <div className="overflow-y-auto p-4">
+          <FamilyPhotoEditor person={person} householdSize={family.members.length} canEdit onSaved={onSaved} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Family card ──────────────────────────────────────────────────────────────
+
+const CameraIcon = () => (
+  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+  </svg>
+);
+
+function FamilyCard({ family, onEdit, onDelete, onFamilyPhoto }) {
   const { familyName, address, city, state, zip, members } = family;
   const location = [address, city, state, zip].filter(Boolean).join(', ');
+  // Everybody at an address shares the family photo, so any one of them shows it.
+  const withFamilyPhoto = members.find(m => m.has_family_photo);
 
   return (
-    <div className="bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md hover:border-church-gold/30 transition-all flex flex-col">
+    <div className="bg-white rounded-xl border border-gray-100 shadow-sm hover:shadow-md hover:border-church-gold/30 transition-all flex flex-col overflow-hidden">
+      {withFamilyPhoto && (
+        <FamilyPhoto person={withFamilyPhoto} className="w-full aspect-[16/9]" />
+      )}
+
       {/* Card header */}
-      <div className="px-4 py-3 border-b border-gray-50">
-        <h3 className="font-semibold text-church-navy text-sm leading-snug">{familyName} Family</h3>
-        {location && <p className="text-xs text-gray-400 mt-0.5 leading-tight">{location}</p>}
+      <div className="px-4 py-3 border-b border-gray-50 flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold text-church-navy text-sm leading-snug">{familyName} Family</h3>
+          {location && <p className="text-xs text-gray-400 mt-0.5 leading-tight">{location}</p>}
+        </div>
+        <button
+          onClick={() => onFamilyPhoto(family)}
+          className="shrink-0 flex items-center gap-1 text-xs text-gray-400 hover:text-church-navy px-1.5 py-1 rounded"
+          title={withFamilyPhoto ? 'Change the family photo' : 'Add a family photo'}
+        >
+          <CameraIcon />
+          <span className="sr-only sm:not-sr-only">{withFamilyPhoto ? 'Change' : 'Add photo'}</span>
+        </button>
       </div>
 
       {/* Member rows */}
       <div className="divide-y divide-gray-50 flex-1">
         {members.map(m => (
           <div key={m.id} className="group px-4 py-2.5 flex items-start gap-2.5">
-            <PersonPhoto person={{ ...m, has_photo: !!m.photo }} size={40} />
+            {/* Their own photo, or the family's when they have none. */}
+            <PersonPhoto person={m} size={40} className={m.has_own_photo ? '' : 'opacity-90'} />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-800 leading-snug">{m.name}</p>
               <div className="mt-0.5 space-y-0.5">
@@ -202,6 +277,7 @@ export default function DirectoryView({ canSync = false }) {
   const [search,     setSearch]     = useState('');
   const [letter,     setLetter]     = useState('');
   const [modal,      setModal]      = useState(null);
+  const [familyPhoto, setFamilyPhoto] = useState(null);
   const [error,      setError]      = useState('');
   const [syncing,    setSyncing]    = useState(false);
   const [syncMsg,    setSyncMsg]    = useState('');
@@ -233,7 +309,7 @@ export default function DirectoryView({ canSync = false }) {
         (m.email   || '').toLowerCase().includes(q)
       );
     }
-    let grouped = groupByFamily(filtered);
+    let grouped = groupByFamily(filtered.map(asPerson));
     if (letter) grouped = grouped.filter(f => f.familyName.toUpperCase().startsWith(letter));
     setFamilies(grouped);
   }, [allMembers, search, letter]);
@@ -258,6 +334,15 @@ export default function DirectoryView({ canSync = false }) {
       if (idx >= 0) { const next = [...prev]; next[idx] = row; return next; }
       return [...prev, row];
     });
+  }
+
+  // A photo saved from the profile API comes back in its shape; merge it over
+  // the directory row so the card shows it at once.
+  function mergePeople(updated) {
+    setAllMembers(prev => prev.map(m => {
+      const u = updated.find(p => p.id === m.id);
+      return u ? { ...asPerson(m), ...u } : m;
+    }));
   }
 
   async function handleSync() {
@@ -364,6 +449,7 @@ export default function DirectoryView({ canSync = false }) {
               family={fam}
               onEdit={setModal}
               onDelete={handleDelete}
+              onFamilyPhoto={setFamilyPhoto}
             />
           ))}
         </div>
@@ -373,7 +459,19 @@ export default function DirectoryView({ canSync = false }) {
         <MemberModal
           member={modal === 'new' ? null : modal}
           onSave={handleSaved}
+          onPhotoSaved={p => mergePeople([p])}
           onClose={() => setModal(null)}
+        />
+      )}
+
+      {familyPhoto && (
+        <FamilyPhotoModal
+          family={familyPhoto}
+          onSaved={json => {
+            mergePeople(json.household);
+            setFamilyPhoto(prev => prev && { ...prev, members: prev.members.map(m => ({ ...m, ...(json.household.find(p => p.id === m.id) || {}) })) });
+          }}
+          onClose={() => setFamilyPhoto(null)}
         />
       )}
     </div>

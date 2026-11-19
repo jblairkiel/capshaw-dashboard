@@ -10,13 +10,14 @@
 // contacts can be found (or cleared out) together, and a UID made from the
 // directory id, so importing a newer file can be matched against an older one.
 //
-// The directory's photos are family photos, shared by everybody at an
-// address. A card carries its photo when it is a JPEG, PNG or GIF (what both
+// A card shows the person's own photo when they have one, otherwise the family
+// photo everybody at their address shares (lib/people.js photoOf). A card carries its photo when it is a JPEG, PNG or GIF (what both
 // phones show) and small enough not to make the file unwieldy to import.
 
 const fs = require('fs');
 const db = require('../db');
 const photoStore = require('./photoStore');
+const { photoOf } = require('./people');
 
 const ORG = 'Capshaw Church of Christ';
 // A family thumbnail is far below this; a full-size camera photo is not worth
@@ -94,7 +95,7 @@ function card(person, { photos = true, cache = new Map() } = {}) {
   if (person.address || person.city || person.state || person.zip) {
     lines.push(`ADR;TYPE=HOME:;;${esc(person.address)};${esc(person.city)};${esc(person.state)};${esc(person.zip)};`);
   }
-  const photo = photos ? photoFor(person.photo, cache) : null;
+  const photo = photos ? photoFor(photoOf(person), cache) : null;
   if (photo) lines.push(`PHOTO;ENCODING=b;TYPE=${photo.type}:${photo.base64}`);
   lines.push('END:VCARD');
   return lines.map(fold).join('\r\n');
@@ -104,7 +105,7 @@ function card(person, { photos = true, cache = new Map() } = {}) {
 // text and how many contacts (and photos) are in it.
 function directoryVcf({ photos = true } = {}) {
   const people = db.prepare(`
-    SELECT id, name, address, city, state, zip, phone, cell, email, photo
+    SELECT id, name, address, city, state, zip, phone, cell, email, photo, own_photo
       FROM directory WHERE trim(name) <> '' ORDER BY name COLLATE NOCASE
   `).all();
   const cache = new Map();

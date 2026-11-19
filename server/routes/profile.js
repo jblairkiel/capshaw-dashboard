@@ -1,5 +1,6 @@
 const express = require('express');
 const router  = express.Router();
+const multer  = require('multer');
 const db      = require('../db');
 const { requireAuth, requireApproved, holdsArea } = require('../middleware/auth');
 const actionLog = require('../lib/actionLog');
@@ -7,7 +8,7 @@ const photoStore = require('../lib/photoStore');
 const directoryVcard = require('../lib/directoryVcard');
 const worship = require('../lib/worship');
 const {
-  sameHousehold,
+  sameHousehold, photoOf,
   WORSHIP_ROLES, PREFERENCE_LEVELS,
   EDITABLE_FIELDS, GENDERS, isGender,
 } = require('../lib/people');
@@ -26,13 +27,25 @@ function householdOf(person) {
     .filter(other => sameHousehold(person, other));
 }
 
-// A person plus everything the profile screens render about them.
+// A short, stable token for a stored photo, so a page can ask for the new
+// picture the moment one is replaced instead of the one its browser cached.
+const photoVersion = file => (file ? file.slice(0, 12) : '');
+
+// A person plus everything the profile screens render about them. The photo
+// filenames stay on the server; the page learns only whether there is one of
+// each kind, and which the face shown is.
 function personPayload(person) {
-  const { edited_fields, photo, ...fields } = person;
+  const { edited_fields, photo, own_photo, ...fields } = person;
+  const face = photoOf(person);
   return {
     ...fields,
     edited_fields: safeParse(edited_fields),
-    has_photo: !!photo,
+    has_photo:        !!face,
+    has_own_photo:    !!own_photo,
+    has_family_photo: !!photo,
+    photo_version:    photoVersion(face),
+    own_photo_version:    photoVersion(own_photo),
+    family_photo_version: photoVersion(photo),
     worship: { preferences: worship.preferencesOf(person.id), notes: worship.notesOf(person.id) },
   };
 }
@@ -128,6 +141,15 @@ router.get('/directory.vcf', requireApproved, (req, res) => {
 });
 
 // ─── GET /api/profile/person/:id/photo ────────────────────────────────────────
+// The face shown for a person: their own photo, or their family's when they
+// have none. ?kind=own or ?kind=family asks for one in particular, which is
+// what the photo editor shows.
+
+const PHOTO_KINDS = {
+  face:   person => photoOf(person),
+  own:    person => person.own_photo,
+  family: person => person.photo,
+};
 
 router.get('/person/:id/photo', requireApproved, (req, res) => {
   const person = getPerson(req.params.id);
@@ -136,14 +158,142 @@ router.get('/person/:id/photo', requireApproved, (req, res) => {
     return res.status(403).json({ success: false, error: 'You can only view photos in your own household' });
   }
 
-  const file = photoStore.photoPath(person.photo);
-  if (!person.photo || !file || !photoStore.exists(person.photo)) {
+  const pick = PHOTO_KINDS[req.query.kind || 'face'];
+  if (!pick) return res.status(400).json({ success: false, error: 'kind must be own or family' });
+  const filename = pick(person);
+  const file = photoStore.photoPath(filename);
+  if (!filename || !file || !photoStore.exists(filename)) {
     return res.status(404).json({ success: false, error: 'No photo on file' });
   }
 
   // Content-addressed filenames never change contents, so this is safe to keep.
+  // The page adds ?v= with the photo's version, so a replaced photo is a new URL.
   res.set('Cache-Control', 'private, max-age=86400');
   res.sendFile(file);
+});
+
+// ─── Uploading photos ─────────────────────────────────────────────────────────
+// A person's own photo belongs to them; the family photo belongs to everybody
+// at the address and changes for all of them at once. Either may be put up or
+// taken down by anyone who may edit that person (canEdit): the directory's
+// keeper for anybody, a member for their own household.
+//
+// An uploaded or removed photo is marked edited, like a typed-in field, so the
+// next sync from capshawchurch.org does not put the site's portrait back over
+// it (lib/directorySync.js) — and so the row is not pruned as a scrape artefact.
+
+const IMAGE_MIMES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp']);
+const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: (req, file, cb) => cb(null, IMAGE_MIMES.has(file.mimetype)),
+  limits: { fileSize: MAX_PHOTO_BYTES },
+});
+
+// multer's own errors (a file over the limit) as a plain 400 rather than a 500.
+function receivePhoto(req, res, next) {
+  upload.single('photo')(req, res, err => {
+    if (err) {
+      const tooBig = err.code === 'LIMIT_FILE_SIZE';
+      return res.status(400).json({ success: false, error: tooBig ? 'That photo is larger than 5 MB' : 'That photo could not be uploaded' });
+    }
+    next();
+  });
+}
+
+function markEdited(person, field) {
+  const edited = new Set(safeParse(person.edited_fields));
+  edited.add(field);
+  return JSON.stringify([...edited]);
+}
+
+function editablePerson(req, res) {
+  const person = getPerson(req.params.id);
+  if (!person) { res.status(404).json({ success: false, error: 'Person not found' }); return null; }
+  if (!canEdit(req.user, person)) {
+    res.status(403).json({ success: false, error: 'You can only change photos in your own household' });
+    return null;
+  }
+  return person;
+}
+
+function storeUpload(req, res) {
+  if (!req.file) {
+    res.status(400).json({ success: false, error: 'Choose a JPEG, PNG, GIF or WebP photo to upload' });
+    return null;
+  }
+  const filename = photoStore.savePhoto({ buffer: req.file.buffer }, MAX_PHOTO_BYTES);
+  if (!filename) res.status(400).json({ success: false, error: 'That file could not be read as a photo' });
+  return filename;
+}
+
+function photoArea(user) {
+  return holdsArea(user, 'directory') ? 'directory' : 'my-household';
+}
+
+// Writes one person's own photo ('' removes it).
+function setOwnPhoto(req, res, person, filename) {
+  db.prepare('UPDATE directory SET own_photo = ?, edited_fields = ? WHERE id = ?')
+    .run(filename, markEdited(person, 'own_photo'), person.id);
+  actionLog.record(req.user, {
+    area:     photoArea(req.user),
+    action:   'update',
+    entity:   'directory photo',
+    entityId: person.id,
+    summary:  filename ? `Put up a photo of ${person.name}` : `Took down ${person.name}'s own photo`,
+  });
+  res.json({ success: true, person: personPayload(getPerson(person.id)) });
+}
+
+// Writes the family photo for everybody at the person's address ('' removes it).
+function setFamilyPhoto(req, res, person, filename) {
+  const household = householdOf(person);
+  const update = db.prepare('UPDATE directory SET photo = ?, edited_fields = ? WHERE id = ?');
+  db.transaction(() => {
+    for (const member of household) update.run(filename, markEdited(member, 'photo'), member.id);
+  })();
+  actionLog.record(req.user, {
+    area:     photoArea(req.user),
+    action:   'update',
+    entity:   'directory photo',
+    entityId: person.id,
+    summary:  `${filename ? 'Put up' : 'Took down'} the family photo for ${household.map(m => m.name).join(', ')}`,
+    details:  { household: household.map(m => m.id) },
+  });
+  res.json({
+    success:   true,
+    person:    personPayload(getPerson(person.id)),
+    household: householdOf(person).map(personPayload),
+  });
+}
+
+// ─── PUT/DELETE /api/profile/person/:id/photo — one person's own photo ───────
+
+router.put('/person/:id/photo', requireApproved, receivePhoto, (req, res) => {
+  const person = editablePerson(req, res);
+  if (!person) return;
+  const filename = storeUpload(req, res);
+  if (filename) setOwnPhoto(req, res, person, filename);
+});
+
+router.delete('/person/:id/photo', requireApproved, (req, res) => {
+  const person = editablePerson(req, res);
+  if (person) setOwnPhoto(req, res, person, '');
+});
+
+// ─── PUT/DELETE /api/profile/person/:id/family-photo — the household's ───────
+
+router.put('/person/:id/family-photo', requireApproved, receivePhoto, (req, res) => {
+  const person = editablePerson(req, res);
+  if (!person) return;
+  const filename = storeUpload(req, res);
+  if (filename) setFamilyPhoto(req, res, person, filename);
+});
+
+router.delete('/person/:id/family-photo', requireApproved, (req, res) => {
+  const person = editablePerson(req, res);
+  if (person) setFamilyPhoto(req, res, person, '');
 });
 
 // ─── PATCH /api/profile/person/:id — contact details ──────────────────────────

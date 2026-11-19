@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { DIRECTORY_FIELDS, PREFERENCE_LEVELS } from '../lib/worship';
 import WorshipPreferences from './WorshipPreferences';
 import PersonPhoto from './PersonPhoto';
+import { OwnPhotoEditor, FamilyPhotoEditor } from './PhotoEditor';
 
 const API = '/api/profile';
 
@@ -131,6 +132,7 @@ function PersonCard({ person, isSelf, canEdit, onSaved, defaultOpen }) {
 
       {open && (
         <div className="mt-4 pt-4 border-t border-gray-100 space-y-6">
+          <OwnPhotoEditor person={person} canEdit={canEdit} onSaved={onSaved} />
           <ContactForm person={person} disabled={!canEdit} onSaved={onSaved} />
           <div className="pt-4 border-t border-gray-100">
             <WorshipPreferences
@@ -217,7 +219,7 @@ function DirectoryToPhone({ canExport }) {
       <h3 className="font-semibold text-church-navy text-sm">The church directory on your phone</h3>
       <p className="text-xs text-gray-500 mt-1">
         Adds everybody in the member directory to your phone&apos;s contacts — names, phone numbers,
-        email and addresses, with family photos where there are some — each marked
+        email and addresses, with each person&apos;s photo (or their family photo) where there is one — each marked
         &ldquo;Capshaw Church of Christ&rdquo; so you can find them together.
       </p>
       <a href={DIRECTORY_VCF} className="btn-primary inline-flex items-center gap-2 text-sm mt-3">
@@ -266,6 +268,15 @@ export default function MyProfileView({ user }) {
     });
   }
 
+  // A family photo changes everybody at the address at once.
+  function handleHousehold({ household }) {
+    setData(prev => prev && {
+      ...prev,
+      person:    household.find(p => p.id === prev.person?.id) ?? prev.person,
+      household,
+    });
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-16">
@@ -309,7 +320,7 @@ export default function MyProfileView({ user }) {
       <div>
         <h2 className="section-heading mb-0">My Household</h2>
         <p className="text-xs text-gray-400 mt-0.5">
-          Your details and worship preferences, and those of everyone at your address.
+          Your details, photos and worship preferences, and those of everyone at your address.
         </p>
       </div>
 
@@ -324,6 +335,13 @@ export default function MyProfileView({ user }) {
         onSaved={notifications => setData(prev => prev && ({ ...prev, notifications }))}
       />
       <DirectoryToPhone canExport={user?.role === 'approved' || user?.role === 'admin'} />
+
+      <FamilyPhotoEditor
+        person={data.person}
+        householdSize={data.household.length}
+        canEdit={canEdit}
+        onSaved={handleHousehold}
+      />
 
       <PersonCard
         person={data.person}

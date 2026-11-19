@@ -855,6 +855,11 @@ function initSchema(db) {
   addColumn('directory', 'edited_fields', "TEXT NOT NULL DEFAULT '[]'");
   // Filename of this person's photo inside server/data/photos, or '' if none.
   addColumn('directory', 'photo', "TEXT NOT NULL DEFAULT ''");
+  // `photo` above is the family photo: everybody at an address shares one file
+  // (the site publishes a portrait per family). `own_photo` is this one
+  // person's picture, uploaded here, or '' — in which case the family photo
+  // stands in for them everywhere a face is shown (lib/people.js photoOf).
+  addColumn('directory', 'own_photo', "TEXT NOT NULL DEFAULT ''");
   // Everyone gets the monthly schedule summary unless they turn it off on My
   // Info, so a new account is opted in by default.
   addColumn('users', 'wants_monthly_report', 'INTEGER NOT NULL DEFAULT 1');
