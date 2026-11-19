@@ -3,6 +3,7 @@ import { DIRECTORY_FIELDS, PREFERENCE_LEVELS } from '../lib/worship';
 import WorshipPreferences from './WorshipPreferences';
 import PersonPhoto from './PersonPhoto';
 import { OwnPhotoEditor, FamilyPhotoEditor } from './PhotoEditor';
+import { TwoStepSettings } from './TwoStep';
 
 const API = '/api/profile';
 
@@ -297,6 +298,7 @@ export default function MyProfileView({ user }) {
           onSaved={notifications => setData(prev => prev && ({ ...prev, notifications }))}
         />
         <DirectoryToPhone canExport={user?.role === 'approved' || user?.role === 'admin'} />
+        {user && <TwoStepSettings user={user} />}
 
         <div className="card text-center py-10">
           <p className="text-sm text-gray-600">
@@ -335,6 +337,7 @@ export default function MyProfileView({ user }) {
         onSaved={notifications => setData(prev => prev && ({ ...prev, notifications }))}
       />
       <DirectoryToPhone canExport={user?.role === 'approved' || user?.role === 'admin'} />
+      {user && <TwoStepSettings user={user} />}
 
       <FamilyPhotoEditor
         person={data.person}
