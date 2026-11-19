@@ -1,0 +1,58 @@
+name: Server setup
+
+# One-time and occasional jobs on the droplet that a deploy does not do, run
+# by hand from Actions → Server setup → Run workflow. Connects with the same
+# SSH secrets as the deploy and runs scripts/ops/server-setup.sh from the
+# droplet's checkout. Every task is safe to run twice.
+#
+#   preflight      read-only: what is in place and what is missing
+#   nginx          forward the visitor's real address to the app and hide the
+#                  nginx version; backs up /etc/nginx first, checks every site
+#                  on the box answers the same afterwards, rolls back if not,
+#                  then proves sign-in limits are per visitor
+#   backups        nightly backup install, scripts/backup/README.md steps 3-6
+#   restore-check  download the newest off-server backup and verify it,
+#                  without touching live data
+#
+# This repository is public, so these logs are too. The script prints counts
+# and pass/fail, never config files, secrets or the other sites' names.
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: What to run on the droplet
+        type: choice
+        options: [preflight, nginx, backups, restore-check]
+        default: preflight
+
+permissions:
+  contents: read
+
+# Never two of these at once, and never alongside a deploy's own SSH session.
+concurrency:
+  group: droplet-server-setup
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: ${{ inputs.task }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Run on the droplet
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          TASK: ${{ inputs.task }}
+        with:
+          host: ${{ secrets.DO_HOST }}
+          username: ${{ secrets.DO_USER }}
+          key: ${{ secrets.DO_SSH_KEY }}
+          envs: TASK
+          command_timeout: 15m
+          script: |
+            set -e
+            cd /var/www/capshaw-dashboard
+            # The deploy pulls main; if this runs before that deploy has, catch up.
+            [ -x scripts/ops/server-setup.sh ] || git pull --ff-only origin main
+            scripts/ops/server-setup.sh "$TASK"
