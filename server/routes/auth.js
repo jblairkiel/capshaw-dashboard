@@ -17,6 +17,9 @@ const { EDITABLE_FIELDS } = require('../lib/people');
 const { rateLimit } = require('../middleware/rateLimit');
 const accountMail = require('../mail/accounts');
 const notices = require('../mail/notices');
+const twoStep = require('../lib/twoStep');
+const { createTwoStepRouter, startSecondStep, pendingOf } = require('./twoStep');
+const displayPrefs = require('../lib/displayPrefs');
 
 const isProd     = process.env.NODE_ENV === 'production';
 const CLIENT_URL = isProd ? 'https://capshaw.jblairkiel.com' : 'http://localhost:5173';
@@ -376,6 +379,12 @@ function publicUser(user) {
     id, name, email, photo, role, provider, created_at, last_login, directory_id, areas: effectiveAreas(user),
     // An address they asked to add, still waiting on its confirmation link.
     pending_email: user.pending_email || '',
+    // Whether two-step sign-in is on, and whether this account has to use it.
+    // Never the secret.
+    two_step: twoStep.statusOf(user),
+    // Text size, theme and motion, so every device they sign in on looks the
+    // way they chose (lib/displayPrefs.js).
+    display_prefs: displayPrefs.read(user.display_prefs),
   };
 }
 
@@ -750,6 +759,15 @@ router.post('/login', limitSignIn, asyncRoute(async (req, res, next) => {
   // An account still waiting for approval signs in like any other, but sees
   // only the page saying so, with the admins it can contact (limitPending).
 
+  // Two-step sign-in on: the password was only the first step. Nobody is
+  // signed in until the code from their phone arrives at /two-step/verify.
+  if (twoStep.isEnabled(user)) {
+    return startSecondStep(req, user, regenerateSession, err => {
+      if (err) return next(err);
+      res.status(401).json({ success: false, code: 'two_step_required', error: 'Enter the code from your authenticator app.' });
+    });
+  }
+
   // A brand-new session id for the signed-in session, so a cookie somebody was
   // handed before they signed in cannot be reused afterwards.
   regenerateSession(req, regenErr => {
@@ -801,6 +819,16 @@ router.get('/google/callback', ifConfigured('google'), (req, res, next) => {
       console.log('[auth] Google: no user —', info?.message ?? 'unknown reason');
       return res.redirect(`${CLIENT_URL}/?auth_error=${authErrorFor('google', info)}`);
     }
+    // Two-step sign-in on: Google vouched for the first step only.
+    if (twoStep.isEnabled(user)) {
+      return startSecondStep(req, user, regenerateSession, stepErr => {
+        if (stepErr) {
+          console.error('[auth] Google session error:', stepErr.message);
+          return res.redirect(`${CLIENT_URL}/?auth_error=google`);
+        }
+        res.redirect(`${CLIENT_URL}/?two_step=1`);
+      });
+    }
     req.logIn(user, loginErr => {
       if (loginErr) {
         console.error('[auth] Google session error:', loginErr.message);
@@ -828,6 +856,16 @@ router.get('/facebook/callback', ifConfigured('facebook'), (req, res, next) => {
       console.log('[auth] Facebook: no user —', info?.message ?? 'unknown reason');
       return res.redirect(`${CLIENT_URL}/?auth_error=${authErrorFor('facebook', info)}`);
     }
+    // Two-step sign-in on: Facebook vouched for the first step only.
+    if (twoStep.isEnabled(user)) {
+      return startSecondStep(req, user, regenerateSession, stepErr => {
+        if (stepErr) {
+          console.error('[auth] Facebook session error:', stepErr.message);
+          return res.redirect(`${CLIENT_URL}/?auth_error=facebook`);
+        }
+        res.redirect(`${CLIENT_URL}/?two_step=1`);
+      });
+    }
     req.logIn(user, loginErr => {
       if (loginErr) {
         console.error('[auth] Facebook session error:', loginErr.message);
@@ -840,7 +878,10 @@ router.get('/facebook/callback', ifConfigured('facebook'), (req, res, next) => {
 });
 
 router.get('/me', (req, res) => {
-  if (!req.user) return res.status(401).json({ success: false });
+  if (!req.user) {
+    // Halfway through signing in: the page should ask for the code.
+    return res.status(401).json(pendingOf(req) ? { success: false, code: 'two_step_required' } : { success: false });
+  }
   res.json({
     success: true,
     user: publicUser(req.user),
@@ -852,6 +893,10 @@ router.get('/me', (req, res) => {
       : null,
   });
 });
+
+// The code step itself, and setting it up from My Info.
+const twoStepRouter = createTwoStepRouter({ publicUser, regenerateSession });
+router.use('/two-step', twoStepRouter);
 
 router.post('/logout', (req, res) => {
   req.logout(err => {
@@ -950,11 +995,11 @@ function withLinkedProviders(row) {
 function userRow(id) {
   const user = db.prepare(`
     SELECT u.id, u.provider, u.email, u.name, u.photo, u.role, u.created_at, u.last_login,
-           u.directory_id, u.email_verified_at, d.name AS directory_name, ${LINKED_PROVIDERS_SQL}
+           u.directory_id, u.email_verified_at, u.two_step_enabled_at, d.name AS directory_name, ${LINKED_PROVIDERS_SQL}
       FROM users u LEFT JOIN directory d ON d.id = u.directory_id
      WHERE u.id = ?
   `).get(id);
-  return { ...withLinkedProviders(user), is_owner: isOwner(user), areas: effectiveAreas(user) };
+  return { ...withLinkedProviders(user), is_owner: isOwner(user), areas: effectiveAreas(user), two_step_required: twoStep.isRequired(user) };
 }
 
 function approveUser(actor, targetId, body = {}) {
@@ -1053,10 +1098,11 @@ router.get('/users', requireAuth, requireAdmin, (req, res) => {
   const users = db.prepare(`
     SELECT u.id, u.provider, u.email, u.name, u.photo, u.role, u.created_at, u.last_login,
            u.directory_id, u.email_verified_at, u.approved_at, d.name AS directory_name,
+           u.two_step_enabled_at,
            ${LINKED_PROVIDERS_SQL}
     FROM users u LEFT JOIN directory d ON d.id = u.directory_id
     ORDER BY u.role ASC, u.created_at ASC
-  `).all().map(u => ({ ...withLinkedProviders(u), is_owner: isOwner(u), areas: effectiveAreas(u) }));
+  `).all().map(u => ({ ...withLinkedProviders(u), is_owner: isOwner(u), areas: effectiveAreas(u), two_step_required: twoStep.isRequired(u) }));
   res.json({ success: true, users, roles: ROLES, areas: AREAS });
 });
 
@@ -1356,6 +1402,37 @@ router.delete('/link-requests/:id', requireAuth, requireAdmin, (req, res) => {
   res.json({ success: true });
 });
 
+// ─── Admin: two-step sign-in reset ────────────────────────────────────────────
+//
+// For somebody who has lost their phone and their recovery codes. It turns
+// two-step sign-in off; if their account has to use it, they are asked to set
+// it up again the next time they sign in. Not for your own account — that is
+// what your recovery codes are for, and it would let a stolen admin password
+// switch off the protection on the very account it belongs to.
+router.delete('/users/:id/two-step', requireAuth, requireAdmin, (req, res) => {
+  if (req.impersonator) {
+    return res.status(403).json({ success: false, error: 'Stop viewing as a member first.' });
+  }
+  if (String(req.params.id) === String(req.user.id)) {
+    return res.status(400).json({ success: false, error: 'You cannot reset your own two-step sign-in. Use a recovery code, or ask another admin.' });
+  }
+  const target = db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id);
+  if (!target) return res.status(404).json({ success: false, error: 'User not found' });
+  if (!twoStep.isEnabled(target)) {
+    return res.status(400).json({ success: false, error: `${target.name} does not have two-step sign-in on.` });
+  }
+  twoStep.disable(target.id);
+  actionLog.record(req.user, {
+    area:     'accounts',
+    action:   'update',
+    entity:   'account',
+    entityId: target.id,
+    summary:  `Reset two-step sign-in for ${target.name}`,
+    details:  { email: target.email, must_set_up_again: twoStep.isRequired(target) },
+  });
+  res.json({ success: true, user: userRow(target.id) });
+});
+
 router.delete('/users/:id', requireAuth, requireAdmin, (req, res) => {
   if (String(req.params.id) === String(req.user.id)) {
     return res.status(400).json({ success: false, error: 'Cannot delete your own account' });
@@ -1391,4 +1468,5 @@ module.exports.resetRateLimits = () => {
   limitResend.reset();
   limitForgot.reset();
   limitReset.reset();
+  twoStepRouter.resetRateLimits();
 };

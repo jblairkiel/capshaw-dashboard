@@ -12,11 +12,13 @@ import AnnouncementsView from './components/AnnouncementsView';
 import AnnouncementsDisplay from './components/AnnouncementsDisplay';
 import LoginPage from './components/LoginPage';
 import WaitingForApproval from './components/WaitingForApproval';
+import { TwoStepRequiredPage } from './components/TwoStep';
 import UsersView from './components/UsersView';
 import UpcomingServiceView from './components/UpcomingServiceView';
 import DatabaseAdminView from './components/DatabaseAdminView';
 import DirectoryView from './components/DirectoryView';
 import MyProfileView from './components/MyProfileView';
+import { applyDisplay } from './lib/displayPrefs';
 import MobileNav from './components/MobileNav';
 import InboxView from './components/InboxView';
 import MailGroupsView from './components/MailGroupsView';
@@ -677,6 +679,9 @@ export default function App() {
   // until they are known, so the page appears whole rather than the buttons
   // arriving late.
   const [providers, setProviders] = useState(undefined);
+  // The password (or Google, or Facebook) was accepted and the server is
+  // waiting for the code from their phone.
+  const [secondStep, setSecondStep] = useState(false);
 
   // Set by the OAuth callbacks and by the confirmation link in the registration
   // email, which the API answers with a redirect back to here.
@@ -689,10 +694,21 @@ export default function App() {
 
   useEffect(() => {
     fetch('/api/auth/me', { credentials: 'include' })
-      .then(r => r.ok ? r.json() : null)
-      .then(j => { setUser(j?.user ?? null); setImpersonatedBy(j?.impersonatedBy ?? null); })
+      .then(async r => ({ ok: r.ok, j: await r.json().catch(() => null) }))
+      .then(({ ok, j }) => {
+        setSecondStep(!ok && j?.code === 'two_step_required');
+        setUser(ok ? (j?.user ?? null) : null);
+        setImpersonatedBy(ok ? (j?.impersonatedBy ?? null) : null);
+      })
       .catch(() => setUser(null));
   }, []);
+
+  // The member's text size, theme and motion settings follow their account to
+  // any device. While an admin is viewing as someone, their own screen keeps
+  // the admin's look.
+  useEffect(() => {
+    if (user?.display_prefs && !impersonatedBy) applyDisplay(user.display_prefs);
+  }, [user, impersonatedBy]);
 
   // Only the sign-in page needs the providers, so they are asked for once we
   // know nobody is signed in (on load, or after signing out).
@@ -719,8 +735,21 @@ export default function App() {
         verified={verified}
         verifyError={verifyError}
         resetToken={resetToken}
+        secondStep={secondStep}
         providers={providers}
         onSignedIn={setUser}
+      />
+    );
+  }
+
+  // An admin or directory manager who has yet to set up two-step sign-in: the
+  // server answers nothing else until they do (server/middleware/twoStep.js).
+  if (!impersonatedBy && user.two_step?.required && !user.two_step?.enabled) {
+    return (
+      <TwoStepRequiredPage
+        user={user}
+        onDone={setUser}
+        onLogout={() => { setUser(null); setImpersonatedBy(null); }}
       />
     );
   }

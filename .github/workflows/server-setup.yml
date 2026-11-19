@@ -12,15 +12,25 @@ name: Server setup
 #                  then proves sign-in limits are per visitor
 #   backups        nightly backup install, scripts/backup/README.md steps 3-6
 #   timezone       set the droplet clock to US Central (America/Chicago)
+#   revoke-cloud-key  take the cloud session SSH key off claude-deploy, by
+#                  fingerprint; every other key and user is left alone
 #   restore-check  download the newest off-server backup and verify it,
 #                  without touching live data
 #   restore-drill  a full practice restore: back up now, restore the newest
 #                  off-server copy into a scratch copy of the portal (own
 #                  container, volume and port), check every record and photo
 #                  matches live, then delete the scratch copy
+#   harden         unattended security updates, fail2ban for SSH, and a ufw
+#                  firewall allowing only SSH, 80 and 443. Checks every site
+#                  from the internet before and after, over a fresh SSH
+#                  connection, and turns the firewall back off if anything
+#                  differs; the droplet also turns it off by itself after 15
+#                  minutes unless this run confirms, so SSH can't stay locked out
+#   harden-check   read-only: what harden would see (ports, owners, sites)
 #
-# This repository is public, so these logs are too. The script prints counts
-# and pass/fail, never config files, secrets or the other sites' names.
+# This repository is public, so these logs are too. The script prints sizes
+# and pass/fail, never member counts, names or addresses, config files,
+# secrets, remote names or the other sites' names.
 
 on:
   workflow_dispatch:
@@ -28,7 +38,7 @@ on:
       task:
         description: What to run on the droplet
         type: choice
-        options: [preflight, nginx, backups, restore-check, restore-drill, timezone]
+        options: [preflight, nginx, backups, restore-check, restore-drill, timezone, revoke-cloud-key, harden-check, harden]
         default: preflight
 
 permissions:
@@ -42,6 +52,7 @@ concurrency:
 jobs:
   run:
     name: ${{ inputs.task }}
+    if: inputs.task != 'harden' && inputs.task != 'harden-check'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -61,3 +72,86 @@ jobs:
             # The deploy pulls main; if this runs before that deploy has, catch up.
             [ -x scripts/ops/server-setup.sh ] || git pull --ff-only origin main
             scripts/ops/server-setup.sh "$TASK"
+
+  # The firewall changes what the internet can reach, which no check run on the
+  # droplet itself can see (its own requests never cross the firewall). So this
+  # one is driven from the runner: plain ssh, so each step is a NEW connection,
+  # and every site asked from out here before and after.
+  harden:
+    name: harden
+    if: inputs.task == 'harden' || inputs.task == 'harden-check'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DO_HOST: ${{ secrets.DO_HOST }}
+      DO_USER: ${{ secrets.DO_USER }}
+      DOMAIN: capshaw.jblairkiel.com
+    steps:
+      - name: SSH key
+        env:
+          KEY: ${{ secrets.DO_SSH_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/droplet && chmod 600 ~/.ssh/droplet
+          ip=$(getent ahostsv4 "$DO_HOST" | awk 'NR==1{print $1}')
+          [ -n "$ip" ] || { echo "::error::Could not resolve the droplet"; exit 1; }
+          echo "::add-mask::$ip"
+          echo "DO_IP=$ip" >> "$GITHUB_ENV"
+          cat > ~/remote <<'SH'
+          #!/usr/bin/env bash
+          # One fresh SSH connection per call, running server-setup.sh <task>.
+          exec ssh -i ~/.ssh/droplet -o BatchMode=yes -o ConnectTimeout=20 \
+            -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=15 \
+            "$DO_USER@$DO_HOST" "cd /var/www/capshaw-dashboard && \
+              { grep -q harden_apply scripts/ops/server-setup.sh || git pull -q --ff-only origin main; } && \
+              scripts/ops/server-setup.sh $1"
+          SH
+          chmod +x ~/remote
+          cat > ~/sites <<'SH'
+          #!/usr/bin/env bash
+          # Every site on the droplet, asked from the internet: "<label> <http> <https>".
+          i=0
+          while read -r n; do
+            i=$((i + 1)); label="site-$i"; [ "$n" = "$DOMAIN" ] && label=portal
+            printf '%-8s http %s  https %s\n' "$label" \
+              "$(curl -s  -o /dev/null -m 15 -w '%{http_code}' --resolve "$n:80:$DO_IP"  "http://$n/")" \
+              "$(curl -sk -o /dev/null -m 15 -w '%{http_code}' --resolve "$n:443:$DO_IP" "https://$n/")"
+          done < ~/names
+          SH
+          chmod +x ~/sites
+
+      - name: Record what is there (read-only)
+        run: ~/remote harden-record
+
+      - name: Every site from the internet, before
+        run: |
+          ~/remote server-names > ~/names
+          # Public log: the other sites' names never appear in it.
+          while read -r n; do echo "::add-mask::$n"; done < ~/names
+          echo "$(wc -l < ~/names) server names"
+          ~/sites | tee ~/before
+
+      - name: Security updates, fail2ban, firewall
+        if: inputs.task == 'harden'
+        run: ~/remote harden-apply
+
+      - name: Check from the internet, then confirm or undo
+        if: inputs.task == 'harden'
+        run: |
+          fail=""
+          for i in 1 2 3; do ~/remote server-names >/dev/null || fail="a new SSH connection failed"; done
+          [ -z "$fail" ] && echo "  ok    three new SSH connections got in"
+          ~/sites | tee ~/after
+          diff -q ~/before ~/after >/dev/null || fail="${fail:+$fail; }a site answered differently from the internet"
+          if [ -z "$fail" ]; then
+            echo "  ok    every site answers from the internet exactly as before"
+            ~/remote harden-confirm
+          else
+            echo "::error::$fail. Turning the firewall off again."
+            ~/remote harden-rollback || echo "::error::Could not reach the droplet; its guard turns ufw off by itself within 15 minutes of the change."
+            exit 1
+          fi
+
+      - name: If anything above failed, make sure the firewall is off
+        if: failure() && inputs.task == 'harden'
+        run: ~/remote harden-rollback || echo "::error::Could not reach the droplet; its guard turns ufw off by itself within 15 minutes of the change."

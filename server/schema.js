@@ -863,6 +863,12 @@ function initSchema(db) {
   // Everyone gets the monthly schedule summary unless they turn it off on My
   // Info, so a new account is opted in by default.
   addColumn('users', 'wants_monthly_report', 'INTEGER NOT NULL DEFAULT 1');
+  // The same for the Sunday "Your week" email (mail/myWeek.js): on until the
+  // member turns it off on My Info, or with the link at the foot of the email.
+  addColumn('users', 'wants_weekly_email', 'INTEGER NOT NULL DEFAULT 1');
+  // How the portal looks for this member — text size, color theme, motion —
+  // as JSON (lib/displayPrefs.js). '{}' is the usual look.
+  addColumn('users', 'display_prefs', "TEXT NOT NULL DEFAULT '{}'");
 
   // ── Email + password accounts (provider = 'local') ───────────────────────────
   // Accounts that came from Google or Facebook leave every column below empty:
@@ -901,6 +907,26 @@ function initSchema(db) {
   // without one, kept here until they open the confirmation link (which uses
   // the email_verify_* columns above). Only then does it become their email.
   addColumn('users', 'pending_email', "TEXT NOT NULL DEFAULT ''");
+
+  // ── Two-step sign-in (server/lib/twoStep.js) ────────────────────────────────
+  // The authenticator-app secret, '' until somebody finishes setting it up.
+  // two_step_enabled_at is what says it is on. two_step_last_step is the last
+  // 30-second step a code was accepted for, so one code cannot be used twice.
+  addColumn('users', 'two_step_secret', "TEXT NOT NULL DEFAULT ''");
+  addColumn('users', 'two_step_enabled_at', 'TEXT');
+  addColumn('users', 'two_step_last_step', 'INTEGER NOT NULL DEFAULT -1');
+  // Single-use codes for when the phone is lost: SHA-256 of each, never the
+  // code itself, and when it was spent.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS two_step_recovery_codes (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      code_hash  TEXT    NOT NULL,
+      used_at    TEXT,
+      created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_two_step_recovery_user ON two_step_recovery_codes(user_id);
+  `);
 
   // Whether this person may be rostered for the men's worship jobs. Chosen on
   // My Info (or by the directory area on their behalf) — not guessed from a
@@ -1312,6 +1338,20 @@ function initSchema(db) {
       email    TEXT    NOT NULL DEFAULT '',     -- '' when the leader has no address on file
       sent_at  TEXT    NOT NULL DEFAULT (datetime('now')),
       UNIQUE (date, service, kind)
+    );
+  `);
+
+  // The Sunday "Your week" email, claimed per account per week before it is
+  // built, so a restart or a second server never sends one twice. `items` is
+  // how many things it listed; 0 means there was nothing to say and nothing
+  // was sent.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS my_week_emails (
+      user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      week_of  TEXT    NOT NULL,                 -- the Sunday it was sent for
+      items    INTEGER NOT NULL DEFAULT 0,
+      sent_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, week_of)
     );
   `);
   // A note against any part of a submitted service, whatever the part

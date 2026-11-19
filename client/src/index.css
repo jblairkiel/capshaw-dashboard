@@ -148,3 +148,44 @@
   margin: 1.5rem 0;
   opacity: 0.35;
 }
+
+/* ── Member display settings (My Household → Display) ───────────────────────
+   Set as data-* attributes on <html> by lib/displayPrefs.js, and before the
+   page draws by public/display-prefs.js. Colors for each theme live in
+   theme/palettes.js. Nothing here applies when a setting is at its default. */
+
+/* Text size. Tailwind sizes are in rem, so the whole page scales with this. */
+html[data-text-size="large"]   { font-size: 112.5%; }
+html[data-text-size="largest"] { font-size: 125%; }
+
+/* Reduce motion: no sliding, fading or bouncing. A loading spinner keeps
+   turning, slowly, so it is still clear that something is happening. */
+html[data-motion="reduce"] *,
+html[data-motion="reduce"] *::before,
+html[data-motion="reduce"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  transition-delay: 0s !important;
+  scroll-behavior: auto !important;
+}
+html[data-motion="reduce"] .animate-spin {
+  animation-duration: 2.5s !important;
+  animation-iteration-count: infinite !important;
+}
+
+/* High contrast: a clear ring on whatever the keyboard is on. */
+html[data-theme="contrast"] :focus-visible {
+  outline: 3px solid #000;
+  outline-offset: 2px;
+}
+
+/* Dark: white cards and panels become the dark surface. Only these exact
+   classes — the see-through bg-white/5…/50 highlights sit on navy panels and
+   stay white. */
+html[data-theme="dark"] .bg-white,
+html[data-theme="dark"] .card,
+html[data-theme="dark"] .file\:bg-white::file-selector-button { background-color: #152038; }
+html[data-theme="dark"] .bg-white\/60 { background-color: rgb(21 32 56 / 0.6); }
+html[data-theme="dark"] .bg-white\/70 { background-color: rgb(21 32 56 / 0.7); }
+html[data-theme="dark"] .bg-white\/90 { background-color: rgb(21 32 56 / 0.9); }

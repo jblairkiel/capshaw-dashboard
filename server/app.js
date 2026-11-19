@@ -50,6 +50,7 @@ const myWeekRoutes               = require('./routes/myWeek');
 const memoryVerseRoutes          = require('./routes/memoryVerses');
 const paths                      = require('./lib/paths');
 const { requireSiteAuth, limitPending } = require('./middleware/auth');
+const { enforceTwoStep } = require('./middleware/twoStep');
 const { applyImpersonation }     = require('./middleware/impersonation');
 const { noteVisits }             = require('./lib/portalUsage');
 const usageRoutes                = require('./routes/usage');
@@ -162,7 +163,12 @@ function createApp() {
   // limitPending follows it, so it judges whoever the request is answered as:
   // an account still waiting for approval reaches only the sign-in routes and
   // the page that tells it who to contact.
-  app.use('/api', apiRateLimit, requireTrustedOrigin(allowedOrigins), requireSiteAuth, applyImpersonation, limitPending);
+  //
+  // enforceTwoStep comes before the sign-in gate: a session that never passed
+  // the code step of an account with two-step sign-in on counts as signed out,
+  // and an admin who has yet to set it up reaches only the setup routes. It
+  // judges the real account, so it also sits before impersonation.
+  app.use('/api', apiRateLimit, requireTrustedOrigin(allowedOrigins), enforceTwoStep, requireSiteAuth, applyImpersonation, limitPending);
   // Who used the portal today, for the weekly reports (lib/portalUsage.js).
   app.use('/api', noteVisits);
   app.use('/api/usage', usageRoutes);

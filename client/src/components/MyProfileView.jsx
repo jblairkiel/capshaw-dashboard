@@ -3,6 +3,8 @@ import { DIRECTORY_FIELDS, PREFERENCE_LEVELS } from '../lib/worship';
 import WorshipPreferences from './WorshipPreferences';
 import PersonPhoto from './PersonPhoto';
 import { OwnPhotoEditor, FamilyPhotoEditor } from './PhotoEditor';
+import { TwoStepSettings } from './TwoStep';
+import DisplaySettings from './DisplaySettings';
 
 const API = '/api/profile';
 
@@ -157,48 +159,62 @@ function PersonCard({ person, isSelf, canEdit, onSaved, defaultOpen }) {
 // ─── Email preferences ────────────────────────────────────────────────────────
 
 // About the signed-in account rather than the directory entry, so it sits
-// apart from the household cards.
-function EmailPreferences({ notifications, onSaved }) {
-  const [busy, setBusy]   = useState(false);
-  const [error, setError] = useState('');
-  const wants = notifications?.monthlyReport !== false;
+// apart from the household cards. Both are on until somebody turns them off.
+const EMAIL_CHOICES = [
+  {
+    key: 'monthlyReport',
+    label: 'Monthly schedule summary',
+    help: <>The whole month&apos;s worship assignments, sent when a new schedule is published.
+      Everyone gets this unless they turn it off. Turning it off does not stop the
+      emails about jobs you are personally given.</>,
+  },
+  {
+    key: 'weeklyEmail',
+    label: 'Your week, every Sunday',
+    help: <>Your own My Week page by email on Sunday morning: what you are serving, signed up
+      for and going to this week, and anything waiting on your answer. Not sent in a week
+      with nothing on your list.</>,
+  },
+];
 
-  async function toggle(next) {
-    setBusy(true); setError('');
+function EmailPreferences({ notifications, onSaved }) {
+  const [busy, setBusy]   = useState('');
+  const [error, setError] = useState('');
+
+  async function toggle(key, next) {
+    setBusy(key); setError('');
     try {
       const json = await send(`${API}/notifications`, {
         method:  'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ monthlyReport: next }),
+        body:    JSON.stringify({ [key]: next }),
       });
       onSaved(json.notifications);
     } catch (err) {
       setError(err.message);
     } finally {
-      setBusy(false);
+      setBusy('');
     }
   }
 
   return (
     <div className="card">
       <h3 className="font-semibold text-church-navy text-sm">Email</h3>
-      <label className="flex items-start gap-3 mt-3 cursor-pointer">
-        <input
-          type="checkbox"
-          checked={wants}
-          disabled={busy}
-          onChange={e => toggle(e.target.checked)}
-          className="mt-0.5 w-4 h-4 rounded border-gray-300 text-church-gold focus:ring-church-gold"
-        />
-        <span className="min-w-0">
-          <span className="text-sm text-church-navy block">Monthly schedule summary</span>
-          <span className="text-xs text-gray-500 block mt-0.5">
-            The whole month&apos;s worship assignments, sent when a new schedule is published.
-            Everyone gets this unless they turn it off. Turning it off does not stop the
-            emails about jobs you are personally given.
+      {EMAIL_CHOICES.map(choice => (
+        <label key={choice.key} className="flex items-start gap-3 mt-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={notifications?.[choice.key] !== false}
+            disabled={!!busy}
+            onChange={e => toggle(choice.key, e.target.checked)}
+            className="mt-0.5 w-4 h-4 rounded border-gray-300 text-church-gold focus:ring-church-gold"
+          />
+          <span className="min-w-0">
+            <span className="text-sm text-church-navy block">{choice.label}</span>
+            <span className="text-xs text-gray-500 block mt-0.5">{choice.help}</span>
           </span>
-        </span>
-      </label>
+        </label>
+      ))}
       {error && <p className="text-sm text-red-600 mt-2">{error}</p>}
     </div>
   );
@@ -292,11 +308,13 @@ export default function MyProfileView({ user }) {
     return (
       <div className="space-y-4">
         <h2 className="section-heading mb-0">My Household</h2>
+        <DisplaySettings />
         <EmailPreferences
           notifications={data.notifications}
           onSaved={notifications => setData(prev => prev && ({ ...prev, notifications }))}
         />
         <DirectoryToPhone canExport={user?.role === 'approved' || user?.role === 'admin'} />
+        {user && <TwoStepSettings user={user} />}
 
         <div className="card text-center py-10">
           <p className="text-sm text-gray-600">
@@ -330,11 +348,13 @@ export default function MyProfileView({ user }) {
         </div>
       )}
 
+      <DisplaySettings />
       <EmailPreferences
         notifications={data.notifications}
         onSaved={notifications => setData(prev => prev && ({ ...prev, notifications }))}
       />
       <DirectoryToPhone canExport={user?.role === 'approved' || user?.role === 'admin'} />
+      {user && <TwoStepSettings user={user} />}
 
       <FamilyPhotoEditor
         person={data.person}

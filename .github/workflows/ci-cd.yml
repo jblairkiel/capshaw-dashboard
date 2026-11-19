@@ -401,8 +401,16 @@ jobs:
             fi
             docker compose ps
             echo ""
-            echo "=== Logs (last 200 lines) ==="
-            docker compose logs --tail 200 app || true
+            # The app's log names members and their addresses (reminders,
+            # sign-ins), and this repository's workflow logs are public. Keep
+            # the whole log on the droplet, readable by this user only, and
+            # print just the error lines with any email address masked.
+            failed_log="$HOME/capshaw-deploy-failed-$(date -u +%Y%m%dT%H%M%SZ).log"
+            ( umask 077; docker compose logs --no-color --tail 500 app > "$failed_log" 2>&1 || true )
+            echo "=== Error lines from the app log (full log kept on the droplet at $failed_log) ==="
+            grep -aiE 'error|exception|fail|cannot|refused|EADDRINUSE|SQLITE|[|][[:space:]]+at ' "$failed_log" \
+              | sed -E 's/[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]{2,}/<email>/g' \
+              | tail -60 || echo "(no error lines)"
 
             # The one failure whose cause is outside the container: something
             # else on the host already has the port. On this droplet that is
@@ -414,7 +422,8 @@ jobs:
             ss -ltnp 2>/dev/null | grep -E '[:.]3001' \
               || echo "nothing else is listening on 3001"
             if command -v pm2 >/dev/null 2>&1; then
-              pm2 list 2>/dev/null || true
+              # This app's row only: the box runs other people's sites too.
+              pm2 list 2>/dev/null | grep -E 'capshaw-dashboard' || true
               echo "If PM2 is listed as online above, something started it"
               echo "after this job stopped it, and it is holding the port"
               echo "against the container. Retire it for good with:"

@@ -142,7 +142,7 @@ church-site settings), restores the newest off-server copy into it with
 `capshaw-restore.sh latest-remote`, and checks every table and every photo and
 upload is identical to live. Then it deletes the scratch copy and checks the
 live container and every other site on the droplet answer as before. The log
-shows counts and pass/fail only. Worth running every few months, and after any
+shows pass/fail only, never row counts or names. Worth running every few months, and after any
 change to the backup scripts.
 
 ## Day to day
@@ -152,7 +152,7 @@ change to the backup scripts.
 | Did last night's run work? | `journalctl -u capshaw-backup --since yesterday` |
 | Take one now | `scripts/backup/capshaw-backup.sh` (or `sudo systemctl start capshaw-backup`) |
 | What is there | `scripts/backup/capshaw-restore.sh --list` |
-| Check an archive without restoring | `docker compose exec -T app node server/tools/backup.js verify - < /var/backups/capshaw/<file>` |
+| Check an archive without restoring | `docker compose exec -T app node server/tools/backup.js verify - < /var/backups/capshaw/<file>` (add `--counts` for per-table row counts; leave it off anywhere the output is shared) |
 
 ## Restoring
 
