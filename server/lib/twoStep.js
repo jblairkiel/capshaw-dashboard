@@ -72,9 +72,9 @@ function looksLikeRecoveryCode(code) {
 }
 
 function newRecoveryCode() {
-  const bytes = crypto.randomBytes(8);
+  // randomInt draws without the bias `byte % 31` would have.
   let out = '';
-  for (const b of bytes) out += RECOVERY_ALPHABET[b % RECOVERY_ALPHABET.length];
+  for (let i = 0; i < 8; i += 1) out += RECOVERY_ALPHABET[crypto.randomInt(RECOVERY_ALPHABET.length)];
   return `${out.slice(0, 4)}-${out.slice(4)}`;
 }
 
