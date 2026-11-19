@@ -19,6 +19,7 @@ const accountMail = require('../mail/accounts');
 const notices = require('../mail/notices');
 const twoStep = require('../lib/twoStep');
 const { createTwoStepRouter, startSecondStep, pendingOf } = require('./twoStep');
+const displayPrefs = require('../lib/displayPrefs');
 
 const isProd     = process.env.NODE_ENV === 'production';
 const CLIENT_URL = isProd ? 'https://capshaw.jblairkiel.com' : 'http://localhost:5173';
@@ -381,6 +382,9 @@ function publicUser(user) {
     // Whether two-step sign-in is on, and whether this account has to use it.
     // Never the secret.
     two_step: twoStep.statusOf(user),
+    // Text size, theme and motion, so every device they sign in on looks the
+    // way they chose (lib/displayPrefs.js).
+    display_prefs: displayPrefs.read(user.display_prefs),
   };
 }
 

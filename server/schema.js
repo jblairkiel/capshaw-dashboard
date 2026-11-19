@@ -866,6 +866,9 @@ function initSchema(db) {
   // The same for the Sunday "Your week" email (mail/myWeek.js): on until the
   // member turns it off on My Info, or with the link at the foot of the email.
   addColumn('users', 'wants_weekly_email', 'INTEGER NOT NULL DEFAULT 1');
+  // How the portal looks for this member — text size, color theme, motion —
+  // as JSON (lib/displayPrefs.js). '{}' is the usual look.
+  addColumn('users', 'display_prefs', "TEXT NOT NULL DEFAULT '{}'");
 
   // ── Email + password accounts (provider = 'local') ───────────────────────────
   // Accounts that came from Google or Facebook leave every column below empty:
