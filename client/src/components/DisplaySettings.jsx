@@ -48,7 +48,7 @@ export default function DisplaySettings() {
                     key={option.value}
                     className={`cursor-pointer rounded-lg border px-3 py-2 text-sm transition-colors focus-within:ring-2 focus-within:ring-church-gold ${
                       on
-                        ? 'bg-church-navy border-church-navy text-white'
+                        ? 'bg-church-navy border-church-navy text-white font-semibold'
                         : 'bg-white border-gray-300 text-church-navy hover:border-church-gold'
                     }`}
                   >

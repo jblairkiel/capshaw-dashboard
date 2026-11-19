@@ -1,5 +1,5 @@
 import plugin from 'tailwindcss/plugin';
-import { tailwindColors, THEMES, cssVars } from './theme/palettes.js';
+import { tailwindColors, THEMES, cssVars, DARK_PANELS, restoredInDarkPanels } from './theme/palettes.js';
 
 /** @type {import('tailwindcss').Config} */
 export default {
@@ -27,6 +27,7 @@ export default {
         ':root': cssVars(THEMES.standard),
         ':root[data-theme="dark"]': { ...cssVars(THEMES.dark), colorScheme: 'dark' },
         ':root[data-theme="contrast"]': cssVars(THEMES.contrast),
+        [DARK_PANELS.map(sel => `:root[data-theme="contrast"] ${sel}`).join(',\n')]: restoredInDarkPanels(THEMES.contrast),
       });
     }),
   ],

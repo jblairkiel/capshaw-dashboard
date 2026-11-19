@@ -166,6 +166,24 @@ function contrast() {
 
 export const THEMES = { standard: standard(), dark: dark(), contrast: contrast() };
 
+// The navy header, navy buttons and other dark panels were drawn for light text
+// and the bright gold, so inside them High contrast puts back the Standard
+// value of everything it darkened. CSS variables inherit, so this covers all
+// that sits inside such a panel.
+export const DARK_PANELS = [
+  '.bg-church-navy', '.bg-church-navy\\/90', '.btn-primary', '.bg-gray-900',
+  '.bg-\\[\\#0b1636\\]', '.bg-\\[\\#152038\\]',
+];
+
+export function restoredInDarkPanels(theme) {
+  const std = THEMES.standard.c;
+  const out = {};
+  for (const layer of ['c', 'bg', 'text']) {
+    for (const name of Object.keys(theme[layer] || {})) out[`--${layer}-${name}`] = triplet(std[name]);
+  }
+  return out;
+}
+
 // The CSS custom properties for one theme, as a { '--name': 'r g b' } object
 // ready for Tailwind's addBase.
 export function cssVars(theme) {
