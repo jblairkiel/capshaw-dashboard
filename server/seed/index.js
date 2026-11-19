@@ -60,6 +60,7 @@ const NOT_FILLED = {
   worship_parts: 'The parts a service is made of. Seeded once at start-up and kept by the worship organizer; real services are built from them, so a batch must not take them away.',
   worship_outlines: 'The usual order of each service. Seeded with the parts, and the worship organizer\'s to change.',
   worship_reminders: 'Which song leaders have been reminded about which service. A made-up entry would stop a real reminder being sent.',
+  my_week_emails: 'Which members have been sent their Sunday "Your week" email. A made-up entry would stop a real one being sent.',
   scheduled_jobs: 'When the weekly reminders last went out. A made-up entry would stop a real one being sent.',
   user_areas: 'Who may do what, which follows from the accounts.',
   portal_visits: 'Who used the portal on which day, which follows from the accounts, and made-up visits would pass for real use in the weekly reports.',

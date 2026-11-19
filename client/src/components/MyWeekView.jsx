@@ -210,6 +210,13 @@ export default function MyWeekView({ onOpen }) {
         Something missing? Serving jobs are matched by the name on the Service Roster, so a job written under a
         different spelling of your name will not show here.
       </p>
+      <p className="text-xs text-gray-500">
+        This page is emailed to you on Sunday mornings when there is something on it.{' '}
+        <button onClick={() => onOpen?.({ page: 'profile' })} className="underline">
+          Turn that off under My Household &amp; Preferences
+        </button>
+        .
+      </p>
     </div>
   );
 }

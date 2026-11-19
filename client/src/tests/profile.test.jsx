@@ -186,6 +186,27 @@ describe('MyProfileView — email preferences', () => {
     expect(await screen.findByRole('checkbox', { name: /monthly schedule summary/i })).not.toBeChecked();
   });
 
+  test('the Sunday "Your week" email is on by default and can be turned off on its own', async () => {
+    const fetchMock = mockProfile({ notifications: { monthlyReport: true, weeklyEmail: true } });
+    render(<MyProfileView user={{}} />);
+    const box = await screen.findByRole('checkbox', { name: /your week, every sunday/i });
+    expect(box).toBeChecked();
+    fireEvent.click(box);
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/profile/notifications',
+        expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ weeklyEmail: false }) })
+      );
+    });
+  });
+
+  test('shows the weekly email as off for somebody who turned it off', async () => {
+    mockProfile({ notifications: { monthlyReport: true, weeklyEmail: false } });
+    render(<MyProfileView user={{}} />);
+    expect(await screen.findByRole('checkbox', { name: /your week, every sunday/i })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /monthly schedule summary/i })).toBeChecked();
+  });
+
   test('is offered even to an account not yet linked to the directory', async () => {
     mockProfile({ linked: false, person: null, household: [] });
     render(<MyProfileView user={{ email: 'nobody@example.com' }} />);
