@@ -59,7 +59,7 @@ if [ "$target" = "--list" ]; then
   echo "On this droplet ($BACKUP_DIR):"
   ls -1t "$BACKUP_DIR"/capshaw-*.tar.gz 2>/dev/null | head -20 | sed 's/^/  /' || echo "  (none)"
   if [ -n "$RCLONE_REMOTE" ]; then
-    echo "Off-server ($RCLONE_REMOTE):"
+    echo "Off-server:"
     rclone lsf "$RCLONE_REMOTE" --include 'capshaw-*.tar.gz' | sort -r | head -20 | sed 's/^/  /'
   fi
   exit 0
@@ -76,11 +76,11 @@ case "$target" in
     [ -n "$RCLONE_REMOTE" ] || die "RCLONE_REMOTE is not set in $CONFIG"
     if [ "$target" = latest-remote ]; then
       name=$(rclone lsf "$RCLONE_REMOTE" --include 'capshaw-*.tar.gz' | sort | tail -1)
-      [ -n "$name" ] || die "no archives in $RCLONE_REMOTE"
+      [ -n "$name" ] || die "no archives off-server"
     else
       name=${target#remote:}
     fi
-    log "Downloading $name from $RCLONE_REMOTE"
+    log "Downloading $name from off-server"
     rclone copyto "$RCLONE_REMOTE/$name" "$workdir/$name"
     archive="$workdir/$name" ;;
   *)

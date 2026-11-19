@@ -2,8 +2,14 @@
 // ─── The backup command ───────────────────────────────────────────────────────
 //
 //   node server/tools/backup.js create  <file|->     write an archive
-//   node server/tools/backup.js verify  <file|-> [--quiet]   check one, change nothing
+//   node server/tools/backup.js verify  <file|-> [--quiet] [--counts]   check one, change nothing
 //   node server/tools/backup.js restore <file|-> --yes
+//
+// The nightly job and the Server setup workflow both run this, and that
+// workflow's logs are public (the repository is). So by default it reports
+// pass/fail, sizes and how many tables, never how many members, groups or
+// emails there are. --counts adds the per-table row counts, for someone at
+// the droplet's own terminal.
 //
 // '-' means stdout for create and stdin for the others, which is how the host
 // script talks to the container without a shared directory:
@@ -19,13 +25,12 @@ const paths = require('../lib/paths');
 
 const log = (...args) => console.error(...args);
 
-function summarize(manifest, tables) {
+function summarize(manifest, tables, { counts = false } = {}) {
   const t = tables || manifest.database.tables;
-  const rows = Object.values(t).reduce((a, b) => a + b, 0);
-  log(`  taken     ${manifest.createdAt} on ${manifest.host}`);
-  log(`  database  ${(manifest.database.bytes / 1024).toFixed(0)} KiB, ${Object.keys(t).length} tables, ${rows} rows, integrity ${manifest.database.integrity}`);
-  for (const key of ['users', 'church_groups', 'workflow_instances', 'mail_outbox']) {
-    if (key in t) log(`            ${key}: ${t[key]}`);
+  log(`  taken     ${manifest.createdAt}`);
+  log(`  database  ${(manifest.database.bytes / 1024).toFixed(0)} KiB, ${Object.keys(t).length} tables, integrity ${manifest.database.integrity}`);
+  if (counts) {
+    for (const [key, n] of Object.entries(t)) log(`            ${key}: ${n}`);
   }
   for (const [name, { files, bytes }] of Object.entries(manifest.included)) {
     log(`  ${name.padEnd(17)} ${files} file(s), ${(bytes / 1024).toFixed(0)} KiB`);
@@ -35,14 +40,16 @@ function summarize(manifest, tables) {
 async function main(argv) {
   const [command, target, ...rest] = argv;
   if (!command || !target || !['create', 'verify', 'restore'].includes(command)) {
-    log('usage: backup.js create <archive|->\n       backup.js verify <archive|-> [--quiet]\n       backup.js restore <archive|-> --yes');
+    log('usage: backup.js create <archive|->\n       backup.js verify <archive|-> [--quiet] [--counts]\n       backup.js restore <archive|-> --yes');
     return 2;
   }
+
+  const counts = rest.includes('--counts');
 
   if (command === 'create') {
     log(`Backing up ${paths.dataDir}`);
     const manifest = await createBackup({ out: target });
-    summarize(manifest);
+    summarize(manifest, null, { counts });
     log(`Backup written to ${target === '-' ? 'stdout' : target}`);
     return 0;
   }
@@ -50,12 +57,11 @@ async function main(argv) {
   if (command === 'verify') {
     const { manifest, tables } = await verifyBackup(target);
     if (rest.includes('--quiet')) {
-      const rows = Object.values(tables).reduce((a, b) => a + b, 0);
-      log(`Verified: checksum matches, integrity ok, ${rows} rows in ${Object.keys(tables).length} tables`);
+      log(`Verified: checksum matches, integrity ok, ${Object.keys(tables).length} tables`);
       return 0;
     }
     log('Backup is sound:');
-    summarize(manifest, tables);
+    summarize(manifest, tables, { counts });
     return 0;
   }
 
@@ -66,8 +72,7 @@ async function main(argv) {
   }
   log(`Restoring into ${paths.dataDir}`);
   const { manifest, aside, movedAside } = await restoreBackup(target);
-  const rows = Object.values(manifest.database.tables).reduce((a, b) => a + b, 0);
-  log(`  restored the backup taken ${manifest.createdAt}: ${rows} rows, ${Object.keys(manifest.included).join(', ')}`);
+  log(`  restored the backup taken ${manifest.createdAt}: ${Object.keys(manifest.included).join(', ')}`);
   if (aside) log(`What it replaced (${movedAside.join(', ')}) is in ${aside}`);
   log('Restore complete.');
   return 0;
