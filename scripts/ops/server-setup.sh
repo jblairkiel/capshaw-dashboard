@@ -383,6 +383,42 @@ unexpected_listeners() {
   done
 }
 
+# A port an app listens on for nginx, which reaches it on 127.0.0.1: closing
+# it to the internet changes nothing for its site. True when nginx proxies to
+# it on localhost, never to another address, and nobody outside is connected.
+nginx_only_port() {
+  local port=$1 conf local_n any_n outside
+  conf=$(sudo nginx -T 2>/dev/null | grep -v '^[[:space:]]*#')
+  any_n=$(grep -cE "proxy_pass[[:space:]]+https?://[^;/]*:$port([;/]|$)" <<< "$conf" || true)
+  local_n=$(grep -cE "proxy_pass[[:space:]]+https?://(127\.0\.0\.1|localhost):$port([;/]|$)" <<< "$conf" || true)
+  outside=$(sudo ss -Htn state established "( sport = :$port )" 2>/dev/null | awk '{print $4}' | grep -vcE '^(127\.|\[::1\]|\[::ffff:127\.)' || true)
+  [ "$local_n" -ge 1 ] && [ "$local_n" = "$any_n" ] && [ "$outside" = 0 ]
+}
+
+# ufw disable puts the FORWARD policy back to ACCEPT, but Docker had set it to
+# DROP. Saved before ufw goes on, and put back after any ufw disable.
+FORWARD_SAVE=$HARDEN_KEEP/forward-policy
+save_forward_policy() {
+  sudo install -d -m 700 "$HARDEN_KEEP"
+  [ -s "$FORWARD_SAVE" ] && return 0   # keep the first, pre-ufw value
+  # Docker sets DROP whenever it manages iptables; an ACCEPT seen here then is
+  # the leftover of an earlier ufw disable, not something to keep.
+  local v4; v4=$(sudo iptables -S FORWARD 2>/dev/null | awk 'NR==1{print $3}')
+  sudo iptables -S DOCKER-USER >/dev/null 2>&1 && v4=DROP
+  { echo "v4 $v4"
+    echo "v6 $(sudo ip6tables -S FORWARD 2>/dev/null | awk 'NR==1{print $3}')"; } | sudo tee "$FORWARD_SAVE" >/dev/null
+}
+restore_forward_policy() {
+  local v4 v6
+  v4=$(sudo awk '$1=="v4"{print $2}' "$FORWARD_SAVE" 2>/dev/null)
+  v6=$(sudo awk '$1=="v6"{print $2}' "$FORWARD_SAVE" 2>/dev/null)
+  # With no saved value, Docker's own choice when it manages iptables is DROP.
+  [ -n "$v4" ] || { sudo iptables -S DOCKER-USER >/dev/null 2>&1 && v4=DROP; }
+  [ -n "$v4" ] && sudo iptables -P FORWARD "$v4"
+  [ -n "$v6" ] && sudo ip6tables -P FORWARD "$v6" 2>/dev/null || true
+  echo "  FORWARD policy: $(sudo iptables -S FORWARD | head -1 | awk '{print $3}') (IPv4), $(sudo ip6tables -S FORWARD 2>/dev/null | head -1 | awk '{print $3}') (IPv6)"
+}
+
 docker_bridges() { ip -o link show 2>/dev/null | awk -F': ' '{ sub(/@.*/, "", $2); print $2 }' | grep -E '^(docker0|br-[0-9a-f]+)$' || true; }
 
 # Containers by state, and whether the portal's container can reach the
@@ -432,7 +468,11 @@ harden_record() {
   else
     warn "would be closed by the firewall:"
     local proto port name
-    while read -r proto port name; do echo "  $proto $port"; explain_port "$port"; done <<< "$extra"
+    while read -r proto port name; do
+      echo "  $proto $port"; explain_port "$port"
+      nginx_only_port "$port" && echo "    -> only nginx uses it, from inside: safe to close to the internet" \
+        || echo "    -> something may use it directly: harden will not start"
+    done <<< "$extra"
   fi
   log "Docker"
   echo "  containers:"; container_state | sed 's/^/    /'
@@ -462,12 +502,18 @@ harden_apply() {
   site_statuses > "$WORK/before"; print_masked "$WORK/before"
   container_state > "$WORK/containers-before"; sed 's/^/  /' "$WORK/containers-before"
   local out_before; out_before=$(app_outbound); echo "  portal container: $out_before"
-  local extra; extra=$(unexpected_listeners)
-  if [ -n "$extra" ]; then
-    echo "$extra" | sed 's/^/    /'
-    die "Something listens on a port the firewall would close (above). Nothing was changed; decide about it first."
+  local extra proto port name blocking=""; extra=$(unexpected_listeners)
+  while read -r proto port name; do
+    [ -n "$port" ] || continue
+    if [ "$proto" = tcp ] && nginx_only_port "$port"; then
+      echo "  $proto $port: only nginx reaches it, from inside; it will be closed to the internet"
+    else blocking+="$proto $port"$'\n'; fi
+  done <<< "$extra"
+  if [ -n "$blocking" ]; then
+    printf '%s' "$blocking" | sed 's/^/    /'
+    die "Something listens on a port the firewall would close and may be used directly (above). Nothing was changed; decide about it first."
   fi
-  ok "nothing listening that the firewall would close"
+  ok "nothing that is used directly would be closed"
   local sshp; sshp=$(ssh_ports)
   [ -n "$sshp" ] || die "Could not read sshd's port; not touching the firewall."
   sudo tar czf "$keep/etc-before.tar.gz" -C /etc $(cd /etc && ls -d ufw default/ufw fail2ban apt/apt.conf.d 2>/dev/null)
@@ -520,7 +566,7 @@ harden_apply() {
     # the droplet turns its firewall back off by itself.
     sudo systemctl stop "$GUARD_UNIT.timer" 2>/dev/null || true
     sudo systemctl reset-failed "$GUARD_UNIT.timer" "$GUARD_UNIT.service" 2>/dev/null || true
-    sudo systemd-run --quiet --unit "$GUARD_UNIT" --on-active="${GUARD_MIN}m" /usr/sbin/ufw --force disable
+    sudo systemd-run --quiet --unit "$GUARD_UNIT" --on-active="${GUARD_MIN}m" /bin/bash "$APP_DIR/scripts/ops/server-setup.sh" harden-rollback
     ok "guard armed: ufw turns itself off at $(date -d "+$GUARD_MIN min" '+%H:%M %Z') unless the workflow confirms"
     sudo ufw default deny incoming >/dev/null
     sudo ufw default allow outgoing >/dev/null
@@ -534,6 +580,7 @@ harden_apply() {
   public_listeners | grep -q '^udp 443 nginx' && sudo ufw allow 443/udp comment 'http3' >/dev/null
   for b in $(docker_bridges); do sudo ufw allow in on "$b" comment 'docker containers to host' >/dev/null; done
   echo "  rules: ssh ($(echo "$sshp" | paste -sd' ')), 80, 443, and $(docker_bridges | wc -l) docker bridge(s)"
+  save_forward_policy
   sudo ufw --force enable >/dev/null
   sudo ufw status | head -1 | sed 's/^/  /'
   sleep 3
@@ -544,7 +591,7 @@ harden_apply() {
   local out_after; out_after=$(app_outbound); echo "  portal container: $out_after"
   if ! diff -q "$WORK/before" "$WORK/after" >/dev/null || [ "$out_before" != "$out_after" ] \
      || ! diff -q "$WORK/containers-before" "$WORK/containers-after" >/dev/null; then
-    [ "$was_active" = 0 ] && { sudo ufw --force disable >/dev/null; sudo systemctl stop "$GUARD_UNIT.timer" 2>/dev/null || true; }
+    [ "$was_active" = 0 ] && { sudo ufw --force disable >/dev/null; restore_forward_policy; sudo systemctl stop "$GUARD_UNIT.timer" 2>/dev/null || true; }
     die "Something answered differently with the firewall on, so it was turned off again."
   fi
   ok "every site, every container and the portal's outbound traffic are as before"
@@ -564,8 +611,11 @@ harden_confirm() {
 
 harden_rollback() {
   need_sudo
-  sudo ufw --force disable
   sudo systemctl stop "$GUARD_UNIT.timer" 2>/dev/null || true
+  # ufw disable resets the FORWARD policy even when ufw was never on, so only
+  # disable what is on, and put Docker's policy back either way.
+  if sudo ufw status | grep -q '^Status: active'; then sudo ufw --force disable; else echo "  ufw was not on"; fi
+  restore_forward_policy
   ok "ufw is off again (unattended updates and fail2ban are left on; they do not touch the sites)"
 }
 
