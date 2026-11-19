@@ -325,8 +325,8 @@ timezone_set() {
   timedatectl list-timezones | grep -qx "$want" || die "Unknown time zone $want."
   log "Time zone now: $(timedatectl show -p Timezone --value)"
   echo "  cron entries that run at a set time of day (these will now follow $want):"
-  { sudo cat /etc/crontab /etc/cron.d/* 2>/dev/null; for u in $(cut -d: -f1 /etc/passwd); do sudo crontab -l -u "$u" 2>/dev/null; done; } \
-    | grep -vE '^[[:space:]]*(#|$|[A-Za-z_]+=)' | awk '$1 !~ /^@/ && $1 !~ /[*\/]/ && $2 !~ /[*\/]/ { print "    minute " $1 " hour " $2 " (" $3 " " $4 " " $5 ")" }' | sort | uniq -c
+  { sudo cat /etc/crontab /etc/cron.d/* 2>/dev/null; for u in $(cut -d: -f1 /etc/passwd); do sudo crontab -l -u "$u" 2>/dev/null || true; done; } \
+    | grep -vE '^[[:space:]]*(#|$|[A-Za-z_]+=)' | awk '$1 !~ /^@/ && $1 !~ /[*\/]/ && $2 !~ /[*\/]/ { print "    minute " $1 " hour " $2 " (" $3 " " $4 " " $5 ")" }' | sort | uniq -c || true
   log "Setting $want"
   sudo timedatectl set-timezone "$want"
   log "Time zone now: $(timedatectl show -p Timezone --value)   local time: $(date)"
