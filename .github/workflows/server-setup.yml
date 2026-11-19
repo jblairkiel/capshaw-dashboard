@@ -14,6 +14,10 @@ name: Server setup
 #   timezone       set the droplet clock to US Central (America/Chicago)
 #   restore-check  download the newest off-server backup and verify it,
 #                  without touching live data
+#   restore-drill  a full practice restore: back up now, restore the newest
+#                  off-server copy into a scratch copy of the portal (own
+#                  container, volume and port), check every record and photo
+#                  matches live, then delete the scratch copy
 #
 # This repository is public, so these logs are too. The script prints counts
 # and pass/fail, never config files, secrets or the other sites' names.
@@ -24,7 +28,7 @@ on:
       task:
         description: What to run on the droplet
         type: choice
-        options: [preflight, nginx, backups, restore-check, timezone]
+        options: [preflight, nginx, backups, restore-check, restore-drill, timezone]
         default: preflight
 
 permissions:

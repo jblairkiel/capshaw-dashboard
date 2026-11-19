@@ -4,6 +4,7 @@
 #   server-setup.sh preflight   read-only: what is there, what is missing
 #   server-setup.sh nginx       real visitor address + server_tokens off
 #   server-setup.sh backups     backup install steps 3-6 (scripts/backup/README.md)
+#   server-setup.sh restore-drill  practice restore into a scratch copy, then remove it
 #
 # Run by the "Server setup" workflow (.github/workflows/server-setup.yml) as the
 # deploy user, or by hand. Every step is safe to run twice: whatever is already
@@ -291,6 +292,192 @@ backups() {
   restore_check
 }
 
+# ── restore-drill ─────────────────────────────────────────────────────────────
+# A full practice restore, end to end, without touching the live site: take a
+# backup now with the nightly job itself, restore the newest off-server copy
+# with capshaw-restore.sh into a scratch copy of the portal (its own compose
+# project, volume and loopback port), check every record and file came back,
+# then delete the scratch copy. The live container, its volume and nginx are
+# only ever read. Logs show counts and match/mismatch, never names or rows.
+DRILL_PROJECT=capshaw-restore-drill
+DRILL_PORT=${DRILL_PORT:-3901}
+
+# Tables the app writes to by itself (sign-ins, page views, the job schedule,
+# reminder claims at start-up), so a difference there is expected: it is
+# reported but does not fail the drill.
+DRILL_VOLATILE="sessions portal_page_views portal_visits scheduled_jobs mail_outbox worship_reminders notifications action_log scraped_meta"
+
+# Every table's row count and a hash of its rows, and a hash of every file the
+# backup covers, as JSON on stdout. Only ever compared, never shown.
+DRILL_FINGERPRINT='
+  const db = require("./server/db"), paths = require("./server/lib/paths");
+  const fs = require("fs"), path = require("path"), crypto = require("crypto");
+  const h = (b) => crypto.createHash("sha256").update(b).digest("hex");
+  const out = { rows: {}, files: {} };
+  for (const { name } of db.prepare("SELECT name FROM sqlite_master WHERE type = ? AND name NOT LIKE ? ORDER BY name").all("table", "sqlite_%")) {
+    const rows = db.prepare(`SELECT * FROM "${name}" ORDER BY rowid`).all();
+    out.rows[name] = { count: rows.length, sha: h(JSON.stringify(rows)) };
+  }
+  const walk = (d) => fs.existsSync(d) ? fs.readdirSync(d, { withFileTypes: true }).flatMap((e) =>
+    e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]) : [];
+  for (const [kind, dir] of Object.entries({ photos: paths.photos, uploads: paths.uploads,
+      screenshots: paths.screenshots, mailAttachments: paths.mailAttachments })) {
+    for (const f of walk(dir)) out.files[kind + "/" + path.relative(dir, f)] = h(fs.readFileSync(f));
+  }
+  if (fs.existsSync(paths.scrapeCache)) out.files["scrape-cache/members.json"] = h(fs.readFileSync(paths.scrapeCache));
+  console.log(JSON.stringify(out));
+'
+
+# Compares two fingerprints with node inside the image (the droplet itself may
+# not have node). Prints counts per kind only; exits 1 if anything outside
+# DRILL_VOLATILE differs or any file is missing or changed.
+DRILL_COMPARE='
+  const [a, b] = JSON.parse(require("fs").readFileSync(0, "utf8"));
+  const label = process.env.LABEL, volatile = process.env.VOLATILE.split(" ");
+  const tables = [...new Set([...Object.keys(a.rows), ...Object.keys(b.rows)])].sort();
+  let same = 0, rows = 0; const bad = [], soft = [];
+  for (const t of tables) {
+    const x = a.rows[t], y = b.rows[t];
+    if (x && y && x.sha === y.sha) { same++; rows += x.count; continue; }
+    const note = `${t} (${x ? x.count : "missing"} vs ${y ? y.count : "missing"} rows)`;
+    (volatile.includes(t) ? soft : bad).push(note);
+  }
+  console.log(`  tables: ${same} of ${tables.length} identical, ${rows} rows`);
+  for (const n of soft) console.log(`  differs, written by the app on its own: ${n}`);
+  for (const n of bad) console.log(`  MISMATCH ${n}`);
+  const kinds = {}; let fileBad = 0;
+  for (const f of new Set([...Object.keys(a.files), ...Object.keys(b.files)])) {
+    const s = (kinds[f.split("/")[0]] ||= { a: 0, b: 0, same: 0 });
+    if (f in a.files) s.a++;
+    if (f in b.files) s.b++;
+    if (a.files[f] && a.files[f] === b.files[f]) s.same++; else fileBad++;
+  }
+  for (const [k, s] of Object.entries(kinds))
+    console.log(`  ${(k + " files").padEnd(22)} ${label} ${s.a}, restored ${s.b}, byte-for-byte identical ${s.same}`);
+  process.exit(bad.length || fileBad ? 1 : 0);
+'
+
+live_compose()  { docker compose -f "$APP_DIR/docker-compose.yml" "$@"; }
+drill_compose() { docker compose -p "$DRILL_PROJECT" -f "$DRILL_DIR/docker-compose.yml" "$@"; }
+drill_fingerprint() { "$1" exec -T app node -e "$DRILL_FINGERPRINT"; }  # live_compose | drill_compose
+drill_compare() {  # drill_compare <a.json> <b.json> <label for a>
+  { printf '['; cat "$1"; printf ','; cat "$2"; printf ']'; } | docker run --rm -i --entrypoint node -e LABEL="$3" -e VOLATILE="$DRILL_VOLATILE" \
+    "$DRILL_IMAGE" -e "$DRILL_COMPARE"
+}
+
+restore_drill() {
+  need_sudo
+  cd "$APP_DIR"
+  [ -f "$BACKUP_CONFIG" ] || die "$BACKUP_CONFIG is missing; run the backups task first."
+  systemctl cat capshaw-backup.service >/dev/null 2>&1 || die "The nightly backup job is not installed; run the backups task first."
+  local remote
+  # shellcheck disable=SC1090
+  remote=$(set -a; . "$BACKUP_CONFIG"; echo "${RCLONE_REMOTE:-}")
+  [ -n "$remote" ] || die "RCLONE_REMOTE is empty in $BACKUP_CONFIG"
+
+  DRILL_DIR="$WORK/$DRILL_PROJECT"
+  mkdir -p "$DRILL_DIR"
+
+  log "Before: the live portal and every other site on this nginx"
+  local live_cid
+  live_cid=$(live_compose ps -q app)
+  [ -n "$live_cid" ] || die "The live app container is not running."
+  DRILL_IMAGE=$(docker inspect -f '{{.Config.Image}}' "$live_cid")
+  echo "  live container $(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$live_cid"), image tag ${DRILL_IMAGE##*:}"
+  site_statuses > "$WORK/sites-before"
+  print_masked "$WORK/sites-before"
+  if docker ps -a --format '{{.Names}}' | grep -q "^$DRILL_PROJECT"; then die "A scratch copy from an earlier drill is still there; remove it first."; fi
+  if ss -ltn | awk '{print $4}' | grep -qE "[:.]$DRILL_PORT\$"; then die "Port $DRILL_PORT is in use."; fi
+  echo "  memory free: $(free -m | awk '/^Mem:/ {print $7}') MB"
+  echo "  disk free: $(df -h --output=avail /var/lib/docker 2>/dev/null | tail -1 | tr -d ' ')"
+
+  # From here on the scratch copy is removed however the drill ends.
+  trap 'set +e; drill_compose down -v --remove-orphans >/dev/null 2>&1; rm -rf "$WORK"' EXIT
+
+  log "Step 1: a backup now, by the nightly job itself (capshaw-backup.service)"
+  drill_fingerprint live_compose > "$WORK/live-before.json"
+  local started; started=$(date '+%F %T')
+  sudo systemctl start capshaw-backup.service || die "The nightly backup job failed."
+  sudo journalctl -u capshaw-backup.service --since "$started" --no-pager -o cat \
+    | grep -E 'Off-server copy confirmed|Backup complete|pruned' | sed 's/^/  /' || true
+  drill_fingerprint live_compose > "$WORK/live.json"
+  if drill_compare "$WORK/live-before.json" "$WORK/live.json" before >/dev/null; then ok "live data did not change while the backup ran"
+  else echo "  live data changed while the backup ran (someone using the site); comparing against just after"; fi
+  echo "  newest off-server archive: $(rclone lsf "$remote" --include 'capshaw-*.tar.gz' | sort | tail -1)"
+
+  log "Step 2: an empty scratch copy of the portal (own project, own volume, 127.0.0.1:$DRILL_PORT)"
+  # Only SESSION_SECRET: no mail server, no church-site sign-in, no API keys,
+  # so the scratch copy has no way to send mail or act for anyone.
+  printf 'SESSION_SECRET=%s\n' "$(head -c 48 /dev/urandom | base64 | tr -d '/+=\n')" > "$DRILL_DIR/app.env"
+  chmod 600 "$DRILL_DIR/app.env"
+  cat > "$DRILL_DIR/docker-compose.yml" <<YAML
+services:
+  app:
+    image: $DRILL_IMAGE
+    init: true
+    env_file: [ ./app.env ]
+    environment: { NODE_ENV: production, PORT: "3001" }
+    ports: [ "127.0.0.1:$DRILL_PORT:3001" ]
+    volumes: [ "capshaw-data:/data" ]
+volumes:
+  capshaw-data:
+YAML
+  # capshaw-restore.sh reads its settings from a file; give it one that points
+  # only at the scratch copy (the real file's HEALTH_URL would be live's).
+  cat > "$DRILL_DIR/backup.env" <<CONF
+RUNNER=docker
+RCLONE_REMOTE=$remote
+BACKUP_DIR=$DRILL_DIR/no-local-archives
+HEALTH_URL=http://127.0.0.1:$DRILL_PORT/api/health
+CONF
+  drill_compose up -d app >/dev/null 2>&1
+  local i healthy=0
+  for i in $(seq 1 60); do
+    curl -fsS -m 3 "http://127.0.0.1:$DRILL_PORT/api/health" >/dev/null 2>&1 && { healthy=1; break; }
+    sleep 1
+  done
+  [ "$healthy" = 1 ] || die "The empty scratch copy did not start."
+  [ "$(drill_compose ps -q app)" != "$live_cid" ] || die "The scratch project resolved to the live container; stopping."
+  drill_fingerprint drill_compose > "$WORK/empty.json"
+  echo "  scratch copy up and empty: $(docker run --rm -i --entrypoint node "$DRILL_IMAGE" -e '
+    const f = JSON.parse(require("fs").readFileSync(0, "utf8"));
+    console.log(`${f.rows.users.count} users, ${Object.keys(f.files).length} files`)' < "$WORK/empty.json")"
+
+  log "Step 3: restore the newest off-server copy into it (scripts/backup/capshaw-restore.sh latest-remote)"
+  local restore_status=0
+  CAPSHAW_BACKUP_CONFIG="$DRILL_DIR/backup.env" COMPOSE_PROJECT_NAME="$DRILL_PROJECT" \
+    COMPOSE_FILE="$DRILL_DIR/docker-compose.yml" CAPSHAW_IMAGE="$DRILL_IMAGE" ASSUME_YES=1 \
+    scripts/backup/capshaw-restore.sh latest-remote > "$WORK/restore.log" 2>&1 || restore_status=$?
+  grep -E 'Downloading|Backup is sound|rows, integrity|file\(s\)|restored the backup|Stopping|Starting|healthy|STOPPED|failed' "$WORK/restore.log" \
+    | sed -E 's/ from [^ ]+$/ from off-server/; s/^/  /'
+  [ "$restore_status" = 0 ] || die "capshaw-restore.sh did not finish."
+  curl -fsS -m 5 "http://127.0.0.1:$DRILL_PORT/api/health" >/dev/null || die "The scratch copy is not healthy after the restore."
+  ok "scratch copy healthy on the restored data"
+  drill_fingerprint drill_compose > "$WORK/restored.json"
+
+  log "Step 4: the restored copy against live"
+  drill_compare "$WORK/live.json" "$WORK/restored.json" live || die "The restored copy does not match live."
+  ok "every record and every file came back"
+
+  log "Step 5: remove the scratch copy"
+  drill_compose down -v --remove-orphans >/dev/null 2>&1
+  trap 'rm -rf "$WORK"' EXIT
+  ! docker ps -a --format '{{.Names}}' | grep -q "^$DRILL_PROJECT" || die "A scratch container is still there."
+  ! docker volume ls -q | grep -q "^$DRILL_PROJECT" || die "The scratch volume is still there."
+  ok "scratch container, volume and network removed"
+
+  log "After: the live portal and every other site"
+  [ "$(live_compose ps -q app)" = "$live_cid" ] || die "The live container changed during the drill."
+  echo "  live container $(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$live_cid"), the same one as before"
+  drill_fingerprint live_compose > "$WORK/live-after.json"
+  if drill_compare "$WORK/live.json" "$WORK/live-after.json" before >/dev/null; then ok "live data untouched by the drill"
+  else echo "  live data moved on during the drill (someone using the site)"; fi
+  site_statuses > "$WORK/sites-after"
+  print_masked "$WORK/sites-after"
+  diff -q "$WORK/sites-before" "$WORK/sites-after" >/dev/null || die "A site answers differently than before the drill."
+  ok "every site answers exactly as before"
+}
+
 # What capshaw-restore.sh does before it would stop the app: download the newest
 # off-server archive, decrypt it, and verify it with the app's own checker. It
 # stops there; swapping it in is a separate, deliberate step.
@@ -339,6 +526,7 @@ case "${1:-}" in
   ratelimit)  ratelimit_check ;;
   backups)    backups ;;
   restore-check) restore_check ;;
+  restore-drill) restore_drill ;;
   timezone)   timezone_set ;;
   *) sed -n '4,7p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
