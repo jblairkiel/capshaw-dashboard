@@ -863,6 +863,9 @@ function initSchema(db) {
   // Everyone gets the monthly schedule summary unless they turn it off on My
   // Info, so a new account is opted in by default.
   addColumn('users', 'wants_monthly_report', 'INTEGER NOT NULL DEFAULT 1');
+  // The same for the Sunday "Your week" email (mail/myWeek.js): on until the
+  // member turns it off on My Info, or with the link at the foot of the email.
+  addColumn('users', 'wants_weekly_email', 'INTEGER NOT NULL DEFAULT 1');
   // How the portal looks for this member — text size, color theme, motion —
   // as JSON (lib/displayPrefs.js). '{}' is the usual look.
   addColumn('users', 'display_prefs', "TEXT NOT NULL DEFAULT '{}'");
@@ -1315,6 +1318,20 @@ function initSchema(db) {
       email    TEXT    NOT NULL DEFAULT '',     -- '' when the leader has no address on file
       sent_at  TEXT    NOT NULL DEFAULT (datetime('now')),
       UNIQUE (date, service, kind)
+    );
+  `);
+
+  // The Sunday "Your week" email, claimed per account per week before it is
+  // built, so a restart or a second server never sends one twice. `items` is
+  // how many things it listed; 0 means there was nothing to say and nothing
+  // was sent.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS my_week_emails (
+      user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      week_of  TEXT    NOT NULL,                 -- the Sunday it was sent for
+      items    INTEGER NOT NULL DEFAULT 0,
+      sent_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (user_id, week_of)
     );
   `);
   // A note against any part of a submitted service, whatever the part

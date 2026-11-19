@@ -19,6 +19,7 @@ const guestMail = require('./guests');
 const weeklyReports = require('./weeklyReports');
 const rotationMail = require('./rotations');
 const notices = require('./notices');
+const myWeek = require('./myWeek');
 
 const CATEGORIES = [
   { id: 'notifications', label: 'Notifications', description: 'Messages to one person about their own account or something waiting on them.' },
@@ -76,6 +77,18 @@ const SAMPLE = {
       attendance: { headline: { service: 'Sunday AM Worship', count: 212, avg4: 200 } },
       giving: { amount: 4338 }, guests: { visits: 3 }, portal: { members: 41 },
     },
+  },
+  week: {
+    from: '2026-11-22', to: '2026-12-05', linked: true, name: 'Sample Member',
+    items: [
+      { kind: 'job', id: 1, date: '2026-11-22', service: 'Sunday AM Worship', job: 'Opening Prayer', replacementAsked: false },
+      { kind: 'meeting', id: 2, date: '2026-11-22', time: '17:30', title: 'Fellowship meal', group: 'Sample Group', location: 'The fellowship hall', rsvp: 'yes', guests: 2, bringing: ['Dessert'] },
+      { kind: 'signup', id: 3, date: '2026-11-24', time: '17:00', title: 'Meals for the Hale family', item: 'Supper', note: '' },
+      { kind: 'meeting', id: 4, date: '2026-11-25', time: '18:00', title: 'Thanksgiving singing', group: 'Young Families', location: '', rsvp: 'unanswered', guests: 0, bringing: [] },
+      { kind: 'rotation', id: 5, date: '2026-11-29', title: 'Ladies\' class teachers', note: 'Lesson 4 of the quarter' },
+      { kind: 'job', id: 6, date: '2026-12-02', service: 'Wednesday Bible Study', job: 'Song Leader', replacementAsked: true },
+    ],
+    nextUp: [{ rotationId: 2, title: 'Baby shower hosts' }],
   },
   bulletin: {
     sunday: '2026-10-04', masthead: 'Capshaw Church of Christ', sundayLabel: 'Sunday, October 4, 2026',
@@ -433,6 +446,14 @@ const EMAILS = [
     trigger: 'Each week on the day and at the time an admin sets on Reports & Record Keeping → Settings (Sunday at 3 PM unless changed). The PDF is attached: the week and its portal page, then the year so far and its portal page.',
     like: ['weekly-report:analytical:%'],
     preview: () => weeklyReports.compose.weeklyReport({ kind: 'analytical', data: SAMPLE.report }),
+  },
+  {
+    id: 'my-week', category: 'reports',
+    name: 'Your week',
+    audience: 'Every member with an account who has not turned off "Your week, every Sunday" — and only those with something on their list. In test mode, only the people let through on Email Delivery.',
+    trigger: 'Sunday from 7 AM. Their own My Week page: this week day by day, the week after in brief, any group meeting waiting on their answer, and rotations they are next up on.',
+    like: ['my-week:%'],
+    preview: () => myWeek.compose.myWeek({ week: SAMPLE.week }),
   },
   {
     id: 'records-reminder', category: 'reports',
