@@ -402,8 +402,12 @@ describe('photos: family and individual', () => {
     // Either can still be asked for by kind.
     res = await request(buildApp(MEMBER)).get(`/api/profile/person/${MUM.id}/photo?kind=family`);
     expect(Buffer.compare(res.body, family)).toBe(0);
-    res = await request(buildApp(MEMBER)).get(`/api/profile/person/${MUM.id}/photo?kind=nonsense`);
-    expect(res.status).toBe(400);
+    for (const kind of ['nonsense', 'constructor', '__proto__', 'toString']) {
+      res = await request(buildApp(MEMBER)).get(`/api/profile/person/${MUM.id}/photo?kind=${kind}`);
+      expect(res.status).toBe(400);
+    }
+    res = await request(buildApp(MEMBER)).get(`/api/profile/person/${MUM.id}/photo?kind=own&kind=family`);
+    expect(res.status).toBe(200);
   });
 
   test('taking down an own photo falls back to the family photo', async () => {

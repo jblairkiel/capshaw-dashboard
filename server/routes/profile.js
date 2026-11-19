@@ -145,11 +145,13 @@ router.get('/directory.vcf', requireApproved, (req, res) => {
 // have none. ?kind=own or ?kind=family asks for one in particular, which is
 // what the photo editor shows.
 
-const PHOTO_KINDS = {
-  face:   person => photoOf(person),
-  own:    person => person.own_photo,
-  family: person => person.photo,
-};
+// A Map, not an object: a kind like "constructor" or "__proto__" must not
+// reach anything on Object.prototype.
+const PHOTO_KINDS = new Map([
+  ['face',   person => photoOf(person)],
+  ['own',    person => person.own_photo],
+  ['family', person => person.photo],
+]);
 
 router.get('/person/:id/photo', requireApproved, (req, res) => {
   const person = getPerson(req.params.id);
@@ -158,7 +160,8 @@ router.get('/person/:id/photo', requireApproved, (req, res) => {
     return res.status(403).json({ success: false, error: 'You can only view photos in your own household' });
   }
 
-  const pick = PHOTO_KINDS[req.query.kind || 'face'];
+  const kind = typeof req.query.kind === 'string' ? req.query.kind : 'face';
+  const pick = PHOTO_KINDS.get(kind);
   if (!pick) return res.status(400).json({ success: false, error: 'kind must be own or family' });
   const filename = pick(person);
   const file = photoStore.photoPath(filename);
