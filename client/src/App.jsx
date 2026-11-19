@@ -17,6 +17,7 @@ import UpcomingServiceView from './components/UpcomingServiceView';
 import DatabaseAdminView from './components/DatabaseAdminView';
 import DirectoryView from './components/DirectoryView';
 import MyProfileView from './components/MyProfileView';
+import { applyDisplay } from './lib/displayPrefs';
 import MobileNav from './components/MobileNav';
 import InboxView from './components/InboxView';
 import MailGroupsView from './components/MailGroupsView';
@@ -693,6 +694,13 @@ export default function App() {
       .then(j => { setUser(j?.user ?? null); setImpersonatedBy(j?.impersonatedBy ?? null); })
       .catch(() => setUser(null));
   }, []);
+
+  // The member's text size, theme and motion settings follow their account to
+  // any device. While an admin is viewing as someone, their own screen keeps
+  // the admin's look.
+  useEffect(() => {
+    if (user?.display_prefs && !impersonatedBy) applyDisplay(user.display_prefs);
+  }, [user, impersonatedBy]);
 
   // Only the sign-in page needs the providers, so they are asked for once we
   // know nobody is signed in (on load, or after signing out).

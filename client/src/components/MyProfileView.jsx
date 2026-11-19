@@ -3,6 +3,7 @@ import { DIRECTORY_FIELDS, PREFERENCE_LEVELS } from '../lib/worship';
 import WorshipPreferences from './WorshipPreferences';
 import PersonPhoto from './PersonPhoto';
 import { OwnPhotoEditor, FamilyPhotoEditor } from './PhotoEditor';
+import DisplaySettings from './DisplaySettings';
 
 const API = '/api/profile';
 
@@ -292,6 +293,7 @@ export default function MyProfileView({ user }) {
     return (
       <div className="space-y-4">
         <h2 className="section-heading mb-0">My Household</h2>
+        <DisplaySettings />
         <EmailPreferences
           notifications={data.notifications}
           onSaved={notifications => setData(prev => prev && ({ ...prev, notifications }))}
@@ -330,6 +332,7 @@ export default function MyProfileView({ user }) {
         </div>
       )}
 
+      <DisplaySettings />
       <EmailPreferences
         notifications={data.notifications}
         onSaved={notifications => setData(prev => prev && ({ ...prev, notifications }))}

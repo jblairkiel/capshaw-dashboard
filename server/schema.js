@@ -863,6 +863,9 @@ function initSchema(db) {
   // Everyone gets the monthly schedule summary unless they turn it off on My
   // Info, so a new account is opted in by default.
   addColumn('users', 'wants_monthly_report', 'INTEGER NOT NULL DEFAULT 1');
+  // How the portal looks for this member — text size, color theme, motion —
+  // as JSON (lib/displayPrefs.js). '{}' is the usual look.
+  addColumn('users', 'display_prefs', "TEXT NOT NULL DEFAULT '{}'");
 
   // ── Email + password accounts (provider = 'local') ───────────────────────────
   // Accounts that came from Google or Facebook leave every column below empty:
