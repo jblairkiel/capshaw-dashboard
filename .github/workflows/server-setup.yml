@@ -22,6 +22,7 @@ name: Server setup
 #                  connection, and turns the firewall back off if anything
 #                  differs; the droplet also turns it off by itself after 15
 #                  minutes unless this run confirms, so SSH can't stay locked out
+#   harden-check   read-only: what harden would see (ports, owners, sites)
 #
 # This repository is public, so these logs are too. The script prints sizes
 # and pass/fail, never member counts, names or addresses, config files,
@@ -33,7 +34,7 @@ on:
       task:
         description: What to run on the droplet
         type: choice
-        options: [preflight, nginx, backups, restore-check, timezone, revoke-cloud-key, harden]
+        options: [preflight, nginx, backups, restore-check, timezone, revoke-cloud-key, harden-check, harden]
         default: preflight
 
 permissions:
@@ -47,7 +48,7 @@ concurrency:
 jobs:
   run:
     name: ${{ inputs.task }}
-    if: inputs.task != 'harden'
+    if: inputs.task != 'harden' && inputs.task != 'harden-check'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -74,7 +75,7 @@ jobs:
   # and every site asked from out here before and after.
   harden:
     name: harden
-    if: inputs.task == 'harden'
+    if: inputs.task == 'harden' || inputs.task == 'harden-check'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -127,9 +128,11 @@ jobs:
           ~/sites | tee ~/before
 
       - name: Security updates, fail2ban, firewall
+        if: inputs.task == 'harden'
         run: ~/remote harden-apply
 
       - name: Check from the internet, then confirm or undo
+        if: inputs.task == 'harden'
         run: |
           fail=""
           for i in 1 2 3; do ~/remote server-names >/dev/null || fail="a new SSH connection failed"; done
@@ -146,5 +149,5 @@ jobs:
           fi
 
       - name: If anything above failed, make sure the firewall is off
-        if: failure()
+        if: failure() && inputs.task == 'harden'
         run: ~/remote harden-rollback || echo "::error::Could not reach the droplet; its guard turns ufw off by itself within 15 minutes of the change."

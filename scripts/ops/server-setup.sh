@@ -397,6 +397,26 @@ app_outbound() {
   docker exec "$cid" node -e "fetch('https://api.github.com/zen',{signal:AbortSignal.timeout(10000)}).then(r=>{console.log('outbound ok');}).catch(e=>{console.log('outbound FAILS');})" 2>/dev/null || echo "outbound FAILS"
 }
 
+# What an unexpected listener is, so whether to close it can be decided: who
+# owns it, whether nginx already reaches it from inside, whether Docker
+# publishes it (then ufw does not affect it at all), and whether anyone from
+# outside is connected to it right now. Counts and program names only.
+explain_port() {
+  local port=$1 pid comm where
+  pid=$(sudo ss -Hltnp "sport = :$port" 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
+  [ -n "$pid" ] || pid=$(sudo fuser -n tcp "$port" 2>/dev/null | awk '{print $1}')
+  if [ -n "$pid" ]; then
+    comm=$(ps -o comm= -p "$pid" 2>/dev/null)
+    where=host; sudo grep -qE 'docker|containerd' "/proc/$pid/cgroup" 2>/dev/null && where="a container"
+    echo "    owner: $comm (in $where, under $(ps -o comm= -p "$(ps -o ppid= -p "$pid" | tr -d ' ')" 2>/dev/null || echo '?'))"
+  else
+    echo "    owner: no process found (a kernel-level or other-namespace socket)"
+  fi
+  echo "    Docker publishes it: $(docker ps --format '{{.Ports}}' 2>/dev/null | tr ',' '\n' | grep -c ":$port->" || true) mapping(s), $(sudo iptables -t nat -S 2>/dev/null | grep -c -- "--dport $port " || true) NAT rule(s)"
+  echo "    nginx proxies to it: $(sudo nginx -T 2>/dev/null | grep -v '^[[:space:]]*#' | grep -cE "proxy_pass[[:space:]]+https?://[^;/]*:$port([;/]|$)" || true) time(s), of which to 127.0.0.1/localhost: $(sudo nginx -T 2>/dev/null | grep -v '^[[:space:]]*#' | grep -cE "proxy_pass[[:space:]]+https?://(127\.0\.0\.1|localhost):$port([;/]|$)" || true)"
+  echo "    connections now from outside: $(sudo ss -Htn state established "( sport = :$port )" 2>/dev/null | awk '{print $4}' | grep -vcE '^(127\.|\[::1\]|\[::ffff:127\.)' || true)"
+}
+
 harden_record() {
   need_sudo
   log "System"
@@ -408,7 +428,12 @@ harden_record() {
   log "Listening on a public address (proto port program)"
   public_listeners | sed 's/^/  /'
   local extra; extra=$(unexpected_listeners)
-  [ -z "$extra" ] && ok "nothing outside SSH, 80, 443 and Docker's own ports" || { warn "would be closed by the firewall:"; echo "$extra" | sed 's/^/    /'; }
+  if [ -z "$extra" ]; then ok "nothing outside SSH, 80, 443 and Docker's own ports"
+  else
+    warn "would be closed by the firewall:"
+    local proto port name
+    while read -r proto port name; do echo "  $proto $port"; explain_port "$port"; done <<< "$extra"
+  fi
   log "Docker"
   echo "  containers:"; container_state | sed 's/^/    /'
   echo "  bridges: $(docker_bridges | wc -l)   published container ports: $(public_listeners | awk '$3=="docker-proxy"' | wc -l)"
