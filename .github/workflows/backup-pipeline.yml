@@ -1,0 +1,91 @@
+name: Backup pipeline
+
+# Takes a real backup of a running container, sends it to Backblaze B2 through
+# the same encrypted rclone remote the droplet uses, wipes the install, restores
+# from B2 with the droplet's own restore script, and checks every member record
+# and file came back. See scripts/backup/pipeline-test.sh.
+#
+# Backblaze is used when these repository secrets are set (Settings → Secrets
+# and variables → Actions). Without them — a fork's pull request, say — the
+# same test runs against a local folder instead:
+#
+#   B2_KEY_ID            an application key's keyID
+#   B2_APPLICATION_KEY   its applicationKey
+#   B2_BUCKET            the bucket name
+#
+# Give CI its own key, restricted to the bucket and to the file name prefix
+# `ci/`, so a leaked CI secret can neither read nor delete the real backups.
+# Each run writes under ci/<run id>/ and deletes it when it finishes.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/backup/**'
+      - 'server/lib/backup.js'
+      - 'server/tools/backup.js'
+      - 'server/lib/paths.js'
+      - 'server/schema.js'
+      - 'docker-compose.yml'
+      - 'Dockerfile'
+      - '.github/workflows/backup-pipeline.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/backup/**'
+      - 'server/lib/backup.js'
+      - 'server/tools/backup.js'
+      - 'server/lib/paths.js'
+      - 'server/schema.js'
+      - 'docker-compose.yml'
+      - 'Dockerfile'
+      - '.github/workflows/backup-pipeline.yml'
+  # Weekly as well, so an expired key, a deleted bucket or a change on
+  # Backblaze's side shows up here before a restore is ever needed.
+  schedule:
+    - cron: '30 10 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup-pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pipeline:
+    name: Backup → Backblaze → restore
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      # The same image the deploy ships, from the same build cache as the
+      # Container image job.
+      - name: Build the image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: capshaw-dashboard:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Install rclone
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q rclone jq
+          rclone version | head -1
+
+      - name: Back up, lose everything, restore
+        env:
+          CAPSHAW_IMAGE: capshaw-dashboard:ci
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APPLICATION_KEY: ${{ secrets.B2_APPLICATION_KEY }}
+          B2_BUCKET: ${{ secrets.B2_BUCKET }}
+        run: scripts/backup/pipeline-test.sh
