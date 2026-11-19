@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import PersonPhoto from './PersonPhoto';
+import FamilyPhotoCropper from './FamilyPhotoCropper';
 import { photoUrl } from '../lib/photos';
 
 // Putting up and taking down photos. Two kinds, kept apart on the server:
@@ -83,7 +84,8 @@ function RemoveButton({ label, disabled, onClick }) {
 // ─── One person's own photo ───────────────────────────────────────────────────
 
 export function OwnPhotoEditor({ person, canEdit, onSaved }) {
-  const { busy, error, run } = usePhotoAction(json => onSaved(json.person));
+  const [cropping, setCropping] = useState(false);
+  const { busy, error, run } = usePhotoAction(json => { setCropping(false); onSaved(json.person); });
   const url = `${API}/person/${person.id}/photo`;
   const first = person.name?.split(/\s+/)[0] || 'them';
 
@@ -107,6 +109,16 @@ export function OwnPhotoEditor({ person, canEdit, onSaved }) {
                 disabled={busy}
                 onFile={file => run(url, { method: 'PUT', file })}
               />
+              {person.has_family_photo && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setCropping(true)}
+                  className="text-xs font-medium px-3 py-1.5 rounded-lg border border-church-gold text-church-navy hover:bg-church-gold/10 disabled:opacity-50"
+                >
+                  Crop from family photo
+                </button>
+              )}
               {person.has_own_photo && (
                 <RemoveButton
                   label={person.has_family_photo ? 'Use the family photo' : 'Remove photo'}
@@ -120,6 +132,15 @@ export function OwnPhotoEditor({ person, canEdit, onSaved }) {
       </div>
       {busy && <p className="text-xs text-gray-400">Saving…</p>}
       {error && <p className="text-xs text-red-600">{error}</p>}
+      {cropping && (
+        <FamilyPhotoCropper
+          person={person}
+          busy={busy}
+          saveError={error}
+          onCropped={file => run(url, { method: 'PUT', file })}
+          onClose={() => setCropping(false)}
+        />
+      )}
     </div>
   );
 }
