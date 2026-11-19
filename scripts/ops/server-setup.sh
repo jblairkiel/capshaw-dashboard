@@ -5,6 +5,7 @@
 #   server-setup.sh nginx       real visitor address + server_tokens off
 #   server-setup.sh backups     backup install steps 3-6 (scripts/backup/README.md)
 #   server-setup.sh harden-*    security updates, fail2ban, firewall (see below)
+#   server-setup.sh revoke-cloud-key   take the cloud session key off claude-deploy
 #
 # Run by the "Server setup" workflow (.github/workflows/server-setup.yml) as the
 # deploy user, or by hand. Every step is safe to run twice: whatever is already
@@ -541,6 +542,100 @@ harden_rollback() {
   ok "ufw is off again (unattended updates and fail2ban are left on; they do not touch the sites)"
 }
 
+# ── revoke the cloud session key ──────────────────────────────────────────────
+# The key cloud Claude sessions were given (VPS_SSH_KEY_B64) could never reach
+# the droplet, because those sessions only get out on port 443. Take it off
+# claude-deploy's authorized keys. Matched by fingerprint, so no other key
+# (the GitHub deploy key, anyone's own) is touched, whatever its comment says.
+# A public key's fingerprint is not a secret, so it is safe in this file.
+REVOKE_USER=${REVOKE_USER:-claude-deploy}
+REVOKE_FP=${REVOKE_FP:-SHA256:gCtwbJF6oDClD7MjgQBfp1oqoIOLCBcYx8p8ffeREV0}
+
+# One fingerprint per line of an authorized_keys file, "-" for a line that is
+# not a key (blank, comment, unreadable), so line N of the output is line N.
+key_fingerprints() {
+  local line one=$WORK/one.pub
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) echo -; continue ;; esac
+    printf '%s\n' "$line" > "$one"
+    ssh-keygen -lf "$one" 2>/dev/null | awk '{print $2}' | grep . || echo -
+  done < <(sudo cat "$1")
+}
+
+# The authorized_keys files sshd reads for a user.
+authorized_files() {
+  local u=$1 home; home=$(getent passwd "$u" | cut -d: -f6)
+  sudo sshd -T -C "user=$u,host=localhost,addr=127.0.0.1" 2>/dev/null \
+    | awk 'tolower($1)=="authorizedkeysfile" { for (i = 2; i <= NF; i++) print $i }' \
+    | sed -e "s|%h|$home|g" -e "s|%u|$u|g" -e "s|%%|%|g" \
+    | while read -r f; do case "$f" in /*) echo "$f" ;; *) echo "$home/$f" ;; esac; done \
+    | grep . || printf '%s\n' "$home/.ssh/authorized_keys" "$home/.ssh/authorized_keys2"
+}
+
+revoke_cloud_key() {
+  need_sudo
+  command -v ssh-keygen >/dev/null || die "ssh-keygen is not installed."
+  getent passwd "$REVOKE_USER" >/dev/null || die "There is no user $REVOKE_USER."
+  log "Revoking key $REVOKE_FP from $REVOKE_USER"
+
+  # This job's own SSH login must survive: never remove the key it came in on.
+  local mine=""
+  if [ -n "${SSH_CONNECTION:-}" ]; then
+    local port; port=$(echo "$SSH_CONNECTION" | awk '{print $2}')
+    mine=$(sudo journalctl -q -u ssh -u sshd --since '-30 min' 2>/dev/null \
+      | grep "Accepted publickey for $(whoami) from .* port $port " | tail -1 | grep -o 'SHA256:[A-Za-z0-9+/]*' || true)
+  fi
+  if [ -n "$mine" ]; then echo "  this job signed in with a different key: $([ "$mine" != "$REVOKE_FP" ] && echo yes || echo NO)"
+  else echo "  (could not read which key this job signed in with; relying on the counts below)"; fi
+  [ "$mine" != "$REVOKE_FP" ] || die "This job signed in with the key it was asked to remove; stopping."
+
+  local f ts removed_total=0; ts=$(date -u +%Y%m%dT%H%M%SZ)
+  while read -r f; do
+    sudo test -f "$f" || { echo "  $f: not there"; continue; }
+    key_fingerprints "$f" > "$WORK/fps"
+    local total match
+    total=$(grep -vcx -- - "$WORK/fps" || true)
+    match=$(grep -cxF -- "$REVOKE_FP" "$WORK/fps" || true)
+    echo "  $f: $total key(s), $match of them the cloud key"
+    [ "$match" -gt 0 ] || continue
+    # claude-deploy may have no other key, and then it simply can't sign in by
+    # key any more, which is fine. Only stop if this job is that user.
+    [ "$total" -gt "$match" ] || [ "$(whoami)" != "$REVOKE_USER" ] \
+      || die "That would leave $REVOKE_USER, the user this job signed in as, with no keys in $f; stopping."
+    # Keep every line whose fingerprint is not the cloud key's, in order.
+    sudo cat "$f" | paste -d '\t' "$WORK/fps" - | awk -F '\t' -v fp="$REVOKE_FP" '$1 != fp { sub(/^[^\t]*\t/, ""); print }' > "$WORK/keys.new"
+    sudo cp -p "$f" "$f.before-revoke-$ts"
+    sudo sh -c "cat '$WORK/keys.new' > '$f'"     # in place: owner and mode stay as they were
+    key_fingerprints "$f" > "$WORK/fps.after"
+    local left still
+    left=$(grep -vcx -- - "$WORK/fps.after" || true)
+    still=$(grep -cxF -- "$REVOKE_FP" "$WORK/fps.after" || true)
+    [ "$still" = 0 ] && [ "$left" = $((total - match)) ] || { sudo cp -p "$f.before-revoke-$ts" "$f"; die "The file did not come out as expected, so it was put back."; }
+    # Every other key is still there, byte for byte, in the same order.
+    diff <(grep -vxF -- "$REVOKE_FP" "$WORK/fps") "$WORK/fps.after" >/dev/null \
+      || { sudo cp -p "$f.before-revoke-$ts" "$f"; die "Another key changed, so the file was put back."; }
+    ok "removed $match line(s); $left other key(s) left exactly as they were (file still $(sudo stat -c '%U %a' "$f"))"
+    echo "  saved the old file as $f.before-revoke-$ts"
+    removed_total=$((removed_total + match))
+  done < <(authorized_files "$REVOKE_USER" | sort -u)
+  [ "$removed_total" -gt 0 ] && ok "the cloud key no longer opens $REVOKE_USER" || ok "the cloud key was not in $REVOKE_USER's keys; nothing to do"
+
+  log "Is the same key anywhere else? (reported, not changed)"
+  local u found=0
+  for u in $(awk -F: '$7 !~ /(nologin|false)$/ {print $1}' /etc/passwd); do
+    [ "$u" = "$REVOKE_USER" ] && continue
+    while read -r f; do
+      sudo test -f "$f" || continue
+      if key_fingerprints "$f" | grep -qxF -- "$REVOKE_FP"; then warn "$u still has it"; found=1; fi
+    done < <(authorized_files "$u" | sort -u)
+  done
+  [ "$found" = 0 ] && ok "no other user has it"
+
+  log "Every site still answers"
+  site_statuses > "$WORK/sites"
+  print_masked "$WORK/sites"
+}
+
 case "${1:-}" in
   preflight)  preflight ;;
   nginx)      nginx_apply; ratelimit_check ;;
@@ -553,5 +648,6 @@ case "${1:-}" in
   harden-apply)    harden_apply ;;
   harden-confirm)  harden_confirm ;;
   harden-rollback) harden_rollback ;;
-  *) sed -n '4,8p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  revoke-cloud-key) revoke_cloud_key ;;
+  *) sed -n '4,9p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

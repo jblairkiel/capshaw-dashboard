@@ -12,6 +12,8 @@ name: Server setup
 #                  then proves sign-in limits are per visitor
 #   backups        nightly backup install, scripts/backup/README.md steps 3-6
 #   timezone       set the droplet clock to US Central (America/Chicago)
+#   revoke-cloud-key  take the cloud session SSH key off claude-deploy, by
+#                  fingerprint; every other key and user is left alone
 #   restore-check  download the newest off-server backup and verify it,
 #                  without touching live data
 #   harden         unattended security updates, fail2ban for SSH, and a ufw
@@ -30,7 +32,7 @@ on:
       task:
         description: What to run on the droplet
         type: choice
-        options: [preflight, nginx, backups, restore-check, timezone, harden]
+        options: [preflight, nginx, backups, restore-check, timezone, revoke-cloud-key, harden]
         default: preflight
 
 permissions:
