@@ -34,6 +34,10 @@ function portalEnv(work) {
     GOOGLE_CLIENT_ID: 'guide', GOOGLE_CLIENT_SECRET: 'guide',
     FACEBOOK_APP_ID:  'guide', FACEBOOK_APP_SECRET:  'guide',
   });
+  // The seeded login is an admin. Guides show the portal, not the two-step
+  // setup page every admin is sent to first, so the requirement is lifted
+  // for this sample-data portal only.
+  env.TWO_STEP_REQUIRED = 'off';
   env.CAPSHAW_DATA_DIR = path.join(work, 'data');
   env.CAPSHAW_UPLOAD_DIR = path.join(work, 'data', 'uploads');
   return env;
