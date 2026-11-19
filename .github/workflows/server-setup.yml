@@ -11,6 +11,7 @@ name: Server setup
 #                  on the box answers the same afterwards, rolls back if not,
 #                  then proves sign-in limits are per visitor
 #   backups        nightly backup install, scripts/backup/README.md steps 3-6
+#   timezone       set the droplet clock to US Central (America/Chicago)
 #   restore-check  download the newest off-server backup and verify it,
 #                  without touching live data
 #
@@ -23,7 +24,7 @@ on:
       task:
         description: What to run on the droplet
         type: choice
-        options: [preflight, nginx, backups, restore-check]
+        options: [preflight, nginx, backups, restore-check, timezone]
         default: preflight
 
 permissions:

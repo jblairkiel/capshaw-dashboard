@@ -315,11 +315,30 @@ restore_check() {
   ok "the off-server copy downloads, decrypts and verifies"
 }
 
+# ── time zone ─────────────────────────────────────────────────────────────────
+# The whole box's clock zone: cron jobs and systemd timers written as a wall
+# clock time ("3:15") follow it, so list what will shift (schedules only, not
+# the commands or which site they belong to), then change it.
+timezone_set() {
+  need_sudo
+  local want=${TZ_WANT:-America/Chicago}
+  timedatectl list-timezones | grep -qx "$want" || die "Unknown time zone $want."
+  log "Time zone now: $(timedatectl show -p Timezone --value)"
+  echo "  cron entries that run at a set time of day (these will now follow $want):"
+  { sudo cat /etc/crontab /etc/cron.d/* 2>/dev/null; for u in $(cut -d: -f1 /etc/passwd); do sudo crontab -l -u "$u" 2>/dev/null; done; } \
+    | grep -vE '^[[:space:]]*(#|$|[A-Za-z_]+=)' | awk '$1 !~ /^@/ && $1 !~ /[*\/]/ && $2 !~ /[*\/]/ { print "    minute " $1 " hour " $2 " (" $3 " " $4 " " $5 ")" }' | sort | uniq -c
+  log "Setting $want"
+  sudo timedatectl set-timezone "$want"
+  log "Time zone now: $(timedatectl show -p Timezone --value)   local time: $(date)"
+  systemctl list-timers capshaw-backup.timer --no-pager | sed 's/^/  /'
+}
+
 case "${1:-}" in
   preflight)  preflight ;;
   nginx)      nginx_apply; ratelimit_check ;;
   ratelimit)  ratelimit_check ;;
   backups)    backups ;;
   restore-check) restore_check ;;
+  timezone)   timezone_set ;;
   *) sed -n '4,7p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
