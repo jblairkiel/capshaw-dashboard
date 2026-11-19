@@ -7,6 +7,7 @@ const actionLog = require('../lib/actionLog');
 const photoStore = require('../lib/photoStore');
 const directoryVcard = require('../lib/directoryVcard');
 const worship = require('../lib/worship');
+const displayPrefs = require('../lib/displayPrefs');
 const {
   sameHousehold, photoOf,
   WORSHIP_ROLES, PREFERENCE_LEVELS,
@@ -130,6 +131,19 @@ router.patch('/notifications', requireAuth, (req, res) => {
   }
   const user = db.prepare('SELECT wants_monthly_report, wants_weekly_email FROM users WHERE id = ?').get(req.user.id);
   res.json({ success: true, notifications: notificationsOf(user) });
+});
+
+// ─── PATCH /api/profile/display ───────────────────────────────────────────────
+// A member's own display settings (lib/displayPrefs.js). Only the settings sent
+// change; the rest keep their current value. Nobody can change anyone else's.
+
+router.patch('/display', requireAuth, (req, res) => {
+  const row = db.prepare('SELECT display_prefs FROM users WHERE id = ?').get(req.user.id);
+  const { prefs, error } = displayPrefs.merge(row?.display_prefs, req.body);
+  if (error) return res.status(400).json({ success: false, error });
+
+  db.prepare('UPDATE users SET display_prefs = ? WHERE id = ?').run(JSON.stringify(prefs), req.user.id);
+  res.json({ success: true, display: prefs });
 });
 
 // ─── GET /api/profile/directory.vcf ──────────────────────────────────────────

@@ -17,6 +17,7 @@ const { EDITABLE_FIELDS } = require('../lib/people');
 const { rateLimit } = require('../middleware/rateLimit');
 const accountMail = require('../mail/accounts');
 const notices = require('../mail/notices');
+const displayPrefs = require('../lib/displayPrefs');
 
 const isProd     = process.env.NODE_ENV === 'production';
 const CLIENT_URL = isProd ? 'https://capshaw.jblairkiel.com' : 'http://localhost:5173';
@@ -376,6 +377,9 @@ function publicUser(user) {
     id, name, email, photo, role, provider, created_at, last_login, directory_id, areas: effectiveAreas(user),
     // An address they asked to add, still waiting on its confirmation link.
     pending_email: user.pending_email || '',
+    // Text size, theme and motion, so every device they sign in on looks the
+    // way they chose (lib/displayPrefs.js).
+    display_prefs: displayPrefs.read(user.display_prefs),
   };
 }
 
