@@ -1,3 +1,4 @@
+process.env.TWO_STEP_REQUIRED = 'off';
 // server/app.js assembles the whole Express app — the pieces that are hard to
 // see from any single router's own tests: the security headers every response
 // carries, the site-wide auth gate, and the refusal to boot into production

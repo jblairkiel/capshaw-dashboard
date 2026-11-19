@@ -56,6 +56,7 @@ const NOT_FILLED = {
   users:      'Accounts. Made-up sign-ins are not sample data, they are a way in.',
   user_identities: 'Other sign-ins joined to an account. Same reason as users.',
   sessions:   'Who is signed in right now. A made-up session is a way in, and removing a batch would sign real people out.',
+  two_step_recovery_codes: 'Single-use codes that get somebody into an account without their phone. Made-up ones would be a way in.',
   record_checkoffs: 'Somebody saying a service had nothing to record. Made-up ones would hide the gaps the report exists to show.',
   worship_parts: 'The parts a service is made of. Seeded once at start-up and kept by the worship organizer; real services are built from them, so a batch must not take them away.',
   worship_outlines: 'The usual order of each service. Seeded with the parts, and the worship organizer\'s to change.',
