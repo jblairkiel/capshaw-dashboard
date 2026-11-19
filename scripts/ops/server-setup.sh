@@ -47,7 +47,8 @@ preflight() {
   log "Who and where"
   echo "  user: $(whoami)   groups: $(id -nG)"
   if sudo -n true 2>/dev/null; then ok "passwordless sudo"; else warn "no passwordless sudo (nginx and backup steps need it)"; fi
-  id -nG | grep -qw docker && ok "in the docker group" || warn "not in the docker group"
+  if [ "$(id -u)" = 0 ]; then echo "  running as root (the backup job will run as root too)"
+  else id -nG | grep -qw docker && ok "in the docker group" || warn "not in the docker group"; fi
   [ -d "$APP_DIR" ] && ok "$APP_DIR owned by $(stat -c %U "$APP_DIR"), at $(git -C "$APP_DIR" rev-parse --short HEAD 2>/dev/null || echo '?')" \
     || warn "$APP_DIR is missing"
   echo "  droplet time zone: $(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || echo '?')"
@@ -58,7 +59,10 @@ preflight() {
     [ -n "$site" ] && ok "portal site file found" || warn "no nginx site file for $DOMAIN"
     if [ -n "$site" ]; then
       echo "  proxy_set_header Host lines in it: $(sudo grep -c 'proxy_set_header[[:space:]]\+Host[[:space:]]' "$site" || true)"
-      sudo grep -q 'X-Real-IP' "$site" && ok "already forwards X-Real-IP" || echo "  does not forward the visitor's address yet"
+      echo "  forwarding lines now (header and value only):"
+      forwarding_lines "$site" | sed 's/^/    /'
+      [ "$(want_site "$site" | sha256sum)" = "$(sudo cat "$site" | sha256sum)" ] \
+        && ok "already forwards the visitor's address correctly" || echo "  needs the nginx step"
     fi
     echo "  enabled site files: $(sudo find /etc/nginx/sites-enabled -mindepth 1 -maxdepth 1 | wc -l)"
     echo "  server names served: $(server_names | wc -l)"
@@ -112,6 +116,29 @@ print_masked() {
   done < "$1"
 }
 
+# The proxy_set_header lines for the visitor's address, header and value only:
+# safe for a public log.
+forwarding_lines() {
+  sudo grep -E '^[[:space:]]*proxy_set_header[[:space:]]+(Host|X-Real-IP|X-Forwarded-For|X-Forwarded-Proto)[[:space:]]' "$1" \
+    | awk '{ $1 = $1; print }' || true
+}
+
+# The site file as it should be: any existing X-Real-IP / X-Forwarded-For /
+# X-Forwarded-Proto line is dropped wherever it is, and the three correct ones
+# go right after each "proxy_set_header Host" line, at the same indent. Run on
+# a file that is already right, it gives the same file back.
+want_site() {
+  sudo awk '
+    /^[[:space:]]*proxy_set_header[[:space:]]+(X-Real-IP|X-Forwarded-For|X-Forwarded-Proto)[[:space:]]/ { next }
+    { print }
+    /^[[:space:]]*proxy_set_header[[:space:]]+Host[[:space:]]/ {
+      match($0, /^[[:space:]]*/); ind = substr($0, 1, RLENGTH)
+      print ind "proxy_set_header X-Real-IP         $remote_addr;"
+      print ind "proxy_set_header X-Forwarded-For   $remote_addr;"
+      print ind "proxy_set_header X-Forwarded-Proto $scheme;"
+    }' "$1"
+}
+
 nginx_apply() {
   need_sudo
   local site; site=$(capshaw_site)
@@ -138,22 +165,24 @@ nginx_apply() {
     sudo nginx -t && sudo systemctl reload nginx
   }
 
-  if sudo grep -q 'X-Real-IP' "$site"; then
-    ok "portal already forwards the visitor's address"
+  local hosts; hosts=$(sudo grep -c '^[[:space:]]*proxy_set_header[[:space:]]\+Host[[:space:]]' "$site" || true)
+  [ "$hosts" -ge 1 ] || die "The portal site has no 'proxy_set_header Host' line to add beside; change it by hand."
+  want_site "$site" > "$work/site.new"
+  # Every forwarding line that was there must have had a Host line to go back
+  # beside, or the rewrite would drop it from a block with none.
+  local h had now
+  for h in X-Real-IP X-Forwarded-For X-Forwarded-Proto; do
+    had=$(sudo grep -c "^[[:space:]]*proxy_set_header[[:space:]]\+$h[[:space:]]" "$site" || true)
+    now=$(grep -c "^[[:space:]]*proxy_set_header[[:space:]]\+$h[[:space:]]" "$work/site.new" || true)
+    [ "$now" = "$hosts" ] && [ "$had" -le "$hosts" ] || die "$h appears $had time(s) for $hosts Host line(s); change the site by hand."
+  done
+  echo "  forwarding lines before:"; forwarding_lines "$site" | sed 's/^/    /'
+  if sudo cmp -s "$work/site.new" "$site"; then
+    ok "portal already forwards the visitor's address correctly"
   else
-    local hosts; hosts=$(sudo grep -c 'proxy_set_header[[:space:]]\+Host[[:space:]]' "$site" || true)
-    [ "$hosts" -ge 1 ] || die "The portal site has no 'proxy_set_header Host' line to add beside; change it by hand."
-    # Right after each "proxy_set_header Host ..." line, at the same indent.
-    sudo awk '
-      { print }
-      /^[[:space:]]*proxy_set_header[[:space:]]+Host[[:space:]]/ {
-        match($0, /^[[:space:]]*/); ind = substr($0, 1, RLENGTH)
-        print ind "proxy_set_header X-Real-IP         $remote_addr;"
-        print ind "proxy_set_header X-Forwarded-For   $remote_addr;"
-        print ind "proxy_set_header X-Forwarded-Proto $scheme;"
-      }' "$site" | sudo tee "$work/site.new" >/dev/null
     sudo cp "$work/site.new" "$site"
-    ok "added the three headers to $hosts location block(s) of the portal site only"
+    echo "  forwarding lines after:"; forwarding_lines "$site" | sed 's/^/    /'
+    ok "set the three headers in $hosts location block(s) of the portal site only"
     changed=1
   fi
 
@@ -191,7 +220,8 @@ nginx_apply() {
 # would lock everybody out for 15 minutes.
 ratelimit_check() {
   need_sudo
-  sudo nginx -T 2>/dev/null | grep -q 'X-Forwarded-For[[:space:]]\+\$remote_addr' \
+  local site; site=$(capshaw_site)
+  [ -n "$site" ] && [ "$(want_site "$site" | sha256sum)" = "$(sudo cat "$site" | sha256sum)" ] \
     || die "The live nginx does not forward X-Forwarded-For yet; not testing, it would lock out every member."
   local url="https://$DOMAIN/api/auth/login"
   attempt() {  # attempt <source address> [extra curl args]
@@ -229,11 +259,11 @@ backups() {
     if ! docker compose -f "$APP_DIR/docker-compose.yml" ps -q app 2>/dev/null | grep -q .; then
       sudo sed -i 's/^RUNNER=docker$/RUNNER=pm2/' "$BACKUP_CONFIG"
     fi
-    sudo chown "$USER": "$BACKUP_CONFIG"
+    sudo chown "$(id -un)": "$BACKUP_CONFIG"
     sudo chmod 600 "$BACKUP_CONFIG"
     ok "wrote $BACKUP_CONFIG from the example"
   fi
-  sudo install -d -o "$USER" -m 700 /var/backups/capshaw
+  sudo install -d -o "$(id -un)" -m 700 /var/backups/capshaw
   ok "/var/backups/capshaw"
   # shellcheck disable=SC1090
   ( set -a; . "$BACKUP_CONFIG"; set +a
@@ -249,7 +279,7 @@ backups() {
   grep -q 'Backup complete' "$WORK/first-backup.log" || die "The backup did not complete."
 
   log "Step 5: schedule it"
-  sed "s/^User=deploy$/User=$USER/" scripts/backup/capshaw-backup.service \
+  sed "s/^User=deploy$/User=$(id -un)/" scripts/backup/capshaw-backup.service \
     | sudo tee /etc/systemd/system/capshaw-backup.service >/dev/null
   sudo cp scripts/backup/capshaw-backup.timer /etc/systemd/system/
   sudo systemctl daemon-reload
