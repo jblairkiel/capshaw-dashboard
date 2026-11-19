@@ -12,6 +12,7 @@
 // rather than deleted, so a mark never points at nothing.
 
 const db = require('../db');
+const { photoOf: faceOf } = require('./people');
 const { churchToday, addDays } = require('./recordKeeping');
 
 // The chart palette's slots, in the order they are handed out. The client
@@ -36,17 +37,18 @@ function bySurname(a, b) {
 // Everybody in the directory, in roll order, with the letter they are filed
 // under. A directory row with no name is a scrape artefact, not a person.
 function people() {
-  return db.prepare("SELECT id, name, photo FROM directory WHERE trim(name) <> ''").all()
+  return db.prepare("SELECT id, name, photo, own_photo FROM directory WHERE trim(name) <> ''").all()
     .map(p => {
       const surname = surnameOf(p.name);
       const first = surname.charAt(0).toUpperCase();
-      return { id: p.id, name: p.name, surname, letter: /[A-Z]/.test(first) ? first : '#', has_photo: !!p.photo };
+      return { id: p.id, name: p.name, surname, letter: /[A-Z]/.test(first) ? first : '#', has_photo: !!faceOf(p) };
     })
     .sort(bySurname);
 }
 
+// The face to show on the roll: their own photo, or the family's.
 function photoOf(personId) {
-  return db.prepare('SELECT photo FROM directory WHERE id = ?').get(personId)?.photo || '';
+  return faceOf(db.prepare('SELECT photo, own_photo FROM directory WHERE id = ?').get(personId));
 }
 
 function services() {
@@ -280,7 +282,7 @@ function groupAnalytics(options = {}) {
 }
 
 function personAnalytics(personId, options = {}) {
-  const person = db.prepare('SELECT id, name, photo FROM directory WHERE id = ?').get(Number(personId));
+  const person = db.prepare('SELECT id, name, photo, own_photo FROM directory WHERE id = ?').get(Number(personId));
   if (!person) return { error: 'No such person' };
   const win = windowFor(options);
   const marks = marksIn(win, person.id);
@@ -303,7 +305,7 @@ function personAnalytics(personId, options = {}) {
 
   return {
     ...win,
-    person: { id: person.id, name: person.name, has_photo: !!person.photo },
+    person: { id: person.id, name: person.name, has_photo: !!faceOf(person) },
     counts,
     summary: {
       marked: marks.length,

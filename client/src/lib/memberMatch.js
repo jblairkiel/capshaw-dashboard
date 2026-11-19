@@ -85,14 +85,17 @@ export function buildQuestions(rounds, random = Math.random) {
   return out;
 }
 
-// Which families each name belongs to: a person may be in more than one
-// photo — their own, and a family portrait.
+// Which families each name belongs to. A person may be in more than one
+// photo — their own, and a family portrait — and the server says which family
+// each person belongs to even when they are shown in a photo of their own, so
+// relatives never turn up as each other's wrong answers.
 export function familiesByName(rounds) {
   const map = new Map();
   for (const round of rounds) {
     for (const m of round.members) {
       if (!map.has(m.name)) map.set(m.name, new Set());
       map.get(m.name).add(round.photo);
+      if (m.family) map.get(m.name).add(`family:${m.family}`);
     }
   }
   return map;

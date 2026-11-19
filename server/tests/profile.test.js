@@ -320,3 +320,124 @@ describe('person payload', () => {
     expect(res.body.person.has_photo).toBe(false);
   });
 });
+
+// ─── Family and individual photos ─────────────────────────────────────────────
+// A person's own photo is theirs; the family photo belongs to everybody at the
+// address. Anybody without their own photo is shown with the family's.
+
+describe('photos: family and individual', () => {
+  const fs   = require('fs');
+  const path = require('path');
+  const photoDir = process.env.CAPSHAW_PHOTO_DIR;
+
+  // Two different 1x1 PNGs, so they hash to two different files.
+  const PNG_A = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000a49444154789c6360000002000155a2415a0000000049454e44ae426082', 'hex');
+  const PNG_B = Buffer.concat([PNG_A, Buffer.from('extra')]);
+
+  const KEEPER = { id: 5, role: 'approved', areas: ['directory'], directory_id: null };
+
+  const row = id => db.prepare('SELECT * FROM directory WHERE id=?').get(id);
+  const putOwn    = (user, id, buf = PNG_A) => request(buildApp(user)).put(`/api/profile/person/${id}/photo`).attach('photo', buf, { filename: 'me.png', contentType: 'image/png' });
+  const putFamily = (user, id, buf = PNG_B) => request(buildApp(user)).put(`/api/profile/person/${id}/family-photo`).attach('photo', buf, { filename: 'us.png', contentType: 'image/png' });
+
+  beforeEach(() => {
+    fs.mkdirSync(photoDir, { recursive: true });
+    for (const f of fs.readdirSync(photoDir)) fs.unlinkSync(path.join(photoDir, f));
+  });
+
+  test('a member can put up their own photo, and it is marked as edited', async () => {
+    const res = await putOwn(MEMBER, DAD.id);
+    expect(res.status).toBe(200);
+    expect(res.body.person).toMatchObject({ has_photo: true, has_own_photo: true, has_family_photo: false });
+    expect(row(DAD.id).own_photo).toMatch(/\.png$/);
+    expect(JSON.parse(row(DAD.id).edited_fields)).toContain('own_photo');
+    expect(res.body.person.own_photo).toBeUndefined();
+  });
+
+  test('a member can set photos for anybody in their household', async () => {
+    expect((await putOwn(MEMBER, KID.id)).status).toBe(200);
+    expect(row(KID.id).own_photo).not.toBe('');
+  });
+
+  test('a member cannot set photos for another household', async () => {
+    expect((await putOwn(MEMBER, STRANGER.id)).status).toBe(403);
+    expect((await putFamily(MEMBER, STRANGER.id)).status).toBe(403);
+    expect((await request(buildApp(MEMBER)).delete(`/api/profile/person/${STRANGER.id}/photo`)).status).toBe(403);
+    expect(row(STRANGER.id).own_photo).toBe('');
+  });
+
+  test('the directory keeper can set anybody\'s photos', async () => {
+    expect((await putOwn(KEEPER, STRANGER.id)).status).toBe(200);
+    expect((await putFamily(KEEPER, STRANGER.id)).status).toBe(200);
+  });
+
+  test('a pending account cannot upload', async () => {
+    expect((await putOwn(PENDING, MUM.id)).status).toBe(403);
+  });
+
+  test('a family photo goes to everybody at the address and nobody else', async () => {
+    const res = await putFamily(MEMBER, KID.id);
+    expect(res.status).toBe(200);
+    const file = row(DAD.id).photo;
+    expect(file).toMatch(/\.png$/);
+    expect(row(MUM.id).photo).toBe(file);
+    expect(row(KID.id).photo).toBe(file);
+    expect(row(STRANGER.id).photo).toBe('');
+    expect(res.body.household).toHaveLength(3);
+    expect(res.body.household.every(p => p.has_family_photo)).toBe(true);
+    for (const id of [DAD.id, MUM.id, KID.id]) expect(JSON.parse(row(id).edited_fields)).toContain('photo');
+  });
+
+  test('without an own photo the family photo is the face; with one, the own photo is', async () => {
+    await putFamily(MEMBER, DAD.id);
+    const family = fs.readFileSync(path.join(photoDir, row(DAD.id).photo));
+    let res = await request(buildApp(MEMBER)).get(`/api/profile/person/${MUM.id}/photo`);
+    expect(res.status).toBe(200);
+    expect(Buffer.compare(res.body, family)).toBe(0);
+
+    await putOwn(MEMBER, MUM.id, PNG_A);
+    res = await request(buildApp(MEMBER)).get(`/api/profile/person/${MUM.id}/photo`);
+    expect(Buffer.compare(res.body, PNG_A)).toBe(0);
+
+    // Either can still be asked for by kind.
+    res = await request(buildApp(MEMBER)).get(`/api/profile/person/${MUM.id}/photo?kind=family`);
+    expect(Buffer.compare(res.body, family)).toBe(0);
+    for (const kind of ['nonsense', 'constructor', '__proto__', 'toString']) {
+      res = await request(buildApp(MEMBER)).get(`/api/profile/person/${MUM.id}/photo?kind=${kind}`);
+      expect(res.status).toBe(400);
+    }
+    res = await request(buildApp(MEMBER)).get(`/api/profile/person/${MUM.id}/photo?kind=own&kind=family`);
+    expect(res.status).toBe(200);
+  });
+
+  test('taking down an own photo falls back to the family photo', async () => {
+    await putFamily(MEMBER, DAD.id);
+    await putOwn(MEMBER, DAD.id);
+    const res = await request(buildApp(MEMBER)).delete(`/api/profile/person/${DAD.id}/photo`);
+    expect(res.status).toBe(200);
+    expect(res.body.person).toMatchObject({ has_photo: true, has_own_photo: false, has_family_photo: true });
+  });
+
+  test('taking down the family photo clears it for the household', async () => {
+    await putFamily(MEMBER, DAD.id);
+    const res = await request(buildApp(MEMBER)).delete(`/api/profile/person/${MUM.id}/family-photo`);
+    expect(res.status).toBe(200);
+    expect([DAD, MUM, KID].map(p => row(p.id).photo)).toEqual(['', '', '']);
+  });
+
+  test('refuses a file that is not an image, and a missing file', async () => {
+    let res = await request(buildApp(MEMBER)).put(`/api/profile/person/${DAD.id}/photo`)
+      .attach('photo', Buffer.from('not a picture at all'), { filename: 'x.png', contentType: 'image/png' });
+    expect(res.status).toBe(400);
+    res = await request(buildApp(MEMBER)).put(`/api/profile/person/${DAD.id}/photo`)
+      .attach('photo', Buffer.from('hello'), { filename: 'x.txt', contentType: 'text/plain' });
+    expect(res.status).toBe(400);
+    expect(row(DAD.id).own_photo).toBe('');
+  });
+
+  test('a scraped family photo already on file keeps working with no own photo', async () => {
+    db.prepare('UPDATE directory SET photo=? WHERE id=?').run('abc.jpg', DAD.id);
+    const res = await request(buildApp(MEMBER)).get('/api/profile/me');
+    expect(res.body.person).toMatchObject({ has_photo: true, has_family_photo: true, has_own_photo: false });
+  });
+});

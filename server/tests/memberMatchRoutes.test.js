@@ -53,7 +53,10 @@ describe('GET /api/member-match/rounds', () => {
     addPerson('Ray Harris', 'ray.jpg');
     const res = await request(buildApp(MEMBER)).get('/api/member-match/rounds');
     expect(res.status).toBe(200);
-    expect(res.body.rounds).toEqual([{ photo: 'ray.jpg', members: [{ id: expect.any(Number), name: 'Ray Harris' }] }]);
+    expect(res.body.rounds).toEqual([{
+      photo: 'ray.jpg', kind: 'family',
+      members: [{ id: expect.any(Number), name: 'Ray Harris', family: 'ray.jpg' }],
+    }]);
   });
 
   test('groups a photo several people share as one family round', async () => {
@@ -79,6 +82,31 @@ describe('GET /api/member-match/rounds', () => {
     const res = await request(buildApp(MEMBER)).get('/api/member-match/rounds');
     expect(res.status).toBe(200);
     expect(res.body.rounds).toEqual([]);
+  });
+});
+
+describe('GET /api/member-match/rounds with individual photos', () => {
+  function addFamily(name, { photo = '', own = '', address = '12 Oak St' } = {}) {
+    return db.prepare('INSERT INTO directory (name, address, zip, photo, own_photo) VALUES (?, ?, ?, ?, ?)')
+      .run(name, address, '35749', photo, own).lastInsertRowid;
+  }
+
+  test('somebody with their own photo is asked about with it, not the family photo', async () => {
+    addFamily('Ray Harris', { photo: 'harris.jpg', own: 'ray.jpg' });
+    addFamily('Jo Harris',  { photo: 'harris.jpg' });
+    const res = await request(buildApp(MEMBER)).get('/api/member-match/rounds');
+    expect(res.body.rounds).toEqual([
+      { photo: 'harris.jpg', kind: 'family',     members: [{ id: expect.any(Number), name: 'Jo Harris',  family: 'harris.jpg' }] },
+      { photo: 'ray.jpg',    kind: 'individual', members: [{ id: expect.any(Number), name: 'Ray Harris', family: 'harris.jpg' }] },
+    ]);
+  });
+
+  test('an individual photo with no family photo still says which household it belongs to', async () => {
+    addFamily('Ray Harris', { own: 'ray.jpg' });
+    addFamily('Jo Harris',  { own: 'jo.jpg' });
+    const res = await request(buildApp(MEMBER)).get('/api/member-match/rounds');
+    const families = new Set(res.body.rounds.flatMap(r => r.members.map(m => m.family)));
+    expect(families.size).toBe(1);
   });
 });
 

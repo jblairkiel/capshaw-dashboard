@@ -135,4 +135,24 @@ describe('syncDirectory — photos', () => {
     expect(summary.photos).toBe(0);
     expect(db.prepare('SELECT photo FROM directory').get().photo).toBe('');
   });
+
+  test('keeps a family photo put up here over the site\'s, and never touches an own photo', () => {
+    syncDirectory(db, [person('Ray Harris', { base64: JPEG, mime: 'image/jpeg' })], { savePhoto });
+    db.prepare("UPDATE directory SET photo = 'ours.png', own_photo = 'ray.png', edited_fields = '[\"photo\",\"own_photo\"]'").run();
+    savePhoto.mockReturnValueOnce('site-new.jpg');
+    syncDirectory(db, [person('Ray Harris', { base64: JPEG, mime: 'image/jpeg' })], { savePhoto });
+    expect(db.prepare('SELECT photo, own_photo FROM directory').get()).toEqual({ photo: 'ours.png', own_photo: 'ray.png' });
+  });
+
+  test('pruning keeps individual photos as well as family ones', () => {
+    fs.mkdirSync(photoStore.PHOTO_DIR, { recursive: true });
+    for (const name of ['family1.jpg', 'own1.png', 'stray1.jpg']) fs.writeFileSync(path.join(photoStore.PHOTO_DIR, name), 'x');
+    syncDirectory(db, [person('Ray Harris', null)], { savePhoto });
+    db.prepare("UPDATE directory SET own_photo = 'own1.png'").run();
+    syncDirectory(db, [person('Ray Harris', { file: 'family1.jpg' })]);
+    expect(photoStore.exists('family1.jpg')).toBe(true);
+    expect(photoStore.exists('own1.png')).toBe(true);
+    expect(photoStore.exists('stray1.jpg')).toBe(false);
+    for (const name of ['family1.jpg', 'own1.png']) fs.unlinkSync(path.join(photoStore.PHOTO_DIR, name));
+  });
 });

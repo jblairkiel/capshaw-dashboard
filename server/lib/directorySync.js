@@ -70,8 +70,11 @@ function syncDirectory(db, people, options = {}) {
       const next = person[field] || '';
       if (next !== match[field]) { updates.push(`${field} = ?`); values.push(next); }
     }
-    // The photo is never hand-edited, so it always follows the site.
-    if (photoFile && photoFile !== match.photo) { updates.push('photo = ?'); values.push(photoFile); }
+    // The family photo follows the site unless the family (or the directory's
+    // keeper) put up their own here, which marks it edited like any field.
+    if (photoFile && photoFile !== match.photo && !protectedFields.includes('photo')) {
+      updates.push('photo = ?'); values.push(photoFile);
+    }
 
     if (updates.length) {
       db.prepare(`UPDATE directory SET ${updates.join(', ')} WHERE id = ?`).run(...values, match.id);
@@ -98,7 +101,11 @@ function syncDirectory(db, people, options = {}) {
   // database, a failed scrape, or a test fixture all look like, and none of
   // them is a reason to empty the store.
   if (savePhoto === defaultSavePhoto) {
-    const referenced = db.prepare("SELECT photo FROM directory WHERE photo <> ''").all().map(r => r.photo);
+    // Family photos and individual ones share the store, so both count.
+    const referenced = db.prepare(`
+      SELECT photo AS file FROM directory WHERE photo <> ''
+      UNION SELECT own_photo FROM directory WHERE own_photo <> ''
+    `).all().map(r => r.file);
     if (referenced.length > 0) {
       try { require('./photoStore').pruneUnreferenced(referenced); } catch { /* non-fatal */ }
     }

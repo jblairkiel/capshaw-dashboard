@@ -116,6 +116,18 @@ describe('the file', () => {
     expect(directoryVcf({ photos: false }).withPhotos).toBe(0);
   });
 
+  test('a person\'s own photo goes on their card in place of the family photo', () => {
+    const family = photoStore.savePhoto({ buffer: PNG });
+    const own = photoStore.savePhoto({ buffer: Buffer.concat([PNG, Buffer.from('own')]) });
+    addPerson({ name: 'Ann Bell', photo: family });
+    addPerson({ name: 'Ben Bell', photo: family });
+    db.prepare("UPDATE directory SET own_photo = ? WHERE name = 'Ben Bell'").run(own);
+
+    const people = parseDirectory(directoryVcf().vcf);
+    expect(people.find(p => p.name === 'Ann Bell').photo.base64).toBe(PNG.toString('base64'));
+    expect(people.find(p => p.name === 'Ben Bell').photo.base64).toBe(fs.readFileSync(photoStore.photoPath(own)).toString('base64'));
+  });
+
   test('entries with no name are left out, and the rest are in alphabetical order', () => {
     addPerson({ name: 'zed Young' });
     addPerson({ name: '   ' });
