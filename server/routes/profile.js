@@ -145,13 +145,17 @@ router.get('/directory.vcf', requireApproved, (req, res) => {
 // have none. ?kind=own or ?kind=family asks for one in particular, which is
 // what the photo editor shows.
 
-// A Map, not an object: a kind like "constructor" or "__proto__" must not
-// reach anything on Object.prototype.
-const PHOTO_KINDS = new Map([
-  ['face',   person => photoOf(person)],
-  ['own',    person => person.own_photo],
-  ['family', person => person.photo],
-]);
+// A fixed choice rather than a lookup table: nothing in the query string is
+// ever used to pick a function, so ?kind=constructor and friends just get a 400.
+// Returns undefined for a kind it does not know.
+function photoOfKind(person, kind) {
+  switch (kind) {
+    case 'face':   return photoOf(person);
+    case 'own':    return person.own_photo;
+    case 'family': return person.photo;
+    default:       return undefined;
+  }
+}
 
 router.get('/person/:id/photo', requireApproved, (req, res) => {
   const person = getPerson(req.params.id);
@@ -161,9 +165,8 @@ router.get('/person/:id/photo', requireApproved, (req, res) => {
   }
 
   const kind = typeof req.query.kind === 'string' ? req.query.kind : 'face';
-  const pick = PHOTO_KINDS.get(kind);
-  if (!pick) return res.status(400).json({ success: false, error: 'kind must be own or family' });
-  const filename = pick(person);
+  const filename = photoOfKind(person, kind);
+  if (filename === undefined) return res.status(400).json({ success: false, error: 'kind must be own or family' });
   const file = photoStore.photoPath(filename);
   if (!filename || !file || !photoStore.exists(filename)) {
     return res.status(404).json({ success: false, error: 'No photo on file' });
