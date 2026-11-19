@@ -4,6 +4,7 @@
 #   server-setup.sh preflight   read-only: what is there, what is missing
 #   server-setup.sh nginx       real visitor address + server_tokens off
 #   server-setup.sh backups     backup install steps 3-6 (scripts/backup/README.md)
+#   server-setup.sh harden-*    security updates, fail2ban, firewall (see below)
 #
 # Run by the "Server setup" workflow (.github/workflows/server-setup.yml) as the
 # deploy user, or by hand. Every step is safe to run twice: whatever is already
@@ -333,6 +334,213 @@ timezone_set() {
   systemctl list-timers capshaw-backup.timer --no-pager | sed 's/^/  /'
 }
 
+# ── harden: security updates, fail2ban, firewall ──────────────────────────────
+# Run by the workflow's "harden" job, in this order:
+#   harden-record   read-only: what listens, what runs, what is already on
+#   harden-apply    unattended security updates, fail2ban for SSH, then ufw
+#                   allowing only SSH, 80 and 443. Arms a guard that turns ufw
+#                   back off by itself in GUARD_MIN minutes, so a firewall that
+#                   cuts off SSH undoes itself without anyone logging in.
+#   harden-confirm  run by the workflow over a NEW SSH connection, after it has
+#                   checked every site from the internet: disarms the guard
+#   harden-rollback ufw off again (the workflow runs it if a site changed)
+#
+# Docker publishes container ports through its own iptables rules, ahead of
+# ufw, so containers keep their reachability exactly as it is; their traffic to
+# the host comes in on the docker bridges, which stay allowed for the same
+# reason. ufw "allow", never "limit", for SSH: the workflow and the deploy open
+# several connections a minute from one runner address.
+HARDEN_KEEP=/root/hardening
+GUARD_UNIT=capshaw-ufw-guard
+GUARD_MIN=${GUARD_MIN:-15}
+
+ssh_ports() { sudo sshd -T 2>/dev/null | awk '$1 == "port" { print $2 }' | sort -un; }
+
+# "proto port process" for everything listening on an address other than
+# loopback. Ports and program names only; no addresses.
+public_listeners() {
+  sudo ss -Hlntup 2>/dev/null | awk '
+    { proto = $1; local = $5; proc = $7
+      addr = local; sub(/:[^:]*$/, "", addr); port = local; sub(/.*:/, "", port)
+      if (addr ~ /^(127\.|\[::1\]|::1)/ || addr ~ /%lo$/) next
+      name = "?"; if (match(proc, /"[^"]+"/)) name = substr(proc, RSTART + 1, RLENGTH - 2)
+      print proto, port, name }' | sort -u -k1,1 -k2,2n
+}
+
+# Listeners the firewall would newly cut off: anything on a public address that
+# is not SSH, 80 or 443, not Docker's own (Docker's ports bypass ufw), and not
+# one of the UDP ports a server uses only for answers to its own requests.
+unexpected_listeners() {
+  local allowed; allowed=" $(ssh_ports | tr '\n' ' ') 80 443 "
+  public_listeners | while read -r proto port name; do
+    case "$name" in docker-proxy) continue ;; esac
+    case "$proto:$port" in udp:68|udp:123|udp:323|udp:546) continue ;; esac
+    case "$allowed" in *" $port "*) continue ;; esac
+    echo "$proto $port $name"
+  done
+}
+
+docker_bridges() { ip -o link show 2>/dev/null | awk -F': ' '{ sub(/@.*/, "", $2); print $2 }' | grep -E '^(docker0|br-[0-9a-f]+)$' || true; }
+
+# Containers by state, and whether the portal's container can reach the
+# internet: what the firewall must leave exactly as it was.
+container_state() {
+  docker ps -a --format '{{.State}} {{.Status}}' 2>/dev/null \
+    | awk '{ h = ($0 ~ /\(healthy\)/) ? " healthy" : ($0 ~ /unhealthy/ ? " unhealthy" : "") ; print $1 h }' | sort | uniq -c
+}
+app_outbound() {
+  local cid; cid=$(docker compose -f "$APP_DIR/docker-compose.yml" ps -q app 2>/dev/null)
+  [ -n "$cid" ] || { echo "no app container"; return; }
+  docker exec "$cid" node -e "fetch('https://api.github.com/zen',{signal:AbortSignal.timeout(10000)}).then(r=>{console.log('outbound ok');}).catch(e=>{console.log('outbound FAILS');})" 2>/dev/null || echo "outbound FAILS"
+}
+
+harden_record() {
+  need_sudo
+  log "System"
+  echo "  $(. /etc/os-release; echo "$PRETTY_NAME"), kernel $(uname -r), up $(uptime -p | sed 's/^up //')"
+  [ -f /var/run/reboot-required ] && echo "  a reboot is pending from an earlier update" || true
+  log "SSH"
+  echo "  sshd port(s): $(ssh_ports | tr '\n' ' ')"
+  echo "  password sign-in: $(sudo sshd -T 2>/dev/null | awk '$1=="passwordauthentication"{print $2}')   root sign-in: $(sudo sshd -T 2>/dev/null | awk '$1=="permitrootlogin"{print $2}')"
+  log "Listening on a public address (proto port program)"
+  public_listeners | sed 's/^/  /'
+  local extra; extra=$(unexpected_listeners)
+  [ -z "$extra" ] && ok "nothing outside SSH, 80, 443 and Docker's own ports" || { warn "would be closed by the firewall:"; echo "$extra" | sed 's/^/    /'; }
+  log "Docker"
+  echo "  containers:"; container_state | sed 's/^/    /'
+  echo "  bridges: $(docker_bridges | wc -l)   published container ports: $(public_listeners | awk '$3=="docker-proxy"' | wc -l)"
+  echo "  portal container: $(app_outbound)"
+  log "Already in place?"
+  echo "  ufw: $(command -v ufw >/dev/null && sudo ufw status | head -1 || echo 'not installed')"
+  echo "  fail2ban: $(systemctl is-active fail2ban 2>/dev/null || true)"
+  echo "  unattended-upgrades: $(dpkg-query -W -f '${Status}' unattended-upgrades 2>/dev/null | awk '{print $3}' || echo none), auto run: $(apt-config dump 2>/dev/null | awk -F'"' '/^APT::Periodic::Unattended-Upgrade /{print $2}')"
+  echo "  iptables FORWARD policy: $(sudo iptables -S FORWARD 2>/dev/null | head -1)"
+  log "Every site, from here"
+  site_statuses > "$WORK/sites"; print_masked "$WORK/sites"
+}
+
+apt_quiet() {
+  sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l NEEDRESTART_SUSPEND=1 \
+    apt-get -q -y -o DPkg::Lock::Timeout=600 -o Dpkg::Options::=--force-confold "$@"
+}
+
+harden_apply() {
+  need_sudo
+  local ts; ts=$(date -u +%Y%m%dT%H%M%SZ)
+  local keep="$HARDEN_KEEP/$ts"
+  sudo install -d -m 700 "$keep"
+
+  log "Before"
+  site_statuses > "$WORK/before"; print_masked "$WORK/before"
+  container_state > "$WORK/containers-before"; sed 's/^/  /' "$WORK/containers-before"
+  local out_before; out_before=$(app_outbound); echo "  portal container: $out_before"
+  local extra; extra=$(unexpected_listeners)
+  if [ -n "$extra" ]; then
+    echo "$extra" | sed 's/^/    /'
+    die "Something listens on a port the firewall would close (above). Nothing was changed; decide about it first."
+  fi
+  ok "nothing listening that the firewall would close"
+  local sshp; sshp=$(ssh_ports)
+  [ -n "$sshp" ] || die "Could not read sshd's port; not touching the firewall."
+  sudo tar czf "$keep/etc-before.tar.gz" -C /etc $(cd /etc && ls -d ufw default/ufw fail2ban apt/apt.conf.d 2>/dev/null)
+
+  log "Installing unattended-upgrades, fail2ban, ufw (nothing else is upgraded now)"
+  apt_quiet update >/dev/null
+  apt_quiet install --no-upgrade unattended-upgrades fail2ban ufw >/dev/null
+  ok "installed: $(dpkg-query -W -f '${Package} ${Version}  ' unattended-upgrades fail2ban ufw)"
+
+  log "Unattended security updates"
+  printf '%s\n' '// added by scripts/ops/server-setup.sh harden' \
+    'APT::Periodic::Update-Package-Lists "1";' \
+    'APT::Periodic::Unattended-Upgrade "1";' \
+    'APT::Periodic::AutocleanInterval "7";' | sudo tee /etc/apt/apt.conf.d/20auto-upgrades >/dev/null
+  # Security updates only (Ubuntu's default origins). Never reboot by itself:
+  # seven sites live here, so a kernel update waits for a chosen time.
+  printf '%s\n' '// added by scripts/ops/server-setup.sh harden' \
+    'Unattended-Upgrade::Automatic-Reboot "false";' \
+    'Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";' \
+    'Unattended-Upgrade::Remove-Unused-Dependencies "false";' | sudo tee /etc/apt/apt.conf.d/52capshaw-unattended >/dev/null
+  sudo systemctl enable --now apt-daily.timer apt-daily-upgrade.timer >/dev/null 2>&1 || true
+  echo "  origins: $(apt-config dump | awk -F'"' '/^Unattended-Upgrade::Allowed-Origins::/{printf "%s  ", $2}')"
+  echo "  security updates waiting now: $(apt-get -s -o Debug::NoLocking=1 dist-upgrade 2>/dev/null | grep '^Inst' | grep -ci security || true)"
+  sudo unattended-upgrade --dry-run >/dev/null 2>&1 && ok "unattended-upgrade dry run passes" || warn "unattended-upgrade dry run reported a problem"
+  systemctl list-timers apt-daily-upgrade.timer --no-pager | sed -n 2p | sed 's/^/  next run: /'
+
+  log "fail2ban for SSH"
+  local backend=systemd; [ -s /var/log/auth.log ] && backend=auto
+  [ "$backend" = systemd ] && apt_quiet install python3-systemd >/dev/null
+  printf '%s\n' '# added by scripts/ops/server-setup.sh harden' \
+    '# Only failed sign-ins count. The deploy and the Server setup workflow sign in' \
+    '# with a key, which never fails, and a ban lasts an hour, not for ever.' \
+    '[sshd]' 'enabled  = true' "port     = $(echo "$sshp" | paste -sd,)" "backend  = $backend" \
+    'mode     = normal' 'maxretry = 5' 'findtime = 10m' 'bantime  = 1h' \
+    'ignoreip = 127.0.0.1/8 ::1' | sudo tee /etc/fail2ban/jail.d/capshaw-sshd.local >/dev/null
+  sudo fail2ban-client -t >/dev/null 2>&1 || { sudo rm -f /etc/fail2ban/jail.d/capshaw-sshd.local; die "fail2ban's config test failed; removed the jail."; }
+  sudo systemctl enable fail2ban >/dev/null 2>&1
+  sudo systemctl restart fail2ban
+  sleep 3
+  sudo fail2ban-client status sshd | grep -E 'Currently (failed|banned)|Total banned' | sed 's/^[ |`-]*/  /'
+  local me=${SSH_CLIENT%% *}
+  if [ -n "$me" ] && sudo fail2ban-client status sshd | grep -qw -- "$me"; then sudo fail2ban-client set sshd unbanip "$me" >/dev/null; warn "this runner was banned; unbanned"; fi
+  ok "sshd jail on (port $(echo "$sshp" | paste -sd,), backend $backend, 5 failures in 10 min = 1 hour ban)"
+
+  log "Firewall"
+  local was_active=0
+  sudo ufw status | grep -q '^Status: active' && was_active=1
+  if [ "$was_active" = 0 ]; then
+    # Armed before ufw goes on: if this session, or the next one, can't get in,
+    # the droplet turns its firewall back off by itself.
+    sudo systemctl stop "$GUARD_UNIT.timer" 2>/dev/null || true
+    sudo systemctl reset-failed "$GUARD_UNIT.timer" "$GUARD_UNIT.service" 2>/dev/null || true
+    sudo systemd-run --quiet --unit "$GUARD_UNIT" --on-active="${GUARD_MIN}m" /usr/sbin/ufw --force disable
+    ok "guard armed: ufw turns itself off at $(date -d "+$GUARD_MIN min" '+%H:%M %Z') unless the workflow confirms"
+    sudo ufw default deny incoming >/dev/null
+    sudo ufw default allow outgoing >/dev/null
+  else
+    echo "  ufw was already on; adding rules only, no guard needed"
+  fi
+  local p b
+  for p in $sshp; do sudo ufw allow "$p/tcp" comment 'ssh' >/dev/null; done
+  sudo ufw allow 80/tcp  comment 'http'  >/dev/null
+  sudo ufw allow 443/tcp comment 'https' >/dev/null
+  public_listeners | grep -q '^udp 443 nginx' && sudo ufw allow 443/udp comment 'http3' >/dev/null
+  for b in $(docker_bridges); do sudo ufw allow in on "$b" comment 'docker containers to host' >/dev/null; done
+  echo "  rules: ssh ($(echo "$sshp" | paste -sd' ')), 80, 443, and $(docker_bridges | wc -l) docker bridge(s)"
+  sudo ufw --force enable >/dev/null
+  sudo ufw status | head -1 | sed 's/^/  /'
+  sleep 3
+
+  log "After, from here"
+  site_statuses > "$WORK/after"; print_masked "$WORK/after"
+  container_state > "$WORK/containers-after"; sed 's/^/  /' "$WORK/containers-after"
+  local out_after; out_after=$(app_outbound); echo "  portal container: $out_after"
+  if ! diff -q "$WORK/before" "$WORK/after" >/dev/null || [ "$out_before" != "$out_after" ] \
+     || ! diff -q "$WORK/containers-before" "$WORK/containers-after" >/dev/null; then
+    [ "$was_active" = 0 ] && { sudo ufw --force disable >/dev/null; sudo systemctl stop "$GUARD_UNIT.timer" 2>/dev/null || true; }
+    die "Something answered differently with the firewall on, so it was turned off again."
+  fi
+  ok "every site, every container and the portal's outbound traffic are as before"
+  log "Saved the earlier /etc/ufw, /etc/fail2ban and apt settings in $keep"
+}
+
+harden_confirm() {
+  need_sudo
+  sudo systemctl stop "$GUARD_UNIT.timer" 2>/dev/null || true
+  systemctl list-timers "$GUARD_UNIT.timer" --no-pager 2>/dev/null | grep -q "$GUARD_UNIT" && die "The guard is still armed." || true
+  ok "guard disarmed; the firewall stays on"
+  sudo ufw status verbose | grep -E '^(Status|Default)' | sed 's/^/  /'
+  sudo ufw status | awk 'NR > 4 && NF' | sed 's/^/  /'
+  echo "  fail2ban sshd: $(sudo fail2ban-client status sshd | awk -F'\t' '/Currently banned/{print $2}' | tr -d ' ') banned now"
+  echo "  unattended-upgrades: $(apt-config dump | awk -F'"' '/^APT::Periodic::Unattended-Upgrade /{print $2}') (1 = daily)"
+}
+
+harden_rollback() {
+  need_sudo
+  sudo ufw --force disable
+  sudo systemctl stop "$GUARD_UNIT.timer" 2>/dev/null || true
+  ok "ufw is off again (unattended updates and fail2ban are left on; they do not touch the sites)"
+}
+
 case "${1:-}" in
   preflight)  preflight ;;
   nginx)      nginx_apply; ratelimit_check ;;
@@ -340,5 +548,10 @@ case "${1:-}" in
   backups)    backups ;;
   restore-check) restore_check ;;
   timezone)   timezone_set ;;
-  *) sed -n '4,7p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  server-names) server_names ;;
+  harden-record)   harden_record ;;
+  harden-apply)    harden_apply ;;
+  harden-confirm)  harden_confirm ;;
+  harden-rollback) harden_rollback ;;
+  *) sed -n '4,8p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac
