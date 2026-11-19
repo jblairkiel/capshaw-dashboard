@@ -16,6 +16,10 @@ name: Server setup
 #                  fingerprint; every other key and user is left alone
 #   restore-check  download the newest off-server backup and verify it,
 #                  without touching live data
+#   restore-drill  a full practice restore: back up now, restore the newest
+#                  off-server copy into a scratch copy of the portal (own
+#                  container, volume and port), check every record and photo
+#                  matches live, then delete the scratch copy
 #   harden         unattended security updates, fail2ban for SSH, and a ufw
 #                  firewall allowing only SSH, 80 and 443. Checks every site
 #                  from the internet before and after, over a fresh SSH
@@ -34,7 +38,7 @@ on:
       task:
         description: What to run on the droplet
         type: choice
-        options: [preflight, nginx, backups, restore-check, timezone, revoke-cloud-key, harden-check, harden]
+        options: [preflight, nginx, backups, restore-check, restore-drill, timezone, revoke-cloud-key, harden-check, harden]
         default: preflight
 
 permissions:

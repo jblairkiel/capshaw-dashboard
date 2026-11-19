@@ -131,6 +131,20 @@ for a few seconds, swaps the data in, starts it and waits for it to report
 healthy. Restoring the backup you just took changes nothing visible, which is
 the point: it shows the off-server copy, its passwords and the restore all work.
 
+### A practice restore that leaves live alone
+
+Actions → **Server setup** → task `restore-drill` (or
+`scripts/ops/server-setup.sh restore-drill` on the droplet) does the whole
+thing without touching the live portal. It takes a backup now with the nightly
+job itself, starts an empty scratch copy of the portal in its own compose
+project (`capshaw-restore-drill`, its own volume, `127.0.0.1:3901`, no mail or
+church-site settings), restores the newest off-server copy into it with
+`capshaw-restore.sh latest-remote`, and checks every table and every photo and
+upload is identical to live. Then it deletes the scratch copy and checks the
+live container and every other site on the droplet answer as before. The log
+shows pass/fail only, never row counts or names. Worth running every few months, and after any
+change to the backup scripts.
+
 ## Day to day
 
 | | |
