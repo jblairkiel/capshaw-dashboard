@@ -15,8 +15,9 @@ name: Server setup
 #   restore-check  download the newest off-server backup and verify it,
 #                  without touching live data
 #
-# This repository is public, so these logs are too. The script prints counts
-# and pass/fail, never config files, secrets or the other sites' names.
+# This repository is public, so these logs are too. The script prints sizes
+# and pass/fail, never member counts, names or addresses, config files,
+# secrets, remote names or the other sites' names.
 
 on:
   workflow_dispatch:

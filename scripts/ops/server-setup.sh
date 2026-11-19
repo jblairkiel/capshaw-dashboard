@@ -10,8 +10,10 @@
 # in place is left as it is.
 #
 # This repository is public, and so are its workflow logs. Nothing here prints
-# a config file, a secret, a bucket name or the names of the other sites this
-# nginx serves: those are counted and checked, and shown as site-1, site-2...
+# a config file, a secret, a bucket or remote name, the names of the other
+# sites this nginx serves (shown as site-1, site-2...), or anything about the
+# members: no row counts, names or addresses. Pass/fail, sizes and counts of
+# the box's own things (sites, archives, remotes) only.
 set -Eeuo pipefail
 
 # Every check below talks to this droplet's own nginx (--resolve to 127.0.0.1).
@@ -74,7 +76,7 @@ preflight() {
   log "Backups"
   command -v rclone >/dev/null && ok "rclone $(rclone version 2>/dev/null | head -1 | awk '{print $2}')" || warn "rclone is not installed"
   if command -v rclone >/dev/null; then
-    echo "  rclone remotes for $(whoami): $(rclone listremotes 2>/dev/null | tr '\n' ' ')"
+    echo "  rclone remotes for $(whoami): $(rclone listremotes 2>/dev/null | grep -c . || true)"
     local u
     for u in root deploy claude-deploy; do
       local home; home=$(getent passwd "$u" | cut -d: -f6) || continue
@@ -269,8 +271,8 @@ backups() {
   ( set -a; . "$BACKUP_CONFIG"; set +a
     [ -n "${RCLONE_REMOTE:-}" ] || { echo "::error::RCLONE_REMOTE is empty in $BACKUP_CONFIG"; exit 1; }
     rclone listremotes | grep -qx "${RCLONE_REMOTE%%:*}:" \
-      || { echo "::error::$(whoami) has no rclone remote called ${RCLONE_REMOTE%%:*}. Remotes: $(rclone listremotes | tr '\n' ' ')"; exit 1; }
-    echo "  RUNNER=$RUNNER  RCLONE_REMOTE=$RCLONE_REMOTE  KEEP_DAYS=$KEEP_DAYS  REMOTE_KEEP_DAYS=$REMOTE_KEEP_DAYS"
+      || { echo "::error::$(whoami) has no rclone remote named in RCLONE_REMOTE ($(rclone listremotes | grep -c . || true) remote(s) configured)"; exit 1; }
+    echo "  RUNNER=$RUNNER  RCLONE_REMOTE set  KEEP_DAYS=$KEEP_DAYS  REMOTE_KEEP_DAYS=$REMOTE_KEEP_DAYS"
   )
 
   log "Step 4: the first backup, by hand"
@@ -299,7 +301,7 @@ restore_check() {
   set -a; . "$BACKUP_CONFIG"; set +a
   local work=$WORK name
   name=$(rclone lsf "$RCLONE_REMOTE" --include 'capshaw-*.tar.gz' | sort | tail -1)
-  [ -n "$name" ] || die "No archives in $RCLONE_REMOTE."
+  [ -n "$name" ] || die "No archives off-server."
   log "Downloading $name"
   rclone copyto "$RCLONE_REMOTE/$name" "$work/$name"
   echo "  $(du -h "$work/$name" | cut -f1) downloaded and decrypted"
