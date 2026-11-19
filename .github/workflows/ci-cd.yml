@@ -422,7 +422,8 @@ jobs:
             ss -ltnp 2>/dev/null | grep -E '[:.]3001' \
               || echo "nothing else is listening on 3001"
             if command -v pm2 >/dev/null 2>&1; then
-              pm2 list 2>/dev/null || true
+              # This app's row only: the box runs other people's sites too.
+              pm2 list 2>/dev/null | grep -E 'capshaw-dashboard' || true
               echo "If PM2 is listed as online above, something started it"
               echo "after this job stopped it, and it is holding the port"
               echo "against the container. Retire it for good with:"
