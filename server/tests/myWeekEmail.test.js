@@ -145,6 +145,8 @@ describe('what it says', () => {
     expect(body).toContain('  • Group: Singing night — Young Families · 6:00 PM\n    They are waiting on your answer');
     expect(body).toContain('One group is waiting on your answer.');
     expect(body).toContain('The week after\n  • Wed Dec 2 · Usher');
+    const later = myWeek.compose.myWeek({ week: { ...week, items: [{ ...week.items[1], date: '2026-12-01' }] } });
+    expect(later.body).toContain('  • Tue Dec 1 · Singing night (waiting on your answer)');
     expect(body).toContain('You are next up for Baby shower hosts.');
     expect(body).toMatch(/My Week: http\S+\?page=my-week/);
     expect(body).toMatch(/turn off "Your week, every Sunday" under My Household & Preferences: http\S+\?page=profile/);

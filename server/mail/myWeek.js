@@ -144,7 +144,7 @@ compose.myWeek = ({ week }) => {
     ]),
     ...(later.length ? [
       'The week after',
-      ...later.map(item => `  • ${shortDay(item.date)} · ${describe(item).title}`),
+      ...later.map(item => `  • ${shortDay(item.date)} · ${describe(item).title}${item.rsvp === 'unanswered' ? ' (waiting on your answer)' : ''}`),
       '',
     ] : []),
     ...(week.nextUp.length ? [
@@ -186,7 +186,7 @@ compose.myWeek = ({ week }) => {
   <p style="margin:0 0 16px;color:#6b7280;font-size:14px">${esc(range(week.from, weekEnd))}${thisWeek.length ? ` · ${esc(count(thisWeek.length))}` : ''}${waiting ? ` · <span style="color:#b91c1c;font-weight:bold">${waiting} waiting on your answer</span>` : ''}</p>
   ${thisWeek.length ? days : '<p style="margin:0 0 12px;color:#4b5563">Nothing is on your list for this week.</p>'}
   ${later.length ? `<p style="margin:16px 0 4px;color:#6b7280;font-size:12px;font-weight:bold;letter-spacing:.04em;text-transform:uppercase">The week after</p>
-  <ul style="margin:0 0 12px;padding-left:18px;color:#374151;font-size:14px">${later.map(item => `<li>${esc(shortDay(item.date))} · ${esc(describe(item).title)}</li>`).join('')}</ul>` : ''}
+  <ul style="margin:0 0 12px;padding-left:18px;color:#374151;font-size:14px">${later.map(item => `<li>${esc(shortDay(item.date))} · ${esc(describe(item).title)}${item.rsvp === 'unanswered' ? ' <span style="color:#b91c1c;font-weight:bold">(waiting on your answer)</span>' : ''}</li>`).join('')}</ul>` : ''}
   ${week.nextUp.length ? `<p style="margin:12px 0;padding:8px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;color:#92400e;font-size:14px">You are next up for <strong>${week.nextUp.map(r => esc(r.title)).join('</strong>, <strong>')}</strong>.</p>` : ''}
   <p style="margin:16px 0 24px"><a href="${esc(page)}" style="display:inline-block;background:#1a2744;color:#ffffff;padding:8px 16px;border-radius:6px;text-decoration:none;font-size:14px">Open My Week</a></p>
   <p style="color:#9ca3af;font-size:12px;margin:0">${esc(why)} ${esc(stop)}: <a href="${esc(prefs)}" style="color:#9ca3af">${esc(prefs)}</a></p>
