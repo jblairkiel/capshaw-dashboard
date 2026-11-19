@@ -181,6 +181,10 @@ old="capshaw-$(date -u -d '-120 days' +%Y-%m-%dT031500Z).tar.gz"
 cp "$work/backups/$remote" "$work/$old" && touch -d '-120 days' "$work/$old"
 rclone copyto "$work/$old" "capshaw-offsite:$old"
 rclone lsf capshaw-offsite: | grep -qx "$old" || die "could not plant the old archive"
+# Archives are named to the second. On a fast runner this second run can
+# start in the same second as the first, and would then replace it rather
+# than add a second archive, so wait for the clock to move on.
+while [ "capshaw-$(date -u +%Y-%m-%dT%H%M%SZ).tar.gz" = "$remote" ]; do sleep 0.2; done
 "$REPO/scripts/backup/capshaw-backup.sh" 2>&1 | grep -E 'pruned remote|Off-server copy confirmed|Backup complete' | sed 's/^/  /'
 rclone lsf capshaw-offsite: | grep -qx "$old" && die "the 120-day-old archive was not pruned"
 [ "$(rclone lsf capshaw-offsite: --include 'capshaw-*.tar.gz' | wc -l)" -eq 2 ] || die "expected the two fresh archives to remain"
