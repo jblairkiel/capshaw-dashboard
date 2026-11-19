@@ -26,7 +26,11 @@ HEALTH_URL=${HEALTH_URL:-http://127.0.0.1:3001/api/health}
 log() { printf '%s  %s\n' "$(date -u +%FT%TZ)" "$*" >&2; }
 die() { log "RESTORE STOPPED: $*"; exit 1; }
 
-compose() { docker compose -f "$APP_DIR/docker-compose.yml" "$@"; }
+# The droplet's compose file, unless COMPOSE_FILE already says which to use
+# (the pipeline test points it at a throwaway project).
+compose_args=()
+[ -n "${COMPOSE_FILE:-}" ] || compose_args=(-f "$APP_DIR/docker-compose.yml")
+compose() { docker compose "${compose_args[@]}" "$@"; }
 
 # The deploy passes CAPSHAW_IMAGE on its command line rather than writing it to
 # .env, so a one-off `compose run` would otherwise reach for the default local

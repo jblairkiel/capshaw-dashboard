@@ -178,3 +178,30 @@ file, openable with any SQLite tool), the photo and upload folders, and
 the data directory (`/data` in the container, `server/data` and
 `server/uploads` under PM2) and deleting any `bible_questions.db-wal` and
 `-shm` beside the old database is a complete restore.
+
+## The pipeline test
+
+`.github/workflows/backup-pipeline.yml` runs the whole thing in CI on every
+change to the backup code, and once a week: it fills a throwaway container
+with sample data, runs `capshaw-backup.sh`, checks that Backblaze holds only
+ciphertext, plants a 120-day-old archive and checks the next run prunes it,
+deletes the volume and the local backups, runs `capshaw-restore.sh
+latest-remote`, and compares every member record and file with what was
+backed up. `scripts/backup/pipeline-test.sh` is the test, and runs the same
+on any machine with Docker (`CAPSHAW_IMAGE=<image> scripts/backup/pipeline-test.sh`).
+
+It talks to Backblaze when three repository secrets are set, and to a local
+folder otherwise. To turn on the Backblaze half:
+
+1. Backblaze → **Application Keys** → **Add a New Application Key**: name it
+   `capshaw-ci`, allow access to the backups bucket only, **Read and Write**,
+   and set **File name prefix** to `ci/`. That key can only touch `ci/`, so
+   CI can never read or delete the droplet's real backups.
+2. GitHub → the repository → **Settings** → **Secrets and variables** →
+   **Actions** → **New repository secret**, three times:
+   `B2_KEY_ID`, `B2_APPLICATION_KEY` (from that key) and `B2_BUCKET`.
+3. **Actions** → **Backup pipeline** → **Run workflow**. The run's summary says
+   which target it used.
+
+Each run writes under `ci/<run id>/` with encryption passwords made up for
+that run, and deletes it when it finishes.

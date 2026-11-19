@@ -31,10 +31,15 @@ fail() {
 }
 trap 'fail "line $LINENO exited with status $?"' ERR
 
+# The droplet's compose file, unless COMPOSE_FILE already says which to use
+# (the pipeline test points it at a throwaway project).
+compose_args=()
+[ -n "${COMPOSE_FILE:-}" ] || compose_args=(-f "$APP_DIR/docker-compose.yml")
+
 # The backup command, run wherever the app's data is.
 app_backup() {
   case "$RUNNER" in
-    docker) docker compose -f "$APP_DIR/docker-compose.yml" exec -T app node server/tools/backup.js "$@" ;;
+    docker) docker compose "${compose_args[@]}" exec -T app node server/tools/backup.js "$@" ;;
     pm2)    env -C "$APP_DIR" node server/tools/backup.js "$@" ;;
     *)      fail "RUNNER must be docker or pm2, not '$RUNNER'" ;;
   esac
@@ -68,7 +73,10 @@ if [ -n "$RCLONE_REMOTE" ]; then
   remote_size=$(rclone size --json "$RCLONE_REMOTE/$name" | sed -n 's/.*"bytes":\([0-9]*\).*/\1/p')
   local_size=$(stat -c %s "$BACKUP_DIR/$name")
   [ "$remote_size" = "$local_size" ] || fail "off-server copy is $remote_size bytes, expected $local_size"
-  rclone delete "$RCLONE_REMOTE" --min-age "${REMOTE_KEEP_DAYS}d" --include 'capshaw-*.tar.gz' -v 2>&1 \
+  # --b2-hard-delete: on Backblaze a plain delete only hides the file, and the
+  # bucket keeps (and bills for) every hidden version forever. Other storage
+  # ignores the flag.
+  rclone delete "$RCLONE_REMOTE" --min-age "${REMOTE_KEEP_DAYS}d" --include 'capshaw-*.tar.gz' --b2-hard-delete -v 2>&1 \
     | sed -n 's/.*INFO *: *\(.*\): Deleted.*/  pruned remote \1/p' >&2 || true
   log "Off-server copy confirmed ($remote_size bytes)"
 else
