@@ -138,7 +138,7 @@ the point: it shows the off-server copy, its passwords and the restore all work.
 | Did last night's run work? | `journalctl -u capshaw-backup --since yesterday` |
 | Take one now | `scripts/backup/capshaw-backup.sh` (or `sudo systemctl start capshaw-backup`) |
 | What is there | `scripts/backup/capshaw-restore.sh --list` |
-| Check an archive without restoring | `docker compose exec -T app node server/tools/backup.js verify - < /var/backups/capshaw/<file>` |
+| Check an archive without restoring | `docker compose exec -T app node server/tools/backup.js verify - < /var/backups/capshaw/<file>` (add `--counts` for per-table row counts; leave it off anywhere the output is shared) |
 
 ## Restoring
 

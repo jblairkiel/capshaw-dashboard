@@ -85,9 +85,7 @@ router.get('/me', requireAuth, (req, res) => {
     roles:        WORSHIP_ROLES,
     levels:       PREFERENCE_LEVELS,
     fields:       EDITABLE_FIELDS,
-    // Everyone is opted into the monthly worship summary until they say
-    // otherwise, so this reflects the column's default of on.
-    notifications: { monthlyReport: req.user.wants_monthly_report !== 0 },
+    notifications: notificationsOf(req.user),
     genders:      GENDERS.filter(Boolean),
     // The directory area edits from the directory screen; members edit their
     // own household.
@@ -107,18 +105,31 @@ router.get('/person/:id', requireApproved, (req, res) => {
   res.json({ success: true, person: personPayload(person), household: householdOf(person).map(personPayload) });
 });
 
+// Everyone is opted into both until they say otherwise, so these reflect the
+// columns' default of on.
+function notificationsOf(user) {
+  return {
+    monthlyReport: user?.wants_monthly_report !== 0,
+    weeklyEmail: user?.wants_weekly_email !== 0,
+  };
+}
+
 // ─── PATCH /api/profile/notifications ─────────────────────────────────────────
 // Anyone signed in can turn their own emails off; nobody can change anyone
 // else's.
 
 router.patch('/notifications', requireAuth, (req, res) => {
-  const wanted = req.body?.monthlyReport;
-  if (typeof wanted !== 'boolean') {
-    return res.status(400).json({ success: false, error: 'monthlyReport must be true or false' });
+  const columns = { monthlyReport: 'wants_monthly_report', weeklyEmail: 'wants_weekly_email' };
+  const given = Object.keys(columns).filter(k => req.body?.[k] !== undefined);
+  if (!given.length || given.some(k => typeof req.body[k] !== 'boolean')) {
+    return res.status(400).json({ success: false, error: 'monthlyReport or weeklyEmail must be true or false' });
   }
 
-  db.prepare('UPDATE users SET wants_monthly_report = ? WHERE id = ?').run(wanted ? 1 : 0, req.user.id);
-  res.json({ success: true, notifications: { monthlyReport: wanted } });
+  for (const key of given) {
+    db.prepare(`UPDATE users SET ${columns[key]} = ? WHERE id = ?`).run(req.body[key] ? 1 : 0, req.user.id);
+  }
+  const user = db.prepare('SELECT wants_monthly_report, wants_weekly_email FROM users WHERE id = ?').get(req.user.id);
+  res.json({ success: true, notifications: notificationsOf(user) });
 });
 
 // ─── GET /api/profile/directory.vcf ──────────────────────────────────────────

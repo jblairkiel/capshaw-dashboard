@@ -67,7 +67,7 @@ find "$BACKUP_DIR" -maxdepth 1 -name 'capshaw-*.tar.gz' -mtime +"$((KEEP_DAYS - 
   | sed 's/^/  pruned /' >&2 || true
 
 if [ -n "$RCLONE_REMOTE" ]; then
-  log "Copying to $RCLONE_REMOTE"
+  log "Copying off-server"
   rclone copyto "$BACKUP_DIR/$name" "$RCLONE_REMOTE/$name" --retries 5 --low-level-retries 10
   # Read it back: a copy that is listed with the right size is a copy that landed.
   remote_size=$(rclone size --json "$RCLONE_REMOTE/$name" | sed -n 's/.*"bytes":\([0-9]*\).*/\1/p')

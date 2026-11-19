@@ -94,4 +94,16 @@ app.listen(PORT, () => {
   };
   remindRotations();
   setInterval(remindRotations, REMINDER_TICK_MS);
+
+  // Sunday morning, each member's own week. Claimed per account per Sunday
+  // (my_week_emails), so ticking often is safe.
+  const myWeekMail = require('./mail/myWeek');
+  const sendWeeks = () => {
+    try {
+      const sent = myWeekMail.tick();
+      if (sent.length) console.log(`[my-week] sent to ${sent.length} member(s)`);
+    } catch (err) { console.error('[my-week] weekly email failed:', err.message); }
+  };
+  sendWeeks();
+  setInterval(sendWeeks, REMINDER_TICK_MS);
 });
