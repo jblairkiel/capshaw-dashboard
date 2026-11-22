@@ -908,25 +908,14 @@ function initSchema(db) {
   // the email_verify_* columns above). Only then does it become their email.
   addColumn('users', 'pending_email', "TEXT NOT NULL DEFAULT ''");
 
-  // ── Two-step sign-in (server/lib/twoStep.js) ────────────────────────────────
-  // The authenticator-app secret, '' until somebody finishes setting it up.
-  // two_step_enabled_at is what says it is on. two_step_last_step is the last
-  // 30-second step a code was accepted for, so one code cannot be used twice.
-  addColumn('users', 'two_step_secret', "TEXT NOT NULL DEFAULT ''");
-  addColumn('users', 'two_step_enabled_at', 'TEXT');
-  addColumn('users', 'two_step_last_step', 'INTEGER NOT NULL DEFAULT -1');
-  // Single-use codes for when the phone is lost: SHA-256 of each, never the
-  // code itself, and when it was spent.
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS two_step_recovery_codes (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      code_hash  TEXT    NOT NULL,
-      used_at    TEXT,
-      created_at TEXT    NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_two_step_recovery_user ON two_step_recovery_codes(user_id);
-  `);
+  // Two-step sign-in (authenticator app) was taken out in November 2026. Its
+  // secrets and recovery codes would only be a way in that nothing checks any
+  // more, so they are removed rather than left lying in the database.
+  db.exec(`DROP TABLE IF EXISTS two_step_recovery_codes;`);
+  for (const column of ['two_step_secret', 'two_step_enabled_at', 'two_step_last_step']) {
+    const exists = db.prepare('PRAGMA table_info(users)').all().some(c => c.name === column);
+    if (exists) db.exec(`ALTER TABLE users DROP COLUMN ${column}`);
+  }
 
   // Whether this person may be rostered for the men's worship jobs. Chosen on
   // My Info (or by the directory area on their behalf) — not guessed from a

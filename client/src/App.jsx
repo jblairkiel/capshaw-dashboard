@@ -12,7 +12,6 @@ import AnnouncementsView from './components/AnnouncementsView';
 import AnnouncementsDisplay from './components/AnnouncementsDisplay';
 import LoginPage from './components/LoginPage';
 import WaitingForApproval from './components/WaitingForApproval';
-import { TwoStepRequiredPage } from './components/TwoStep';
 import UsersView from './components/UsersView';
 import UpcomingServiceView from './components/UpcomingServiceView';
 import DatabaseAdminView from './components/DatabaseAdminView';
@@ -679,9 +678,6 @@ export default function App() {
   // until they are known, so the page appears whole rather than the buttons
   // arriving late.
   const [providers, setProviders] = useState(undefined);
-  // The password (or Google, or Facebook) was accepted and the server is
-  // waiting for the code from their phone.
-  const [secondStep, setSecondStep] = useState(false);
 
   // Set by the OAuth callbacks and by the confirmation link in the registration
   // email, which the API answers with a redirect back to here.
@@ -694,12 +690,8 @@ export default function App() {
 
   useEffect(() => {
     fetch('/api/auth/me', { credentials: 'include' })
-      .then(async r => ({ ok: r.ok, j: await r.json().catch(() => null) }))
-      .then(({ ok, j }) => {
-        setSecondStep(!ok && j?.code === 'two_step_required');
-        setUser(ok ? (j?.user ?? null) : null);
-        setImpersonatedBy(ok ? (j?.impersonatedBy ?? null) : null);
-      })
+      .then(r => r.ok ? r.json() : null)
+      .then(j => { setUser(j?.user ?? null); setImpersonatedBy(j?.impersonatedBy ?? null); })
       .catch(() => setUser(null));
   }, []);
 
@@ -735,21 +727,8 @@ export default function App() {
         verified={verified}
         verifyError={verifyError}
         resetToken={resetToken}
-        secondStep={secondStep}
         providers={providers}
         onSignedIn={setUser}
-      />
-    );
-  }
-
-  // An admin or directory manager who has yet to set up two-step sign-in: the
-  // server answers nothing else until they do (server/middleware/twoStep.js).
-  if (!impersonatedBy && user.two_step?.required && !user.two_step?.enabled) {
-    return (
-      <TwoStepRequiredPage
-        user={user}
-        onDone={setUser}
-        onLogout={() => { setUser(null); setImpersonatedBy(null); }}
       />
     );
   }

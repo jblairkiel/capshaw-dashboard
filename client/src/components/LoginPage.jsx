@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { SecondStepForm } from './TwoStep';
 
 const AUTH_ERROR_MESSAGES = {
   google:   'Google sign-in failed. Please try again.',
@@ -112,7 +111,7 @@ function Divider({ children }) {
 
 // ─── Sign in with an email address and password ───────────────────────────────
 
-function SignInForm({ onSignedIn, onForgot, onSecondStep }) {
+function SignInForm({ onSignedIn, onForgot }) {
   const [email, setEmail]       = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy]         = useState(false);
@@ -139,8 +138,6 @@ function SignInForm({ onSignedIn, onForgot, onSecondStep }) {
       const json = await res.json().catch(() => ({}));
 
       if (json.success && json.user) return onSignedIn(json.user);
-      // The password was right; now the code from their phone.
-      if (json.code === 'two_step_required') return onSecondStep();
       setCode(json.code || '');
       setError(json.error || 'Sign-in failed. Please try again.');
     } catch {
@@ -416,9 +413,9 @@ function RegisterForm({ onRegistered }) {
 
 // ─── The page ─────────────────────────────────────────────────────────────────
 
-export default function LoginPage({ authError, verified, verifyError, resetToken, secondStep = false, providers = [], onSignedIn = () => {} }) {
-  // 'signin' | 'register' | 'forgot' | 'reset' | 'second-step'
-  const [mode, setMode]         = useState(resetToken ? 'reset' : secondStep ? 'second-step' : 'signin');
+export default function LoginPage({ authError, verified, verifyError, resetToken, providers = [], onSignedIn = () => {} }) {
+  // 'signin' | 'register' | 'forgot' | 'reset'
+  const [mode, setMode]         = useState(resetToken ? 'reset' : 'signin');
   const [registered, setRegistered] = useState('');
   const [forgotEmail, setForgotEmail] = useState('');
   const [passwordChanged, setPasswordChanged] = useState('');
@@ -466,19 +463,7 @@ export default function LoginPage({ authError, verified, verifyError, resetToken
         {passwordChanged && <Banner tone="success">{passwordChanged}</Banner>}
 
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-8">
-          {mode === 'second-step' ? (
-            <SecondStepForm
-              onSignedIn={user => {
-                // Google and Facebook land here with ?two_step=1; tidy it away.
-                if (window.location.search) window.history.replaceState(null, '', window.location.pathname);
-                onSignedIn(user);
-              }}
-              onCancel={() => {
-                if (window.location.search) window.history.replaceState(null, '', window.location.pathname);
-                setMode('signin');
-              }}
-            />
-          ) : mode === 'reset' ? (
+          {mode === 'reset' ? (
             <ResetForm token={resetToken} onDone={msg => leaveReset('signin', msg)} onAskAgain={() => leaveReset('forgot')} />
           ) : mode === 'forgot' ? (
             <ForgotForm initialEmail={forgotEmail} onBack={() => setMode('signin')} />
@@ -523,7 +508,7 @@ export default function LoginPage({ authError, verified, verifyError, resetToken
               )}
 
               {mode === 'signin'
-                ? <SignInForm onSignedIn={onSignedIn} onSecondStep={() => setMode('second-step')} onForgot={email => { setForgotEmail(email); setPasswordChanged(''); setMode('forgot'); }} />
+                ? <SignInForm onSignedIn={onSignedIn} onForgot={email => { setForgotEmail(email); setPasswordChanged(''); setMode('forgot'); }} />
                 : <RegisterForm onRegistered={setRegistered} />
               }
 
