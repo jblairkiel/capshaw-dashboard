@@ -157,3 +157,33 @@ describe('converting the worship coordinator', () => {
     expect(db.prepare('SELECT area FROM user_areas').all().map(r => r.area)).toEqual(['serving-schedule']);
   });
 });
+
+describe('taking out two-step sign-in', () => {
+  test('drops the authenticator secrets and recovery codes, keeping the accounts', () => {
+    const db = new Database(':memory:');
+    initSchema(db);
+    // The shape an install had while two-step sign-in was in.
+    db.exec(`
+      ALTER TABLE users ADD COLUMN two_step_secret TEXT NOT NULL DEFAULT '';
+      ALTER TABLE users ADD COLUMN two_step_enabled_at TEXT;
+      ALTER TABLE users ADD COLUMN two_step_last_step INTEGER NOT NULL DEFAULT -1;
+      CREATE TABLE two_step_recovery_codes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        code_hash TEXT NOT NULL, used_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+    const { lastInsertRowid: id } = db.prepare(
+      "INSERT INTO users (provider, provider_id, name, role, two_step_secret, two_step_enabled_at) VALUES ('local', 'a@b.c', 'Ada', 'admin', 'SECRET', datetime('now'))"
+    ).run();
+    db.prepare("INSERT INTO two_step_recovery_codes (user_id, code_hash) VALUES (?, 'hash')").run(id);
+
+    initSchema(db);
+
+    const columns = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
+    expect(columns.filter(c => c.startsWith('two_step'))).toEqual([]);
+    expect(db.prepare("SELECT name FROM sqlite_master WHERE name = 'two_step_recovery_codes'").get()).toBeUndefined();
+    expect(db.prepare('SELECT name, role FROM users WHERE id = ?').get(id)).toEqual({ name: 'Ada', role: 'admin' });
+  });
+});

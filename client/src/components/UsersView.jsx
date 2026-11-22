@@ -707,7 +707,7 @@ function ApproveDialog({ user, people, busy, error, onApprove, onClose }) {
 
 // ─── Detail panel: everything you can do to one account ───────────────────────
 
-function UserDetail({ user, currentUserId, people, busy, onSetRole, onSetAreas, onLink, onRemove, onResetTwoStep, onApproveRequest, onViewAs, onClose }) {
+function UserDetail({ user, currentUserId, people, busy, onSetRole, onSetAreas, onLink, onRemove, onApproveRequest, onViewAs, onClose }) {
   const isSelf  = user.id === currentUserId;
   const locked  = isSelf || !!user.is_owner;
   const waiting = user.role === 'pending' && !isSelf && !user.is_owner;
@@ -899,36 +899,6 @@ function UserDetail({ user, currentUserId, people, busy, onSetRole, onSetAreas, 
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
-          </div>
-
-          {/* Two-step sign-in */}
-          <div>
-            <p className="text-sm font-semibold text-church-navy mb-1">Two-step sign-in</p>
-            <p className="text-xs text-gray-500 mb-2">
-              {user.two_step_enabled_at
-                ? `On since ${formatDate(user.two_step_enabled_at)}.`
-                : user.two_step_required
-                  ? 'Not set up yet. They will be asked to set it up the next time they sign in.'
-                  : 'Off. Members can turn it on from My Household & Preferences.'}
-              {user.two_step_required && user.two_step_enabled_at && ' Required for this account.'}
-            </p>
-            {user.two_step_enabled_at && !isSelf && (
-              <>
-                <p className="text-xs text-gray-500 mb-2">
-                  Lost their phone and their recovery codes? Resetting turns it off, so they can sign in
-                  with their password{user.two_step_required ? ' and set it up again straight away' : ''}.
-                  Only do this once you are sure it is really them asking.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => onResetTwoStep(user.id, user.name)}
-                  disabled={busy}
-                  className="text-sm px-3 py-2 rounded-lg border border-amber-300 text-amber-800 hover:bg-amber-50 transition-colors disabled:opacity-50"
-                >
-                  Reset two-step sign-in
-                </button>
-              </>
-            )}
           </div>
         </div>
 
@@ -1260,17 +1230,6 @@ export default function UsersView({ currentUser }) {
     load();
   }
 
-  async function resetTwoStep(id, name) {
-    if (!window.confirm(`Reset two-step sign-in for ${name}? They will be able to sign in with just their password until they set it up again.`)) return;
-    setNotice('');
-    setBusy(true);
-    const res  = await fetch(`/api/auth/users/${id}/two-step`, { method: 'DELETE' });
-    const json = await res.json().catch(() => ({}));
-    setNotice(json.success ? `Two-step sign-in reset for ${name}.` : (json.error || 'Could not reset two-step sign-in'));
-    setBusy(false);
-    load();
-  }
-
   async function link(id, directoryId) {
     setNotice('');
     setBusy(true);
@@ -1482,7 +1441,6 @@ export default function UsersView({ currentUser }) {
           onViewAs={viewAs}
           onLink={link}
           onRemove={remove}
-          onResetTwoStep={resetTwoStep}
           onApproveRequest={openApproval}
           onClose={() => setOpenId(null)}
         />
