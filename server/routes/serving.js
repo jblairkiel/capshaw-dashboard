@@ -21,7 +21,7 @@ const db      = require('../db');
 const { requireAuth, requireApproved, requireArea, holdsArea } = require('../middleware/auth');
 const { WORSHIP_ROLES, PREFERENCE_LEVELS } = require('../lib/people');
 const worship = require('../lib/worship');
-const { SERVICES, MONTHS, parseMonth, servicesIn } = require('../workflows/scheduling');
+const { SERVICES, MONTHS, parseMonth, servicesIn, serviceRank } = require('../workflows/scheduling');
 const serviceJobs = require('../lib/serviceJobs');
 const engine = require('../workflows/engine');
 const notifications = require('../lib/notifications');
@@ -40,19 +40,40 @@ router.use(requireAuth);
 
 // ─── Lookups ──────────────────────────────────────────────────────────────────
 
+// The months on record, earliest first. A month heading that cannot be read
+// as a month goes after the ones that can.
 function monthsOnRecord() {
   return db.prepare("SELECT month, COUNT(*) AS slots FROM job_assignments WHERE month <> '' GROUP BY month")
     .all()
     .map(r => ({ ...r, parsed: parseMonth(r.month) }))
     .sort((a, b) => {
-      if (!a.parsed || !b.parsed) return a.month.localeCompare(b.month);
-      return b.parsed.year - a.parsed.year || b.parsed.monthIndex - a.parsed.monthIndex;
+      if (!a.parsed || !b.parsed) return (a.parsed ? 0 : 1) - (b.parsed ? 0 : 1) || a.month.localeCompare(b.month);
+      return a.parsed.year - b.parsed.year || a.parsed.monthIndex - b.parsed.monthIndex;
     })
     .map(({ month, slots }) => ({ month, slots }));
 }
 
+// Which a page opens on when none is asked for: the latest month built.
+function latestMonth(months) {
+  const readable = months.filter(m => parseMonth(m.month));
+  return (readable[readable.length - 1] || months[0])?.month || '';
+}
+
+// A month's slots in the order they happen: by day, then by service within the
+// day, then in the order the schedule lists the jobs. A slot with no day of its
+// own (the monthly visual preparation) comes last. Everything that lists the
+// roster — the page, the PDF, the emails — reads it through here.
 function assignmentsIn(month) {
-  return db.prepare('SELECT id, month, date, service, job, name FROM job_assignments WHERE month = ? ORDER BY id ASC').all(month);
+  return db.prepare('SELECT id, month, date, service, job, name FROM job_assignments WHERE month = ? ORDER BY id ASC')
+    .all(month)
+    .map(slot => ({ slot, iso: blackouts.dateOf(slot.month, slot.date) || '' }))
+    .sort((a, b) =>
+      (a.iso ? 0 : 1) - (b.iso ? 0 : 1)
+      || a.iso.localeCompare(b.iso)
+      || serviceRank(a.slot.service) - serviceRank(b.slot.service)
+      || String(a.slot.service).localeCompare(String(b.slot.service))
+      || a.slot.id - b.slot.id)
+    .map(({ slot }) => slot);
 }
 
 function personFor(user) {
@@ -142,7 +163,7 @@ function jobsOf(name, today = new Date()) {
       const iso = blackouts.dateOf(s.month, s.date) || '';
       return { id: s.id, month: s.month, date: s.date, iso, service: s.service, job: s.job, past: !!iso && iso < todayIso, replacement: asked.get(s.id) || null };
     })
-    .sort((a, b) => (a.iso || '9999').localeCompare(b.iso || '9999') || a.id - b.id);
+    .sort((a, b) => (a.iso || '9999').localeCompare(b.iso || '9999') || serviceRank(a.service) - serviceRank(b.service) || a.id - b.id);
   return {
     thisMonth: { month: monthLabel(now), jobs: shape(monthLabel(now)) },
     nextMonth: { month: monthLabel(next), jobs: shape(monthLabel(next)) },
@@ -157,7 +178,7 @@ router.get('/', (req, res) => {
   const months  = monthsOnRecord();
   const wanted  = req.query.month && months.some(m => m.month === req.query.month)
     ? req.query.month
-    : months[0]?.month || '';
+    : latestMonth(months);
   const person  = personFor(req.user);
 
   const canManage = holdsArea(req.user, AREA);

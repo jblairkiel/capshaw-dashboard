@@ -41,6 +41,16 @@ describe('reading the dates records hold', () => {
     expect(isoFromMonthDay('January 2027', 'December 27')).toBe('2026-12-27');
     expect(isoFromMonthDay('June 2026', '')).toBe('');
   });
+
+  test('reads a scraped sheet\'s other ways of writing a roster day', () => {
+    expect(isoFromMonthDay('November 2026', 'Sunday, November 2')).toBe('2026-11-02');
+    expect(isoFromMonthDay('November 2026', 'Wed Nov 5, 2026')).toBe('2026-11-05');
+    expect(isoFromMonthDay('November 2026', 'Nov. 16')).toBe('2026-11-16');
+    expect(isoFromMonthDay('November 2026', '11/9')).toBe('2026-11-09');
+    expect(isoFromMonthDay('November 2026', '11/23/26')).toBe('2026-11-23');
+    expect(isoFromMonthDay('November 2026', '2026-11-30')).toBe('2026-11-30');
+    expect(isoFromMonthDay('November 2026', 'sometime')).toBe('');
+  });
 });
 
 function Harness({ initial, format }) {

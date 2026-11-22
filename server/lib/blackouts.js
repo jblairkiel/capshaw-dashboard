@@ -132,23 +132,54 @@ function nameAwayOn(name, isoDate) {
 // its own — the monthly visual preparation is the one that behaves this way —
 // belongs to no particular day, so nobody can be away for it.
 
+// The roster is scraped from a sheet as well as built here, so a day can be
+// written any of the ways a sheet writes one: "June 7", "Jun. 7", "Sunday,
+// June 7", "Sun Jun 7, 2026", "6/7", "6/7/26", or ISO. The year comes from the
+// day itself when it carries one, and from the month heading otherwise — a
+// December sheet listing a January row belongs to the year after.
+const WEEKDAY_PREFIX = /^(?:sun|mon|tue|wed|thu|fri|sat)[a-z]*\.?,?\s*/i;
+
+function monthNamed(word) {
+  const w = String(word || '').toLowerCase().replace(/\.$/, '');
+  if (w.length < 3) return -1;
+  return MONTHS.findIndex(m => m.toLowerCase().startsWith(w));
+}
+
+function isoOf(year, monthIndex, day) {
+  const y = year < 100 ? 2000 + year : year;
+  const iso = `${y}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  return isDate(iso) ? iso : null;
+}
+
 function dateOf(monthLabel, dateLabel) {
   const date = String(dateLabel || '').trim();
   if (!date) return null;
   if (isDate(date)) return date;
 
-  const parsed = parseMonth(monthLabel);
-  if (!parsed) return null;
+  const rest = date.replace(WEEKDAY_PREFIX, '');
+  let monthIndex, day, year;
+  let match;
+  if ((match = /^([A-Za-z]+\.?)\s+(\d{1,2})(?:(?:,\s*|\s+)(\d{4}|\d{2}))?$/.exec(rest))) {
+    monthIndex = monthNamed(match[1]);
+    day = Number(match[2]);
+    year = match[3] ? Number(match[3]) : null;
+  } else if ((match = /^(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?$/.exec(rest))) {
+    monthIndex = Number(match[1]) - 1;
+    day = Number(match[2]);
+    year = match[3] ? Number(match[3]) : null;
+  } else {
+    return null;
+  }
+  if (!(monthIndex >= 0 && monthIndex <= 11)) return null;
 
-  const match = /^([A-Za-z]+)\s+(\d{1,2})$/.exec(date);
-  if (!match) return null;
-
-  const monthIndex = MONTHS.findIndex(m => m.toLowerCase() === match[1].toLowerCase());
-  if (monthIndex < 0) return null;
-
-  const day = Number(match[2]);
-  const iso = `${parsed.year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-  return isDate(iso) ? iso : null;
+  if (year === null) {
+    const parsed = parseMonth(monthLabel);
+    if (!parsed) return null;
+    year = parsed.year;
+    if (monthIndex < parsed.monthIndex - 6) year += 1;
+    else if (monthIndex > parsed.monthIndex + 6) year -= 1;
+  }
+  return isoOf(year, monthIndex, day);
 }
 
 // "June 7, 2026", or "June 7 – June 21, 2026" — how a range reads in a sentence

@@ -15,6 +15,7 @@ const db      = require('../db');
 const blackouts = require('./blackouts');
 const rotations = require('./rotations');
 const engine = require('../workflows/engine');
+const { serviceRank } = require('../workflows/scheduling');
 const recordKeeping = require('./recordKeeping');
 
 // Today and the thirteen days after it: this week and next.
@@ -40,6 +41,8 @@ function jobsFor(person, from, to) {
     .all(key)
     .map(s => ({ ...s, iso: blackouts.dateOf(s.month, s.date) }))
     .filter(s => inRange(s.iso, from, to))
+    // Sunday morning's jobs before Sunday evening's on the same day.
+    .sort((a, b) => a.iso.localeCompare(b.iso) || serviceRank(a.service) - serviceRank(b.service) || a.id - b.id)
     .map(s => ({
       kind: 'job', id: s.id, date: s.iso, service: s.service, job: s.job,
       replacementAsked: open.has(s.id),

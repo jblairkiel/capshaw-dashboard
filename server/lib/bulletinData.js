@@ -22,6 +22,7 @@
 // announcing last month's events as this week's.
 const db     = require('../db');
 const config = require('./bulletinConfig');
+const blackouts = require('./blackouts');
 
 const MONTHS = [
   'january', 'february', 'march',     'april',   'may',      'june',
@@ -47,33 +48,11 @@ function isoFromSlashed(value) {
   return `${year}-${mm.padStart(2, '0')}-${dd.padStart(2, '0')}`;
 }
 
-function monthIndex(name) {
-  const key = String(name || '').trim().toLowerCase().replace(/\.$/, '');
-  if (!key) return -1;
-  return MONTHS.findIndex(m => m === key || m.startsWith(key));
-}
-
 // A job assignment carries its year on the sheet's heading ('June 2025') and
-// its day on the row ('June 7'), so neither half is a date by itself.
+// its day on the row ('June 7'), so neither half is a date by itself. The
+// Serving Schedule reads them the same way (lib/blackouts.js).
 function isoFromMonthDay(monthLabel, dateLabel) {
-  const heading = String(monthLabel || '').trim().match(/^([A-Za-z]+)\s+(\d{4})$/);
-  const row     = String(dateLabel  || '').trim().match(/^([A-Za-z]+)\.?\s+(\d{1,2})$/);
-  if (!heading || !row) return null;
-
-  const year = Number(heading[2]);
-  // The row's own month is the one to trust — a sheet headed 'June 2025' can
-  // carry a July 5 row for the week that straddles the two.
-  const mi = monthIndex(row[1]);
-  if (mi < 0) return null;
-
-  const day = Number(row[2]);
-  if (!(day >= 1 && day <= 31)) return null;
-
-  // A December sheet listing a January row belongs to the next year.
-  const headingMonth = monthIndex(heading[1]);
-  const wrapped = headingMonth === 11 && mi === 0 ? year + 1 : year;
-
-  return `${wrapped}-${String(mi + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  return blackouts.dateOf(monthLabel, dateLabel);
 }
 
 // Whatever a row happens to store, as ISO — or null when it is unreadable.

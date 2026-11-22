@@ -90,6 +90,21 @@ describe('the day a slot falls on', () => {
     expect(blackouts.dateOf('December 2026', 'December 27')).toBe('2026-12-27');
   });
 
+  test('reads a scraped sheet\'s other ways of writing a day', () => {
+    expect(blackouts.dateOf('November 2026', 'Nov 2')).toBe('2026-11-02');
+    expect(blackouts.dateOf('November 2026', 'Nov. 16')).toBe('2026-11-16');
+    expect(blackouts.dateOf('November 2026', 'Sunday, November 2')).toBe('2026-11-02');
+    expect(blackouts.dateOf('November 2026', 'Wed Nov 5, 2026')).toBe('2026-11-05');
+    expect(blackouts.dateOf('November 2026', '11/9')).toBe('2026-11-09');
+    expect(blackouts.dateOf('November 2026', '11/23/26')).toBe('2026-11-23');
+    expect(blackouts.dateOf('November 2026', '2026-11-30')).toBe('2026-11-30');
+  });
+
+  test('a January row on a December sheet is the next year\'s', () => {
+    expect(blackouts.dateOf('December 2026', 'January 3')).toBe('2027-01-03');
+    expect(blackouts.dateOf('January 2027', 'December 27')).toBe('2026-12-27');
+  });
+
   test('a slot belonging to no particular day cannot be blocked out', () => {
     expect(blackouts.dateOf('June 2026', '')).toBeNull();
     expect(blackouts.dateOf('', 'June 7')).toBeNull();
