@@ -882,8 +882,11 @@ export default function ServingSchedule({ focus = null }) {
       if (!byKey.has(key)) byKey.set(key, { date: a.date, service: a.service, iso: isoFromMonthDay(month, a.date), slots: [] });
       byKey.get(key).slots.push(a);
     }
+    // A day that cannot be read as a date goes after the ones that can.
     return [...byKey.values()].sort((x, y) =>
-      String(x.iso || x.date).localeCompare(String(y.iso || y.date)) || rank(x.service) - rank(y.service) || x.service.localeCompare(y.service));
+      (x.iso ? 0 : 1) - (y.iso ? 0 : 1)
+      || String(x.iso || x.date).localeCompare(String(y.iso || y.date))
+      || rank(x.service) - rank(y.service) || x.service.localeCompare(y.service));
   }, [all, month, regular]);
   const monthly  = all.filter(a => MONTHLY_JOBS.has(a.job));
   const openCount = all.filter(a => !a.name.trim()).length;

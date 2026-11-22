@@ -70,15 +70,32 @@ export function parseMonth(label) {
   return month < 0 ? null : { year: +m[2], month };
 }
 
-// ISO from a month label and a day label ("June 2026", "June 7" or "Jun 7"),
-// or '' when the two do not make a date.
+// ISO from a month label and a day label, or '' when the two do not make a
+// date. The roster is scraped from a sheet as well as built here, so the day
+// can be written any way a sheet writes one: "June 7", "Jun. 7", "Sunday,
+// June 7", "Sun Jun 7, 2026", "6/7", "6/7/26" or ISO. The server reads them
+// the same way (server/lib/blackouts.js dateOf).
 export function isoFromMonthDay(monthLabel, dayLabel) {
-  const month = parseMonth(monthLabel);
-  const m = String(dayLabel || '').trim().match(/^([A-Za-z]+\.?)\s+(\d{1,2})$/);
-  if (!month || !m) return '';
-  const index = monthIndex(m[1]);
+  const day = String(dayLabel || '').trim();
+  if (!day) return '';
+  if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(day)) return toIso(day);
+
+  const rest = day.replace(/^(?:sun|mon|tue|wed|thu|fri|sat)[a-z]*\.?,?\s*/i, '');
+  let index, date, year = null, m;
+  if ((m = rest.match(/^([A-Za-z]+\.?)\s+(\d{1,2})(?:(?:,\s*|\s+)(\d{4}|\d{2}))?$/))) {
+    index = monthIndex(m[1]); date = +m[2]; if (m[3]) year = +m[3];
+  } else if ((m = rest.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?$/))) {
+    index = +m[1] - 1; date = +m[2]; if (m[3]) year = +m[3];
+  } else {
+    return '';
+  }
   if (index < 0) return '';
-  // A slot near the turn of the year can sit in the next month's roster.
-  const year = index < month.month - 6 ? month.year + 1 : index > month.month + 6 ? month.year - 1 : month.year;
-  return iso(year, index, +m[2]);
+
+  if (year === null) {
+    const month = parseMonth(monthLabel);
+    if (!month) return '';
+    // A slot near the turn of the year can sit in the next month's roster.
+    year = index < month.month - 6 ? month.year + 1 : index > month.month + 6 ? month.year - 1 : month.year;
+  }
+  return iso(year, index, date);
 }

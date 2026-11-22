@@ -55,6 +55,44 @@ beforeEach(() => {
   UNLINKED  = addUser('Sam',  'approved', null);
 });
 
+// ─── In the order they happen ─────────────────────────────────────────────────
+
+describe('the roster in date order', () => {
+  const put = (month, date, service, job, name = '') =>
+    db.prepare('INSERT INTO job_assignments (month, date, service, job, name) VALUES (?, ?, ?, ?, ?)').run(month, date, service, job, name);
+
+  test('lists a month by day, then service, however the sheet wrote the days', async () => {
+    // Inserted out of order, the way a scrape or a hand-added slot leaves them.
+    put('November 2026', 'Sunday, November 16', 'Sunday Worship', 'Song Leader', 'Joe Carter');
+    put('November 2026', 'Sunday, November 2',  'Sunday Evening', 'Song Leader', 'Ned Poole');
+    put('November 2026', 'Wednesday, November 5', 'Wednesday',    'Opening Prayer');
+    put('November 2026', '',                     '',               'Visual Preparation');
+    put('November 2026', 'Sunday, November 2',  'Sunday Worship', 'Song Leader', 'Joe Carter');
+    put('November 2026', 'Nov 9',               'Sunday Worship', 'Speaker');
+
+    const res = await request(buildApp(MAN)).get('/api/serving').query({ month: 'November 2026' });
+    expect(res.status).toBe(200);
+    expect(res.body.assignments.map(a => `${a.date}|${a.service}`)).toEqual([
+      'Sunday, November 2|Sunday Worship',
+      'Sunday, November 2|Sunday Evening',
+      'Wednesday, November 5|Wednesday',
+      'Nov 9|Sunday Worship',
+      'Sunday, November 16|Sunday Worship',
+      '|',
+    ]);
+  });
+
+  test('offers the months earliest first, and opens on the latest', async () => {
+    put('December 2026', 'December 6', 'Sunday Worship', 'Speaker');
+    put('October 2026',  'October 4',  'Sunday Worship', 'Speaker');
+    put('November 2026', 'November 1', 'Sunday Worship', 'Speaker');
+
+    const res = await request(buildApp(MAN)).get('/api/serving');
+    expect(res.body.months.map(m => m.month)).toEqual(['October 2026', 'November 2026', 'December 2026']);
+    expect(res.body.month).toBe('December 2026');
+  });
+});
+
 // ─── Building a month ─────────────────────────────────────────────────────────
 
 describe('laying out next month', () => {

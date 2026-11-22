@@ -33,6 +33,13 @@ const SERVICE_ROLES = {
 
 const SERVICES = Object.keys(SERVICE_ROLES);
 
+// Where a service sits among one day's services: Sunday morning, Sunday
+// evening, Wednesday, then anything else (a gospel meeting).
+function serviceRank(service) {
+  const i = SERVICES.findIndex(s => s.toLowerCase() === String(service || '').trim().toLowerCase());
+  return i < 0 ? SERVICES.length : i;
+}
+
 function parseMonth(label) {
   const match = String(label || '').trim().match(/^([A-Za-z]+)\s+(\d{4})$/);
   if (!match) return null;
@@ -208,6 +215,6 @@ function assignmentsFor(draft, name) {
 }
 
 module.exports = {
-  MONTHS, SERVICES, SERVICE_ROLES,
+  MONTHS, SERVICES, SERVICE_ROLES, serviceRank,
   parseMonth, datesFor, servicesIn, generateSchedule, asPreview, assignmentsFor,
 };
