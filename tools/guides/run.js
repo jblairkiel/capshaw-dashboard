@@ -131,6 +131,10 @@ const python = async (script, scriptArgs = []) => run(PYTHON, [path.join(HERE, s
       } catch (e) {
         const shot = path.join(work, `failed-${seg.name}.png`);
         await s.page.screenshot({ path: shot }).catch(() => {});
+        // The words on screen too, for runs (like CI) where the screenshot is
+        // hard to get at.
+        const words = await s.page.evaluate(() => document.body.innerText).catch(() => '');
+        if (words) console.error(`\nOn screen when ${seg.name} failed:\n${words.replace(/\n{2,}/g, '\n').slice(0, 2000)}\n`);
         throw new Error(`${seg.name} failed: ${e.message.split('\n')[0]}\nThe screen at that moment: ${shot}`);
       } finally {
         await s.close();

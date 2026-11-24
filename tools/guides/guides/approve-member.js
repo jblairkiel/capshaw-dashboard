@@ -55,9 +55,13 @@ module.exports = {
         await d.callout(row, 'Waiting to be approved', { where: 'below' });
         await d.hold(2200);
         await d.clear();
-        await d.click(row.getByRole('button', { name: 'Approve', exact: true }));
+        const approve = row.getByRole('button', { name: 'Approve', exact: true });
+        await d.click(approve);
         const dialog = page.getByRole('dialog', { name: `Approve ${facts.pending}` });
-        await dialog.waitFor();
+        // If the pointer's press missed (the table can still be settling after
+        // the filter), press the button itself.
+        if (!(await dialog.waitFor({ timeout: 3000 }).then(() => true, () => false))) await approve.click();
+        await dialog.waitFor({ timeout: 10000 });
         await d.sleep(600);
 
         d.mark('who');
