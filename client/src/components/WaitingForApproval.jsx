@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { PROVIDER_NAMES } from '../lib/signInProviders';
 
 // ─── Waiting for approval ─────────────────────────────────────────────────────
 //
@@ -22,7 +23,6 @@ const TONES = {
   error:   'bg-red-50 border-red-200 text-red-700',
 };
 
-const PROVIDER_NAMES = { google: 'Google', facebook: 'Facebook' };
 
 // Facebook gives no email address for somebody who joined it with a phone
 // number, or who chose not to share it. Without one the account cannot be
@@ -58,7 +58,7 @@ function AddEmail({ provider, pendingEmail }) {
       <div>
         <h3 id="add-email-heading" className="text-sm font-semibold text-amber-900">Add your email address</h3>
         <p className="text-xs text-amber-900 mt-1">
-          {PROVIDER_NAMES[provider] || 'Your sign-in'} did not give us an email address. Add one so we can tell you
+          {PROVIDER_NAMES[provider] || 'Your sign-in'} did not give us an email address we could confirm. Add one so we can tell you
           when you are approved and connect you to the member directory. We will send a link to confirm it is yours.
         </p>
       </div>

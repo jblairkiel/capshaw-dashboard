@@ -16,6 +16,11 @@ const mailer = require('./mailer');
 
 const isProd = process.env.NODE_ENV === 'production';
 
+// The ways in that are not a password, by the name people know them by.
+const PROVIDER_NAME = {
+  google: 'Google', facebook: 'Facebook', yahoo: 'Yahoo', microsoft: 'Microsoft', apple: 'Apple',
+};
+
 function clientUrl() {
   return isProd ? 'https://capshaw.jblairkiel.com' : 'http://localhost:5173';
 }
@@ -76,11 +81,10 @@ compose.confirmAddress = ({ name, token }) => ({
 });
 
 compose.addressAlreadyRegistered = ({ name, provider }) => {
-  const howTheySignIn = provider === 'google'
-    ? 'You already have an account here, and it signs in with Google. Use the\n"Sign in with Google" button rather than a password.'
-    : provider === 'facebook'
-      ? 'You already have an account here, and it signs in with Facebook. Use the\n"Sign in with Facebook" button rather than a password.'
-      : 'You already have an account here with an email address and password.';
+  const via = PROVIDER_NAME[provider];
+  const howTheySignIn = via
+    ? `You already have an account here, and it signs in with ${via}. Use the\n"Sign in with ${via}" button rather than a password.`
+    : 'You already have an account here with an email address and password.';
 
   const body = [
     `Hello ${name || 'there'},`,
@@ -92,7 +96,7 @@ compose.addressAlreadyRegistered = ({ name, provider }) => {
     '',
     `The portal is here: ${clientUrl()}`,
     '',
-    provider === 'google' || provider === 'facebook'
+    via
       ? 'There is no password to remember: just use that button.'
       : 'If you have forgotten your password, choose "Forgot your password?" on\nthe sign-in page and we will email you a link to choose a new one.',
     '',
@@ -125,7 +129,7 @@ compose.resetPassword = ({ name, token }) => ({
 // Asked for a reset on an address whose account signs in with Google or
 // Facebook: there is no password here to reset, so say how they do sign in.
 compose.noPasswordToReset = ({ name, provider }) => {
-  const via = provider === 'facebook' ? 'Facebook' : 'Google';
+  const via = PROVIDER_NAME[provider] || 'Google';
   return {
     subject: 'Signing in to the Capshaw member portal',
     body: [
@@ -145,7 +149,7 @@ compose.noPasswordToReset = ({ name, provider }) => {
   };
 };
 
-const SIGNED_UP_WITH = { google: 'Google', facebook: 'Facebook' };
+const SIGNED_UP_WITH = PROVIDER_NAME;
 
 compose.awaitingApproval = ({ user }) => ({
   subject: `Waiting for approval: ${user.name}`,
@@ -198,8 +202,6 @@ compose.approved = ({ user, personName }) => {
 };
 
 // ─── Joining a second sign-in to an existing account ──────────────────────────
-
-const PROVIDER_NAME = { google: 'Google', facebook: 'Facebook' };
 
 function howAccountSignsIn(provider) {
   return PROVIDER_NAME[provider] || 'an email address and password';

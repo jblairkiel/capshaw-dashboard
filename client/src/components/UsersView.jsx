@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ROLES, AREAS, roleInfo, areaInfo, areasOf } from '../lib/roles';
 import { useCookieState } from '../lib/cookies';
 import { useIsPhone } from '../lib/useMediaQuery';
+import { PROVIDER_NAMES } from '../lib/signInProviders';
+import ProviderIcon from './ProviderIcon';
 
 // Remembers which columns the admin chose to see, so the grid comes back the
 // way they left it on their next visit.
@@ -11,6 +13,9 @@ const PROVIDERS = [
   { value: 'local',    label: 'Email & password' },
   { value: 'google',   label: 'Google'   },
   { value: 'facebook', label: 'Facebook' },
+  { value: 'yahoo',    label: 'Yahoo'    },
+  { value: 'microsoft', label: 'Microsoft' },
+  { value: 'apple',    label: 'Apple'    },
 ];
 
 // The directory fields an admin fills in when they create a profile for
@@ -80,6 +85,14 @@ function ProviderBadge({ provider }) {
       </span>
     );
   }
+  if (PROVIDER_NAMES[provider]) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-gray-50 text-gray-700 border border-gray-200">
+        <ProviderIcon provider={provider} className="w-3 h-3" />
+        {PROVIDER_NAMES[provider]}
+      </span>
+    );
+  }
   return <Dash />;
 }
 
@@ -96,7 +109,7 @@ function SignInBadges({ user }) {
   );
 }
 
-const PROVIDER_NAMES = { google: 'Google', facebook: 'Facebook', local: 'email and password' };
+const SIGN_IN_NAMES = { ...PROVIDER_NAMES, local: 'email and password' };
 
 // A Google or Facebook sign-in that came without an address (Facebook gives
 // none for somebody who joined it with a phone number). Such an account
@@ -142,7 +155,7 @@ function LinkRequests({ requests, currentUserId, busyId, onDecide }) {
                 </div>
                 <div className="text-xs text-gray-500 mt-1">
                   wants to join <strong className="text-church-navy">{r.account_name}</strong>
-                  {' '}({r.account_email || 'no address'}, signs in with {PROVIDER_NAMES[r.account_provider] || r.account_provider})
+                  {' '}({r.account_email || 'no address'}, signs in with {SIGN_IN_NAMES[r.account_provider] || r.account_provider})
                   {r.created_at && <> · asked {formatDateTime(r.created_at)}</>}
                 </div>
                 {own && (
@@ -157,7 +170,7 @@ function LinkRequests({ requests, currentUserId, busyId, onDecide }) {
                     onClick={() => onDecide(r, 'approve')}
                     disabled={busy}
                     className="text-xs px-3 py-1.5 rounded-lg bg-church-navy text-white hover:bg-church-navy/90 disabled:opacity-50"
-                    aria-label={`Approve ${PROVIDER_NAMES[r.provider] || r.provider} sign-in for ${r.account_name}`}
+                    aria-label={`Approve ${SIGN_IN_NAMES[r.provider] || r.provider} sign-in for ${r.account_name}`}
                   >
                     Approve
                   </button>
@@ -166,7 +179,7 @@ function LinkRequests({ requests, currentUserId, busyId, onDecide }) {
                   onClick={() => onDecide(r, 'decline')}
                   disabled={busy}
                   className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                  aria-label={`Decline ${PROVIDER_NAMES[r.provider] || r.provider} sign-in for ${r.account_name}`}
+                  aria-label={`Decline ${SIGN_IN_NAMES[r.provider] || r.provider} sign-in for ${r.account_name}`}
                 >
                   Decline
                 </button>
@@ -762,7 +775,7 @@ function UserDetail({ user, currentUserId, people, busy, onSetRole, onSetAreas, 
               </p>
               {!user.email && user.provider !== 'local' && (
                 <p className="text-xs text-orange-800 mt-1">
-                  Their {PROVIDER_NAMES[user.provider] || 'sign-in'} gave no email address, so they could not be matched to the
+                  Their {SIGN_IN_NAMES[user.provider] || 'sign-in'} gave no email address, so they could not be matched to the
                   directory and will not be emailed when you approve them. They have been asked to add one. You can
                   still approve them now and pick their directory entry yourself; let them know in person.
                 </p>

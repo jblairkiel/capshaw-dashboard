@@ -19,7 +19,11 @@ function originOf(url) {
   }
 }
 
-function requireTrustedOrigin(allowedOrigins) {
+// `exceptions` lets one more origin reach one exact path, for a provider that
+// answers a sign-in with a form POST from its own site (Apple). Such a route
+// has to protect itself some other way — the sign-in's `state`, checked
+// against a cookie only this site could have set.
+function requireTrustedOrigin(allowedOrigins, { exceptions = {} } = {}) {
   const allowed = new Set(allowedOrigins);
 
   return function (req, res, next) {
@@ -28,6 +32,9 @@ function requireTrustedOrigin(allowedOrigins) {
     const source = req.get('origin') || originOf(req.get('referer'));
 
     if (source && allowed.has(source)) return next();
+    if (source && Object.prototype.hasOwnProperty.call(exceptions, req.path) && exceptions[req.path].includes(source)) {
+      return next();
+    }
 
     return res.status(403).json({ success: false, error: 'Request origin not allowed' });
   };
