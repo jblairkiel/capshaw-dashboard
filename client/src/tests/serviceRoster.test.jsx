@@ -30,7 +30,7 @@ const PREFERENCES = {
   success: true, weeks: 26, roles: ['Song Leader', 'Usher', 'Communion'],
   men: MEMBERS.map(m => ({
     personId: m.id, name: m.name, preferences: m.preferences, said: Object.keys(m.preferences).length,
-    participates: m.participation.participates, reason: m.participation.reason,
+    participates: m.participation.participates, reason: m.participation.reason, membership: m.participation.membership,
     updatedAt: null, notes: m.notes, served: {}, servedTotal: 0,
   })),
   coverage: [],
@@ -40,7 +40,9 @@ const PREFERENCES = {
 function mockRoster() {
   const fetchMock = vi.fn((url, options = {}) => {
     let body = { success: true };
-    if (options.method === 'PUT' && String(url).endsWith('/participation')) {
+    if (options.method === 'PUT' && url === '/api/serving/members/participation') {
+      body = { success: true, changed: JSON.parse(options.body).ids.length, members: [] };
+    } else if (options.method === 'PUT' && String(url).endsWith('/participation')) {
       const sent = JSON.parse(options.body);
       const id   = Number(url.match(/members\/(\d+)/)[1]);
       body = { success: true, member: { id, participation: { membership: '', override: '', participates: false, reason: '', ...sent } } };
@@ -109,6 +111,37 @@ describe('ServiceRosterView — opening a man from Preferences', () => {
     expect(screen.queryByRole('button', { name: 'Joe Carter' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Ned Poole' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sam Lee' })).toBeInTheDocument();
+  });
+
+  test('ticks several men and marks them baptized members together', async () => {
+    const fetchMock = mockRoster();
+    render(<ServiceRosterView tab="preferences" />);
+    await screen.findByText('How each job is covered');
+
+    // Joe is already a baptized member, so he has no tick box.
+    expect(screen.queryByRole('checkbox', { name: /Tick Joe Carter/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: /Tick Ned Poole/ }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /Tick Sam Lee/ }));
+    expect(screen.getByText('2 men ticked')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Mark as baptized members' }));
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => u === '/api/serving/members/participation')).toBe(true));
+    const [, options] = fetchMock.mock.calls.find(([u]) => u === '/api/serving/members/participation');
+    expect(options.method).toBe('PUT');
+    expect(JSON.parse(options.body)).toEqual({ ids: [2, 3], membership: 'member' });
+    // The list is read again, and the ticks are cleared.
+    await waitFor(() => expect(screen.queryByText('2 men ticked')).not.toBeInTheDocument());
+    expect(fetchMock.mock.calls.filter(([u]) => String(u).startsWith('/api/participation/preferences')).length).toBe(2);
+  });
+
+  test('one tick box in the heading ticks every man shown who is not yet marked', async () => {
+    mockRoster();
+    render(<ServiceRosterView tab="preferences" />);
+    await screen.findByText('How each job is covered');
+    fireEvent.click(screen.getByRole('checkbox', { name: /Tick every man shown/ }));
+    expect(screen.getByText('2 men ticked')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear' }));
+    expect(screen.queryByText('2 men ticked')).not.toBeInTheDocument();
   });
 
   test('records a preference for a man who has said nothing', async () => {

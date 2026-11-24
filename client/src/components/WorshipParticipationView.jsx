@@ -342,19 +342,58 @@ function Answer({ level, served }) {
   );
 }
 
-export function PreferencesTab({ onPick }) {
+// A man the keeper can tick to record as a baptized member: one whose
+// membership is anything else. Rows from before membership was sent carry
+// none, and are left alone.
+const tickable = m => typeof m.membership === 'string' && m.membership !== 'member';
+
+export function PreferencesTab({ onPick, onMarked }) {
   const [weeks, setWeeks] = useState(26);
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [query, setQuery] = useState('');
   const [show, setShow] = useState('all');
+  const [reload, setReload] = useState(0);
+  const [ticked, setTicked] = useState(() => new Set());
+  const [marking, setMarking] = useState(false);
+  const [markError, setMarkError] = useState('');
 
   useEffect(() => {
     let live = true;
-    setData(null);
+    if (!reload) setData(null);
     call(`${API}/preferences?weeks=${weeks}`).then(d => live && (setData(d), setError(''))).catch(e => live && setError(e.message));
     return () => { live = false; };
-  }, [weeks]);
+  }, [weeks, reload]);
+
+  const tick = (id, on) => setTicked(prev => {
+    const next = new Set(prev);
+    if (on) next.add(id); else next.delete(id);
+    return next;
+  });
+
+  // Records every ticked man as a baptized member in one go, then reads the
+  // list again so each one shows as rostered.
+  async function markBaptized() {
+    setMarking(true);
+    setMarkError('');
+    try {
+      const res = await fetch('/api/serving/members/participation', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [...ticked], membership: 'member' }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!json.success) throw new Error(json.error || 'Something went wrong');
+      setTicked(new Set());
+      setReload(n => n + 1);
+      onMarked?.();
+    } catch (e) {
+      setMarkError(e.message);
+    } finally {
+      setMarking(false);
+    }
+  }
 
   const rows = useMemo(() => {
     if (!data) return [];
@@ -373,6 +412,8 @@ export function PreferencesTab({ onPick }) {
 
   const s = data.summary;
   const control = 'border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white';
+  const canTick = rows.filter(tickable);
+  const allTicked = canTick.length > 0 && canTick.every(m => ticked.has(m.personId));
 
   return (
     <div className="space-y-4">
@@ -385,7 +426,8 @@ export function PreferencesTab({ onPick }) {
       {s.notRostered > 0 && (
         <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
           {s.notRostered === 1 ? '1 man is' : `${s.notRostered} men are`} not rostered for the worship jobs. By default only
-          men recorded as baptized members are; open a man below to record his membership, or to roster him anyway.
+          men recorded as baptized members are. Tick the men below who are baptized members and mark them together,
+          or open one man to record his membership or roster him anyway.
         </p>
       )}
 
@@ -426,12 +468,29 @@ export function PreferencesTab({ onPick }) {
           What each man has said he will do, set by him on My Household &amp; Preferences or recorded for him on the Service Roster.
           The small number is how many times he has served that job in the weeks chosen.
         </p>
+        {ticked.size > 0 && (
+          <div className="flex flex-wrap items-center gap-3 bg-church-cream/60 border border-church-gold/40 rounded-lg px-3 py-2 text-sm">
+            <span className="text-church-navy">{ticked.size === 1 ? '1 man ticked' : `${ticked.size} men ticked`}</span>
+            <button type="button" onClick={markBaptized} disabled={marking} className="btn-primary text-sm px-3 py-1.5">
+              {marking ? 'Saving…' : 'Mark as baptized members'}
+            </button>
+            <button type="button" onClick={() => setTicked(new Set())} disabled={marking} className="text-gray-500 hover:text-church-navy">Clear</button>
+            {markError && <span className="text-red-600">{markError}</span>}
+          </div>
+        )}
         {rows.length === 0 ? <p className="text-sm text-gray-400">Nobody matches.</p> : (
           <div className="overflow-x-auto">
             <table className="text-sm min-w-full">
               <thead>
                 <tr className="text-left text-xs text-gray-400 uppercase tracking-wide">
-                  <th className="py-1 pr-3 font-medium sticky left-0 bg-white">Man</th>
+                  <th className="py-1 pr-3 font-medium sticky left-0 bg-white">
+                    {canTick.length > 0 && (
+                      <input type="checkbox" checked={allTicked} aria-label="Tick every man shown who is not marked as a baptized member"
+                        onChange={e => setTicked(e.target.checked ? new Set(canTick.map(m => m.personId)) : new Set())}
+                        className="mr-2 align-middle" />
+                    )}
+                    Man
+                  </th>
                   {data.roles.map(r => <th key={r} className="py-1 px-2 font-medium whitespace-nowrap">{r}</th>)}
                   <th className="py-1 pl-2 font-medium whitespace-nowrap">Last changed</th>
                 </tr>
@@ -440,6 +499,10 @@ export function PreferencesTab({ onPick }) {
                 {rows.map(m => (
                   <tr key={m.personId} className="border-t border-gray-100 align-top">
                     <td className="py-1.5 pr-3 sticky left-0 bg-white">
+                      {tickable(m) && (
+                        <input type="checkbox" checked={ticked.has(m.personId)} onChange={e => tick(m.personId, e.target.checked)}
+                          aria-label={`Tick ${m.name} to mark as a baptized member`} className="mr-2 align-middle" />
+                      )}
                       <button type="button" onClick={() => onPick(m.name, m.personId)} className="text-church-navy hover:underline text-left whitespace-nowrap">{m.name}</button>
                       {m.participates === false && <span className="block text-[11px] text-amber-800 whitespace-nowrap">{m.reason}</span>}
                       {m.notes && <span className="block text-[11px] text-gray-500 max-w-[14rem] truncate" title={m.notes}>&ldquo;{m.notes}&rdquo;</span>}
