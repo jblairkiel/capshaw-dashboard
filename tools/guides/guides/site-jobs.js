@@ -74,8 +74,11 @@ module.exports = {
         // Any ordinary member's row: the badge reads "Member".
         const row = page.locator('tbody tr').filter({ has: page.getByText('Member', { exact: true }) }).first();
         await row.waitFor({ timeout: 15000 });
-        await d.click(row.getByRole('button', { name: /^Manage / }));
+        const manage = row.getByRole('button', { name: /^Manage / });
+        await d.click(manage);
         const panel = page.getByRole('dialog', { name: /^Details for / });
+        // If the pointer press missed (the button sits in a wide table), press it directly.
+        if (!(await panel.waitFor({ timeout: 3000 }).then(() => true, () => false))) await manage.click();
         await panel.waitFor({ timeout: 10000 });
         await d.sleep(600);
         const heading = panel.getByRole('heading', { name: /looks after$/ });

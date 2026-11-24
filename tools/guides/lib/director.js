@@ -73,8 +73,10 @@ class Director {
     const r = this.frameRect || { x: 0, y: 0, ...VIEW };
     const top = r.y + (this.frameRect ? 120 : 150), bottom = r.y + r.height - (this.frameRect ? 40 : 170);
     let b = await loc.boundingBox();
-    if (!b || b.y < top || b.y + b.height > bottom) {
-      await loc.evaluate(el => el.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+    // Sideways too: a wide table can leave its last column off screen.
+    const offSide = b && (b.x < r.x || b.x + b.width > r.x + r.width);
+    if (!b || b.y < top || b.y + b.height > bottom || offSide) {
+      await loc.evaluate(el => el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' }));
       await sleep(900);
       b = await loc.boundingBox();
     }
@@ -106,6 +108,7 @@ class Director {
     await this.step();
     await this.ui(o => window.__guide.caption(o), opts);
     this.captionAt = Date.now();
+    console.log(`  [${this.name}] caption: ${opts.title}`);
   }
   async hideCaption() { await this.step(); this.captionAt = 0; await this.ui(() => window.__guide.hideCaption()); }
 

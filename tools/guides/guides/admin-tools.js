@@ -135,6 +135,7 @@ module.exports = {
         const row = page.locator('tbody tr').filter({ has: page.getByText('Member', { exact: true }) }).first();
         await row.waitFor({ timeout: 15000 });
         const viewAs = row.getByRole('button', { name: /^View as / });
+        await d.reveal(viewAs);
         await d.callout(viewAs, 'On every member\'s row', { where: 'below', alignRight: true });
         await d.caption({ chip: 'FOR ADMINS', title: 'See what a member sees', text: 'When someone says a button is missing, choose View as on their row in Members & Access. It is offered for members, not for other admins.' });
         await d.hold(2800);
@@ -144,6 +145,8 @@ module.exports = {
         // The portal reloads as them.
         await d.click(viewAs);
         const back = page.getByRole('button', { name: 'Back to my own account' });
+        // If the pointer press missed (the button sits in a wide table), press it directly.
+        if (!(await back.waitFor({ timeout: 4000 }).then(() => true, () => false))) await viewAs.click();
         await back.waitFor({ timeout: 20000 });
         await d.sleep(900);
         await d.callout(back.locator('..'), 'Always on screen', { where: 'below' });

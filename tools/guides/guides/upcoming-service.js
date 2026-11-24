@@ -162,7 +162,7 @@ module.exports = {
         await d.hold(4400);
         await d.clear();
 
-        const requested = page.getByRole('region', { name: 'Requested songs' });
+        const requested = page.getByRole('complementary', { name: 'Requested songs' });
         await show(requested, 'Songs people asked for', { where: 'above' });
         await d.caption({ chip: 'SUBMIT A SERVICE', title: 'Requested songs, one click away', text: 'Requests sit beside the service. Use puts one in the first empty song slot. Search for the other songs by title or number.' });
         await d.hold(2000);
