@@ -214,7 +214,7 @@ export default function ServiceRosterView({ canManage = true, tab = 'scheduled',
         </div>
       )}
       {active === 'scheduled' && <ServingSchedule focus={focus} />}
-      {active === 'preferences' && <PreferencesTab key={prefsKey} onPick={(name, personId) => setOpenId(personId)} />}
+      {active === 'preferences' && <PreferencesTab key={prefsKey} onPick={(name, personId) => setOpenId(personId)} onMarked={() => { if (members.length) loadMembers().catch(() => {}); }} />}
       {active === 'analysis' && <AnalysisTab who={who} setWho={setWho} />}
 
       {man && (

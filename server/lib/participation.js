@@ -215,6 +215,7 @@ function preferences(options = {}) {
       name: m.name,
       participates: m.participates,
       reason: m.reason,
+      membership: m.membership,
       preferences: said,
       said: Object.keys(said).length,
       updatedAt: updated.get(m.id) || null,
