@@ -75,10 +75,72 @@ function isGender(value) {
   return GENDERS.includes(String(value ?? '').toLowerCase());
 }
 
+// ─── Worship participants ─────────────────────────────────────────────────────
+// Who the worship jobs are rostered among. By default that is a man who is a
+// member of the congregation, which here means he has been baptized. Anybody
+// else is left off unless whoever keeps the serving schedule says otherwise
+// for that one person.
+//
+// Nothing is guessed: a man whose membership nobody has recorded is not a
+// participant yet, the same as one whose gender nobody has recorded. Leaving a
+// slot open is easy to notice and fix; rostering somebody who should not be is
+// not.
+//
+// membership:          'member' (baptized member) | 'not-member' | '' (not recorded)
+// worship_participant: 'yes' | 'no' | '' (follow the default)
+
+const MEMBERSHIPS = ['member', 'not-member', ''];
+const PARTICIPATION_OVERRIDES = ['yes', 'no', ''];
+
+function isMembership(value) {
+  return MEMBERSHIPS.includes(String(value ?? '').toLowerCase());
+}
+
+function isParticipationOverride(value) {
+  return PARTICIPATION_OVERRIDES.includes(String(value ?? '').toLowerCase());
+}
+
+const lower = v => String(v ?? '').trim().toLowerCase();
+
+// What the default alone says about a directory entry.
+function participatesByDefault(person) {
+  return lower(person?.gender) === 'male' && lower(person?.membership) === 'member';
+}
+
+// The answer: the keeper's word for this person when there is one, the
+// default otherwise.
+function isWorshipParticipant(person) {
+  const override = lower(person?.worship_participant);
+  if (override === 'yes') return true;
+  if (override === 'no') return false;
+  return participatesByDefault(person);
+}
+
+// Why, in a line the Service Roster can show beside the person.
+function participationReason(person) {
+  const override = lower(person?.worship_participant);
+  if (override === 'yes') return 'Rostered by the schedule keeper';
+  if (override === 'no')  return 'Left off by the schedule keeper';
+  const gender = lower(person?.gender);
+  const membership = lower(person?.membership);
+  if (gender === 'female') return 'Not rostered: the worship jobs go to men';
+  if (gender !== 'male') return 'Not rostered yet: gender not recorded';
+  if (membership === 'not-member') return 'Not rostered: not a baptized member';
+  if (membership !== 'member') return 'Not rostered yet: membership not recorded';
+  return 'Baptized member';
+}
+
 module.exports = {
   householdKey,
   GENDERS,
   isGender,
+  MEMBERSHIPS,
+  PARTICIPATION_OVERRIDES,
+  isMembership,
+  isParticipationOverride,
+  participatesByDefault,
+  isWorshipParticipant,
+  participationReason,
   sameHousehold,
   photoOf,
   WORSHIP_ROLES,

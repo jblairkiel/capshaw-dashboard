@@ -36,7 +36,10 @@ const photoVersion = file => (file ? file.slice(0, 12) : '');
 // filenames stay on the server; the page learns only whether there is one of
 // each kind, and which the face shown is.
 function personPayload(person) {
-  const { edited_fields, photo, own_photo, ...fields } = person;
+  // Membership and the roster override are the schedule keeper's to record
+  // (routes/serving.js), so they stay out of the household and directory
+  // screens.
+  const { edited_fields, photo, own_photo, membership, worship_participant, ...fields } = person;
   const face = photoOf(person);
   return {
     ...fields,

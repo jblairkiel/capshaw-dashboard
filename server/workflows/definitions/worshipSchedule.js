@@ -8,10 +8,16 @@
 const { generateSchedule, asPreview, SERVICES } = require('../scheduling');
 const notify = require('../../mail/notify');
 const serviceJobs = require('../../lib/serviceJobs');
+const { isWorshipParticipant } = require('../../lib/people');
 
 // Reads the directory and everyone's stated preferences, then builds a draft.
+// Only worship participants are drawn on (lib/people.js): by default the
+// baptized men, plus or minus anybody the schedule keeper has said otherwise
+// about.
 function buildDraft(db, { month, services, attempt }) {
-  const people = db.prepare('SELECT id, name FROM directory ORDER BY name ASC').all();
+  const people = db.prepare('SELECT id, name, gender, membership, worship_participant FROM directory ORDER BY name ASC').all()
+    .filter(isWorshipParticipant)
+    .map(({ id, name }) => ({ id, name }));
   const preferences = db.prepare('SELECT directory_id, role, level FROM worship_preferences').all();
   // Days people have blocked out. Read with the preferences so a draft built
   // today reflects the holiday somebody entered this morning.

@@ -359,8 +359,13 @@ export function PreferencesTab({ onPick }) {
   const rows = useMemo(() => {
     if (!data) return [];
     const q = query.trim().toLowerCase();
+    // A man the worship jobs are not rostered among (not recorded as a
+    // baptized member, or left off) is still listed, so the keeper can open
+    // him and record it; "Not rostered" shows only those.
+    const off = m => m.participates === false;
     return data.men.filter(m => (!q || m.name.toLowerCase().includes(q))
-      && (show === 'all' || (show === 'said' ? m.said > 0 : m.said === 0)));
+      && (show === 'all'
+        || (show === 'off' ? off(m) : !off(m) && (show === 'said' ? m.said > 0 : m.said === 0))));
   }, [data, query, show]);
 
   if (error) return <div className="card text-sm text-red-600">{error}</div>;
@@ -376,6 +381,13 @@ export function PreferencesTab({ onPick }) {
         <Tile value={s.said} label="Have said" />
         <Tile value={s.unsaid} label="Not said yet" />
       </div>
+
+      {s.notRostered > 0 && (
+        <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          {s.notRostered === 1 ? '1 man is' : `${s.notRostered} men are`} not rostered for the worship jobs. By default only
+          men recorded as baptized members are; open a man below to record his membership, or to roster him anyway.
+        </p>
+      )}
 
       <div className="card space-y-2">
         <div className="flex items-baseline justify-between gap-2 flex-wrap">
@@ -403,6 +415,7 @@ export function PreferencesTab({ onPick }) {
               <option value="all">Everyone</option>
               <option value="said">Have said</option>
               <option value="unsaid">Not said yet</option>
+              <option value="off">Not rostered</option>
             </select>
             <select value={weeks} onChange={e => setWeeks(Number(e.target.value))} aria-label="Weeks served over" className={control}>
               {[8, 13, 26, 52].map(n => <option key={n} value={n}>Served: last {n} weeks</option>)}
@@ -428,6 +441,7 @@ export function PreferencesTab({ onPick }) {
                   <tr key={m.personId} className="border-t border-gray-100 align-top">
                     <td className="py-1.5 pr-3 sticky left-0 bg-white">
                       <button type="button" onClick={() => onPick(m.name, m.personId)} className="text-church-navy hover:underline text-left whitespace-nowrap">{m.name}</button>
+                      {m.participates === false && <span className="block text-[11px] text-amber-800 whitespace-nowrap">{m.reason}</span>}
                       {m.notes && <span className="block text-[11px] text-gray-500 max-w-[14rem] truncate" title={m.notes}>&ldquo;{m.notes}&rdquo;</span>}
                     </td>
                     {data.roles.map(r => <td key={r} className="py-1.5 px-2"><Answer level={m.preferences[r]} served={m.served[r]} /></td>)}

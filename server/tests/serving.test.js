@@ -19,8 +19,10 @@ function buildApp(user = null) {
   return app;
 }
 
-function addPerson(name, gender = '') {
-  const { lastInsertRowid: id } = db.prepare('INSERT INTO directory (name, gender) VALUES (?, ?)').run(name, gender);
+// A man is a baptized member unless the test says otherwise, since only
+// those are rostered for the worship jobs by default.
+function addPerson(name, gender = '', membership = gender === 'male' ? 'member' : '') {
+  const { lastInsertRowid: id } = db.prepare('INSERT INTO directory (name, gender, membership) VALUES (?, ?, ?)').run(name, gender, membership);
   return db.prepare('SELECT * FROM directory WHERE id = ?').get(id);
 }
 

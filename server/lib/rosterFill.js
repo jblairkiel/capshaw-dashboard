@@ -1,7 +1,9 @@
 // Who could take a slot on the Serving Schedule, and filling a month's open
 // slots from that.
 //
-// A man is a candidate for a job when he has said he is glad to or willing to
+// Only worship participants are considered at all: by default a man who is a
+// baptized member (lib/people.js). A man is a candidate for a job when he has
+// said he is glad to or willing to
 // do it (My Household & Preferences, or recorded for him on the Service
 // Roster). Among candidates, the ones who can actually do it on the day come
 // first: not away, and not already serving at that same service. Then fewest
@@ -14,13 +16,18 @@
 
 const db = require('../db');
 const blackouts = require('./blackouts');
+const { isWorshipParticipant } = require('./people');
 
 const nameKey = s => String(s || '').trim().toLowerCase();
 const LEVEL_RANK = { preferred: 0, willing: 1, '': 2, unavailable: 3 };
 
-// Everything the ranking needs for one month, read once.
+// Everything the ranking needs for one month, read once. Only worship
+// participants are candidates (lib/people.js): by default the baptized men,
+// plus or minus anybody the schedule keeper has said otherwise about.
 function contextFor(month) {
-  const people = db.prepare("SELECT id, name, gender FROM directory WHERE trim(name) <> '' AND coalesce(gender, '') <> 'female'").all();
+  const people = db.prepare("SELECT id, name, gender, membership, worship_participant FROM directory WHERE trim(name) <> ''").all()
+    .filter(isWorshipParticipant)
+    .map(({ id, name, gender }) => ({ id, name, gender }));
   const prefs = new Map();
   for (const r of db.prepare('SELECT directory_id, role, level FROM worship_preferences').all()) {
     if (!prefs.has(r.directory_id)) prefs.set(r.directory_id, {});

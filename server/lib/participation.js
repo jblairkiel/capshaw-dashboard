@@ -14,7 +14,7 @@
 const db = require('../db');
 const { dateOf } = require('./blackouts');
 const { churchToday, addDays } = require('./recordKeeping');
-const { WORSHIP_ROLES } = require('./people');
+const { WORSHIP_ROLES, isWorshipParticipant, participationReason } = require('./people');
 const worship = require('./worship');
 
 const clean = s => String(s ?? '').trim().replace(/\s+/g, ' ');
@@ -44,9 +44,29 @@ function directoryByName() {
   return map;
 }
 
+// The men the worship jobs are rostered among: by default the baptized men,
+// plus or minus anybody the schedule keeper has said otherwise about
+// (lib/people.js).
 function men() {
-  return db.prepare("SELECT id, name FROM directory WHERE gender = 'male' AND trim(name) <> '' ORDER BY name").all()
-    .map(m => ({ id: m.id, name: clean(m.name) }));
+  return everyMan().filter(m => m.participates);
+}
+
+// Every man in the directory, and anybody the keeper has put on the roster,
+// each told whether he is a participant and why — so the Service Roster can
+// show the men still waiting on their membership to be recorded.
+function everyMan() {
+  return db.prepare(`
+    SELECT id, name, gender, membership, worship_participant FROM directory
+     WHERE trim(name) <> '' AND (gender = 'male' OR worship_participant = 'yes')
+     ORDER BY name
+  `).all().map(m => ({
+    id: m.id,
+    name: clean(m.name),
+    membership: m.membership || '',
+    override: m.worship_participant || '',
+    participates: isWorshipParticipant(m),
+    reason: participationReason(m),
+  }));
 }
 
 // Everybody the analysis can be about: the men in the directory and anybody
@@ -185,12 +205,16 @@ function preferences(options = {}) {
   );
   const served = new Map(analysis(options).people.map(p => [p.key, p]));
 
-  const rows = men().map(m => {
+  // Every man is listed, so the keeper can open one whose membership still
+  // needs recording; only the participants count toward coverage.
+  const everyone = everyMan().map(m => {
     const said = prefs.get(m.id) || {};
     const p = served.get(keyOf(m.name));
     return {
       personId: m.id,
       name: m.name,
+      participates: m.participates,
+      reason: m.reason,
       preferences: said,
       said: Object.keys(said).length,
       updatedAt: updated.get(m.id) || null,
@@ -199,6 +223,8 @@ function preferences(options = {}) {
       servedTotal: p?.served || 0,
     };
   });
+
+  const rows = everyone.filter(r => r.participates);
 
   const coverage = WORSHIP_ROLES.map(role => {
     const levels = rows.map(r => r.preferences[role]);
@@ -214,12 +240,15 @@ function preferences(options = {}) {
   return {
     ...win,
     roles: WORSHIP_ROLES,
-    men: rows,
+    men: everyone,
     coverage,
     summary: {
       men: rows.length,
       said: rows.filter(r => r.said).length,
       unsaid: rows.filter(r => !r.said).length,
+      // Men in the directory who are not rostered: membership not recorded,
+      // not a member, or left off by the keeper.
+      notRostered: everyone.length - rows.length,
     },
   };
 }

@@ -9,16 +9,19 @@ import ServiceRosterView from '../components/ServiceRosterView';
 const MEMBERS = [
   {
     id: 1, name: 'Joe Carter', gender: 'male', email: 'joe@example.com', assignments: 3,
+    participation: { membership: 'member', override: '', participates: true, byDefault: true, reason: 'Baptized member' },
     preferences: { 'Song Leader': 'preferred', Usher: 'willing', Communion: 'unavailable' },
     notes: 'Away most of June',
     blackouts: [{ id: 5, directoryId: 1, startsOn: '2026-06-07', endsOn: '2026-06-21', reason: 'Away with family' }],
   },
   {
     id: 2, name: 'Ned Poole', gender: 'male', email: 'ned@example.com', assignments: 0,
+    participation: { membership: '', override: '', participates: false, byDefault: false, reason: 'Not rostered yet: membership not recorded' },
     preferences: {}, notes: '', blackouts: [],
   },
   {
     id: 3, name: 'Sam Lee', gender: '', email: '', assignments: 0,
+    participation: { membership: '', override: '', participates: false, byDefault: false, reason: 'Not rostered yet: gender not recorded' },
     preferences: {}, notes: '', blackouts: [],
   },
 ];
@@ -27,16 +30,21 @@ const PREFERENCES = {
   success: true, weeks: 26, roles: ['Song Leader', 'Usher', 'Communion'],
   men: MEMBERS.map(m => ({
     personId: m.id, name: m.name, preferences: m.preferences, said: Object.keys(m.preferences).length,
+    participates: m.participation.participates, reason: m.participation.reason,
     updatedAt: null, notes: m.notes, served: {}, servedTotal: 0,
   })),
   coverage: [],
-  summary: { men: 3, said: 1, unsaid: 2 },
+  summary: { men: 1, said: 1, unsaid: 0, notRostered: 2 },
 };
 
 function mockRoster() {
   const fetchMock = vi.fn((url, options = {}) => {
     let body = { success: true };
-    if (options.method === 'PUT') {
+    if (options.method === 'PUT' && String(url).endsWith('/participation')) {
+      const sent = JSON.parse(options.body);
+      const id   = Number(url.match(/members\/(\d+)/)[1]);
+      body = { success: true, member: { id, participation: { membership: '', override: '', participates: false, reason: '', ...sent } } };
+    } else if (options.method === 'PUT') {
       const sent = JSON.parse(options.body);
       const id   = Number(url.match(/members\/(\d+)/)[1]);
       const kept = Object.fromEntries(Object.entries(sent.preferences).filter(([, level]) => level));
@@ -64,6 +72,43 @@ describe('ServiceRosterView — opening a man from Preferences', () => {
     await screen.findByText('How each job is covered');
     expect(screen.queryByRole('tab', { name: 'Roster' })).not.toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Preferences' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  test('records that a man is a baptized member, so he is rostered', async () => {
+    const fetchMock = mockRoster();
+    await openMan('Ned Poole');
+
+    expect(screen.getByText(/Not rostered for the worship jobs/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Membership'), { target: { value: 'member' } });
+
+    await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith('/participation'))).toBe(true));
+    const [url, options] = fetchMock.mock.calls.find(([u]) => String(u).endsWith('/participation'));
+    expect(url).toBe('/api/serving/members/2/participation');
+    expect(options.method).toBe('PUT');
+    expect(JSON.parse(options.body)).toEqual({ membership: 'member' });
+  });
+
+  test('a man who is rostered says so, and can be left off', async () => {
+    const fetchMock = mockRoster();
+    await openMan('Joe Carter');
+
+    expect(screen.getByText(/Rostered for the worship jobs \(Baptized member\)/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Rostered'), { target: { value: 'no' } });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith('/participation'))).toBe(true));
+    const [, options] = fetchMock.mock.calls.find(([u]) => String(u).endsWith('/participation'));
+    expect(JSON.parse(options.body)).toEqual({ override: 'no' });
+  });
+
+  test('the Preferences tab says which men are not rostered yet, and can show only them', async () => {
+    mockRoster();
+    render(<ServiceRosterView tab="preferences" />);
+    expect(await screen.findByText(/2 men are not rostered for the worship jobs/)).toBeInTheDocument();
+    expect(screen.getAllByText('Not rostered yet: membership not recorded')).toHaveLength(1);
+
+    fireEvent.change(screen.getByLabelText('Show'), { target: { value: 'off' } });
+    expect(screen.queryByRole('button', { name: 'Joe Carter' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Ned Poole' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sam Lee' })).toBeInTheDocument();
   });
 
   test('records a preference for a man who has said nothing', async () => {

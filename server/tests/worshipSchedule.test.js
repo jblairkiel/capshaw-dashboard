@@ -8,8 +8,12 @@ function outbox() {
   return db.prepare('SELECT * FROM mail_outbox ORDER BY id').all();
 }
 
-function addPerson(name, email = '') {
-  const { lastInsertRowid: id } = db.prepare('INSERT INTO directory (name, email) VALUES (?, ?)').run(name, email);
+// Everybody here is a baptized man, the people the worship jobs go to by
+// default.
+function addPerson(name, email = '', { gender = 'male', membership = 'member', override = '' } = {}) {
+  const { lastInsertRowid: id } = db.prepare(
+    'INSERT INTO directory (name, email, gender, membership, worship_participant) VALUES (?, ?, ?, ?, ?)'
+  ).run(name, email, gender, membership, override);
   return id;
 }
 
@@ -112,6 +116,21 @@ describe('the draft', () => {
     expect(data.draft.rows.length).toBe(24);          // 4 Sundays × 6 jobs
     expect(data.draft.rows.every(r => VOLUNTEERS.some(([name]) => name === r.name))).toBe(true);
     expect(data.draft.unfilled).toEqual([]);
+  });
+
+  test('draws only on worship participants: baptized men, unless the keeper says otherwise', () => {
+    const willing = id => { for (const role of WORSHIP_JOBS) setPreference(id, role, 'willing'); };
+    willing(addPerson('Lee Unrecorded', '', { membership: '' }));
+    willing(addPerson('Max Visitor', '', { membership: 'not-member' }));
+    willing(addPerson('Ann Member', '', { gender: 'female' }));
+    willing(addPerson('Ike Leftoff', '', { override: 'no' }));
+    willing(addPerson('Gus Rostered', '', { membership: '', override: 'yes' }));
+
+    const { id } = engine.start({ definitionId: 'worship-schedule', data: JUNE, user: COORDINATOR });
+    const names = new Set(JSON.parse(db.prepare('SELECT data FROM workflow_instances WHERE id=?').get(id).data).draft.rows.map(r => r.name));
+
+    for (const name of ['Lee Unrecorded', 'Max Visitor', 'Ann Member', 'Ike Leftoff']) expect(names.has(name)).toBe(false);
+    expect(names.has('Gus Rostered')).toBe(true);
   });
 
   test('refuses a month it cannot read, leaving nothing behind', () => {

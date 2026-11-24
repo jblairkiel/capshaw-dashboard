@@ -922,6 +922,15 @@ function initSchema(db) {
   // name. '' means nobody has said.
   addColumn('directory', 'gender', "TEXT NOT NULL DEFAULT ''");
 
+  // Who the worship jobs are rostered among (lib/people.js): by default a man
+  // who is a baptized member. `membership` is 'member', 'not-member' or ''
+  // (nobody has said); `worship_participant` is the schedule keeper's word for
+  // one person, 'yes' or 'no', or '' to follow the default. Neither comes from
+  // the church website, so a re-scrape never touches them, and both start
+  // blank: nobody is assumed baptized.
+  addColumn('directory', 'membership', "TEXT NOT NULL DEFAULT ''");
+  addColumn('directory', 'worship_participant', "TEXT NOT NULL DEFAULT ''");
+
   // What the church site's own tracker records about a guest, kept apart from
   // `notes`, which is ours: a re-scrape replaces this and never touches that.
   addColumn('visitors', 'comments', "TEXT NOT NULL DEFAULT ''");
