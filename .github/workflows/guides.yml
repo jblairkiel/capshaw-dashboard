@@ -16,15 +16,35 @@ on:
     inputs:
       guides:
         description: Guides to record, separated by spaces
-        default: create-account approve-member
+        default: create-account approve-member my-week serving household upcoming-service signups calendar groups rotations inbox bible-class site-jobs admin-tools
 
 permissions:
   contents: read
 
+env:
+  ALL_GUIDES: create-account approve-member my-week serving household upcoming-service signups calendar groups rotations inbox bible-class site-jobs admin-tools
+
 jobs:
+  # One recording job per guide, side by side.
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      guides: ${{ steps.list.outputs.guides }}
+    steps:
+      - id: list
+        env:
+          GUIDES: ${{ inputs.guides || env.ALL_GUIDES }}
+        run: echo "guides=$(printf '%s\n' $GUIDES | jq -R . | jq -sc .)" >> "$GITHUB_OUTPUT"
+
   record:
+    needs: plan
+    name: record ${{ matrix.guide }}
+    strategy:
+      fail-fast: false
+      matrix:
+        guide: ${{ fromJSON(needs.plan.outputs.guides) }}
     runs-on: ubuntu-24.04   # the pinned Playwright has no Chromium for 26.04
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -52,22 +72,13 @@ jobs:
           pip install -r requirements.txt
 
       - name: Record
-        env:
-          GUIDES: ${{ inputs.guides || 'create-account approve-member' }}
-        run: |
-          status=0
-          for guide in $GUIDES; do
-            echo "::group::$guide"
-            node tools/guides/run.js "$guide" || status=1
-            echo "::endgroup::"
-          done
-          exit $status
+        run: node tools/guides/run.js "${{ matrix.guide }}"
 
       - name: Attach the videos
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: video-guides
+          name: video-${{ matrix.guide }}
           path: |
             tools/guides/output/
             tools/guides/work/*/failed-*.png

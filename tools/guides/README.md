@@ -13,7 +13,11 @@ Guides so far: `tour` (three minutes across the portal), `create-account`
 (signing up with Google or Facebook, and the waiting page),
 `create-account-email` (signing up with an email address and password, for
 when the portal's real email is on) and `approve-member` (for admins: approving someone and pairing
-them with the directory).
+them with the directory). One per feature of the member portal, each step on
+screen for at least 10 seconds: `my-week`, `serving`, `household`,
+`upcoming-service`, `signups`, `calendar`, `groups`, `rotations`, `inbox`,
+`bible-class`, `site-jobs` and `admin-tools`. `.github/workflows/guides.yml`
+records them all on GitHub, one job per guide.
 
 Nothing here touches the real database. The portal it starts can't scrape the
 church site or send email: `lib/servers.js` blanks those settings from `.env`.
