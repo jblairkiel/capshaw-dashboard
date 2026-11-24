@@ -122,7 +122,8 @@ const YAHOO = {
   authorizationURL: 'https://api.login.yahoo.com/oauth2/request_auth',
   tokenURL:         'https://api.login.yahoo.com/oauth2/get_token',
   userInfoURL:      'https://api.login.yahoo.com/openid/v1/userinfo',
-  issuer:           claims => typeof claims.iss === 'string' && claims.iss.startsWith('https://api.login.yahoo.com'),
+  // Exactly Yahoo's issuer, with or without a trailing slash.
+  issuer:           claims => claims.iss === 'https://api.login.yahoo.com' || claims.iss === 'https://api.login.yahoo.com/',
 };
 
 // Mailboxes Yahoo runs itself. A Yahoo account whose address is one of these

@@ -166,6 +166,11 @@ describe('Yahoo', () => {
     expect(who).toMatchObject({ email: 'pat@aol.com', emailVerified: true });
   });
 
+  test('a token from a look-alike issuer is refused', () => {
+    const token = yahooToken({ iss: 'https://api.login.yahoo.com.evil.example' });
+    expect(() => oidc.yahooIdentity({ params: { id_token: token }, clientId: 'yid' })).toThrow(/issuer/);
+  });
+
   test('any other address needs Yahoo to say it is confirmed', () => {
     const silent = oidc.yahooIdentity({ params: { id_token: yahooToken({ email: 'pat@gmail.com' }) }, clientId: 'yid' });
     const denied = oidc.yahooIdentity({ params: { id_token: yahooToken({ email: 'pat@yahoo.com', email_verified: false }) }, clientId: 'yid' });
