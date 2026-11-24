@@ -31,8 +31,9 @@ module.exports = {
     {
       name: 'approve',
       device: 'desktop',
-      start: '/',
-      ready: ({ page }) => page.getByText('Order of Worship').first(),
+      start: '/?page=my-week',
+      // The Admin menu, which the first step opens.
+      ready: ({ page }) => page.locator('button').filter({ has: page.locator('span', { hasText: /^Admin$/ }) }).first(),
       async run({ d, page, facts }) {
         await d.caption({ chip: 'FOR ADMINS', title: 'Someone new has signed up', text: 'When somebody signs up, the admins are emailed. Their account waits until one of you approves it.' });
         await d.hold(3600);
