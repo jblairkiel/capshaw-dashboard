@@ -121,9 +121,9 @@ describe('the Service Roster', () => {
     prefer(bo, 'Song Leader', 'preferred');
 
     const p = participation.preferences({ weeks: 4, today: '2026-06-30' });
-    expect(p.men.map(m => [m.name, m.participates, m.reason])).toEqual([
-      ['Al Baptized', true, 'Baptized member'],
-      ['Bo Unrecorded', false, 'Not rostered yet: membership not recorded'],
+    expect(p.men.map(m => [m.name, m.participates, m.reason, m.membership])).toEqual([
+      ['Al Baptized', true, 'Baptized member', 'member'],
+      ['Bo Unrecorded', false, 'Not rostered yet: membership not recorded', ''],
     ]);
     expect(p.summary).toEqual({ men: 1, said: 1, unsaid: 0, notRostered: 1 });
     expect(p.coverage.find(c => c.role === 'Song Leader')).toMatchObject({ glad: 1, unsaid: 0 });
@@ -156,6 +156,37 @@ describe('the Service Roster', () => {
       .toMatchObject({ override: 'no', participates: false, byDefault: true });
     expect((await request(app).put(`/api/serving/members/${al.id}/participation`).send({ override: '' })).body.member.participation)
       .toMatchObject({ override: '', participates: true });
+  });
+
+  test('the keeper ticks several men and marks them baptized members at once', async () => {
+    const bo = addPerson('Bo Unrecorded');
+    const cy = addPerson('Cy Visitor', { membership: 'not-member' });
+    const al = addPerson('Al Baptized', { membership: 'member' });
+    const res = await request(buildApp(KEEPER)).put('/api/serving/members/participation')
+      .send({ ids: [bo.id, cy.id, al.id, bo.id], membership: 'member' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.changed).toBe(2);
+    expect(res.body.members.map(m => [m.name, m.participation.participates])).toEqual([
+      ['Bo Unrecorded', true], ['Cy Visitor', true], ['Al Baptized', true],
+    ]);
+    expect(db.prepare("SELECT COUNT(*) n FROM directory WHERE membership = 'member'").get().n).toBe(3);
+    const log = db.prepare("SELECT summary FROM action_log WHERE entity = 'worship participation'").all();
+    expect(log).toEqual([{ summary: 'Recorded 2 people as a baptized member for the worship jobs: Bo Unrecorded, Cy Visitor' }]);
+  });
+
+  test('marking several at once leaves an override alone, and refuses what it cannot do', async () => {
+    const ed = addPerson('Ed Leftoff', { override: 'no' });
+    const app = buildApp(KEEPER);
+    const ok = await request(app).put('/api/serving/members/participation').send({ ids: [ed.id], membership: 'member' });
+    expect(ok.body.members[0].participation).toMatchObject({ membership: 'member', override: 'no', participates: false });
+
+    expect((await request(app).put('/api/serving/members/participation').send({ ids: [], membership: 'member' })).status).toBe(400);
+    expect((await request(app).put('/api/serving/members/participation').send({ ids: [ed.id] })).status).toBe(400);
+    expect((await request(app).put('/api/serving/members/participation').send({ ids: [ed.id], membership: 'baptized' })).status).toBe(400);
+    expect((await request(app).put('/api/serving/members/participation').send({ ids: [ed.id, 99999], membership: '' })).status).toBe(404);
+    expect(db.prepare('SELECT membership FROM directory WHERE id = ?').get(ed.id).membership).toBe('member');
+    expect((await request(buildApp(MEMBER)).put('/api/serving/members/participation').send({ ids: [ed.id], membership: '' })).status).toBe(403);
   });
 
   test('refuses a value it does not know, and anybody who does not keep the schedule', async () => {

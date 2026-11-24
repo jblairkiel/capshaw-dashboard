@@ -857,6 +857,49 @@ router.get('/members', requireApproved, manageOnly, (req, res) => {
 // schedule keeper's to decide and nobody else's to see.
 
 const MEMBERSHIP_WORDS = { member: 'a baptized member', 'not-member': 'not a member', '': 'membership not recorded' };
+
+// ─── PUT /api/serving/members/participation  { ids, membership } ─────────────
+// The same record for several people at once, for the keeper working down the
+// list of men whose membership nobody has recorded yet. Only the membership:
+// "always" or "never" is a decision about one person, so it stays on the
+// one-person form below. One entry in the action history names everybody.
+
+router.put('/members/participation', requireApproved, manageOnly, (req, res) => {
+  const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter(Number.isInteger))];
+  if (!ids.length) return res.status(400).json({ success: false, error: 'Choose at least one person' });
+  if (ids.length > 500) return res.status(400).json({ success: false, error: 'Choose 500 people or fewer at a time' });
+
+  const membership = String(req.body?.membership ?? '').trim().toLowerCase();
+  if (req.body?.membership === undefined || !isMembership(membership)) {
+    return res.status(400).json({ success: false, error: `Membership must be one of: ${MEMBERSHIPS.filter(Boolean).join(', ')}, or blank` });
+  }
+
+  const read = db.prepare('SELECT id, name, gender, membership, worship_participant FROM directory WHERE id = ?');
+  const people = ids.map(id => read.get(id));
+  if (people.some(p => !p)) return res.status(404).json({ success: false, error: 'Somebody chosen is no longer in the directory' });
+
+  const changed = people.filter(p => (p.membership || '') !== membership);
+  const set = db.prepare('UPDATE directory SET membership = ? WHERE id = ?');
+  db.transaction(() => { for (const p of changed) set.run(membership, p.id); })();
+
+  if (changed.length) {
+    const names = changed.map(p => p.name);
+    actionLog.record(req.user, {
+      area:     AREA,
+      action:   'update',
+      entity:   'worship participation',
+      summary:  `Recorded ${names.length === 1 ? names[0] : `${names.length} people`} as ${MEMBERSHIP_WORDS[membership]} for the worship jobs`
+              + (names.length > 1 ? `: ${names.join(', ')}` : ''),
+      details:  { membership, ids: changed.map(p => p.id) },
+    });
+  }
+
+  res.json({
+    success: true,
+    changed: changed.length,
+    members: people.map(p => ({ id: p.id, name: p.name, participation: participationOf({ ...p, membership }) })),
+  });
+});
 const OVERRIDE_WORDS   = { yes: 'always rostered', no: 'never rostered', '': 'following the default' };
 
 router.put('/members/:id/participation', requireApproved, manageOnly, (req, res) => {
