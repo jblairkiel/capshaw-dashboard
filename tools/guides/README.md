@@ -36,6 +36,7 @@ No system ffmpeg is needed, because `imageio-ffmpeg` brings its own.
 node tools/guides/run.js tour                        # the whole guide
 node tools/guides/run.js tour --only=phone           # just one segment: a clip, no cards
 node tools/guides/run.js tour --pace=0.7             # shorter reading pauses
+node tools/guides/run.js tour --step=10              # each caption stays up at least 10s
 ```
 
 Each run also writes contact sheets to `output/<guide>-review/`: sixteen
@@ -54,6 +55,7 @@ A guide is one file in `guides/`. `guides/tour.js` is the example to copy:
 module.exports = {
   duration: 180,     // exact length in seconds, or leave it out for the natural length
   pace: 0.85,        // scales the reading pauses
+  stepSeconds: 10,   // optional: least time each caption stays on screen
   cards: { title: { heading, sub, note }, end: { heading, items: [...] } },
   async prepare({ request, work, facts, python }) { /* uploads etc., signed in */ },
   segments: [
@@ -80,6 +82,7 @@ Inside `run`, `d` (see `lib/director.js`) does the work:
 | `d.callout(locator \| [first, last], label)` | a gold box around the element(s), with a label |
 | `d.clear()` | removes the callouts |
 | `d.hold(ms)` | a reading pause (scaled by `--pace`) |
+| `d.step()` | waits until the current caption has been up for `stepSeconds` (also done by `caption`, `clear` and `hideCaption`) |
 | `d.sleep(ms)` | a pause that isn't scaled, for waiting on the app |
 | `d.nav('Church Office', 'Weekly Newsletter')` | picks a page from the desktop menu |
 | `d.menu('My Inbox')` | picks a page from the phone menu |

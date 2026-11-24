@@ -9,6 +9,8 @@
 module.exports = {
   description: 'For admins: approving a new member and pairing them with the directory',
   pace: 0.9,
+  // Every caption stays up for at least this long, so it can be read.
+  stepSeconds: 10,
 
   cards: {
     title: {
@@ -37,6 +39,7 @@ module.exports = {
       async run({ d, page, facts }) {
         await d.caption({ chip: 'FOR ADMINS', title: 'Someone new has signed up', text: 'When somebody signs up, the admins are emailed. Their account waits until one of you approves it.' });
         await d.hold(3600);
+        await d.step();
 
         d.mark('members-access');
         await d.nav('Admin', 'Members & Access');
@@ -53,6 +56,7 @@ module.exports = {
         d.mark('approve');
         const row = page.locator('tr', { hasText: facts.pending });
         await d.callout(row, 'Waiting to be approved', { where: 'below' });
+        await d.caption({ chip: 'MEMBERS & ACCESS', title: 'Find them in the list', text: 'Only the people waiting are listed now. Press Approve on their row to start.' });
         await d.hold(2200);
         await d.clear();
         const approve = row.getByRole('button', { name: 'Approve', exact: true });

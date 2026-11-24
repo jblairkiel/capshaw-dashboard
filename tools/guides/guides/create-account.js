@@ -15,6 +15,8 @@
 module.exports = {
   description: 'Creating an account with Google or Facebook, and the waiting page',
   pace: 0.9,
+  // Every caption stays up for at least this long, so it can be read.
+  stepSeconds: 10,
 
   cards: {
     title: {
@@ -44,6 +46,7 @@ module.exports = {
       async run({ d, page }) {
         await d.caption({ chip: 'CREATE YOUR ACCOUNT', title: 'Members only', text: 'Go to members.capshaw.org. The portal is just for our church family: sign in once, and the church office approves you.' });
         await d.hold(3400);
+        await d.step();
 
         const google = page.getByRole('link', { name: 'Sign in with Google' });
         const facebook = page.getByRole('link', { name: 'Sign in with Facebook' });
@@ -82,6 +85,7 @@ module.exports = {
         await d.clear();
         await d.caption({ chip: 'WAITING FOR APPROVAL', title: 'The admins already know', text: 'They are told automatically, and you get an email the moment one of them approves you.' });
         await d.hold(3600);
+        await d.step();
 
         const admins = page.getByRole('list', { name: 'Admins you can contact' });
         if (await admins.isVisible().catch(() => false)) {
@@ -91,6 +95,7 @@ module.exports = {
           await d.clear();
         }
 
+        await d.step();
         await d.click(page.getByRole('button', { name: 'Check again' }));
         await page.getByText('Not yet — still waiting.').waitFor({ timeout: 10000 }).catch(() => {});
         await d.caption({ chip: 'WAITING FOR APPROVAL', title: 'Check again any time', text: 'Once you\'re approved, sign in again or tap Check again, and the whole portal opens.' });

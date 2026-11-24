@@ -37,8 +37,17 @@ class Capture {
 }
 
 class Director {
-  constructor(page, { name, pace = 1, phone = null }) {
-    Object.assign(this, { page, name, pace, phone, marks: [], frameRect: null });
+  constructor(page, { name, pace = 1, phone = null, stepMs = 0 }) {
+    Object.assign(this, { page, name, pace, phone, stepMs, marks: [], frameRect: null, captionAt: 0 });
+  }
+
+  // Each caption is one step, kept on screen for at least `stepMs` (a guide's
+  // stepSeconds) so it can be read. Unscaled by --pace. Waited out before the
+  // next caption, before callouts are cleared, before the caption is hidden,
+  // and wherever a guide calls it before its next action.
+  async step() {
+    const left = this.captionAt + this.stepMs - Date.now();
+    if (this.captionAt && left > 0) await sleep(left);
   }
 
   mark(label) {
@@ -93,8 +102,12 @@ class Director {
 
   // { chip, title, text } — a lower-third on the desktop, or with `side: true`
   // the large panel beside the phone.
-  async caption(opts) { await this.ui(o => window.__guide.caption(o), opts); }
-  async hideCaption() { await this.ui(() => window.__guide.hideCaption()); }
+  async caption(opts) {
+    await this.step();
+    await this.ui(o => window.__guide.caption(o), opts);
+    this.captionAt = Date.now();
+  }
+  async hideCaption() { await this.step(); this.captionAt = 0; await this.ui(() => window.__guide.hideCaption()); }
 
   // A gold box around one element, or around everything from the first to the
   // last of several, with a label above or below it.
@@ -105,7 +118,7 @@ class Director {
     const w = Math.max(...boxes.map(b => b.x + b.width)) - x, h = Math.max(...boxes.map(b => b.y + b.height)) - y;
     await this.ui(o => window.__guide.callout(o), { x, y, w, h, label, ...opts });
   }
-  async clear() { await this.ui(() => window.__guide.clearCallouts()); await sleep(300); }
+  async clear() { await this.step(); await this.ui(() => window.__guide.clearCallouts()); await sleep(300); }
 
   // An image from the run's assets, dimmed in over the page.
   async showImage(file) { await this.ui(src => window.__guide.showImage(src), `/__asset/${file}`); }
@@ -171,7 +184,7 @@ class Director {
 
 // One recorded segment: a fresh browser context — signed in or not, desktop
 // or phone — with the guide layer on every page and every frame captured.
-async function openSegment(browser, { base, work, name, device = 'desktop', storageState, start = '/', pace = 1 }) {
+async function openSegment(browser, { base, work, name, device = 'desktop', storageState, start = '/', pace = 1, stepMs = 0 }) {
   const ctx = await browser.newContext({ viewport: null, storageState });
   await ctx.addInitScript({ content: `window.__guideMode=${JSON.stringify(device === 'phone' ? 'touch' : 'mouse')};\n${OVERLAY}` });
   await ctx.route(`${base}/__stage*`, r => r.fulfill({ contentType: 'text/html', body: STAGE }));
@@ -186,7 +199,7 @@ async function openSegment(browser, { base, work, name, device = 'desktop', stor
   await cap.start();
 
   const phone = device === 'phone' ? page.frameLocator('#phone') : null;
-  const d = new Director(page, { name, pace, phone });
+  const d = new Director(page, { name, pace, phone, stepMs });
   if (phone) {
     await page.goto(`${base}/__stage`);
     await d.openOnPhone(start);

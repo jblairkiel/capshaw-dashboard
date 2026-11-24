@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Records a guide end to end:
 //
-//   node tools/guides/run.js <guide> [--only=seg1,seg2] [--pace=0.85] [--no-video]
+//   node tools/guides/run.js <guide> [--only=seg1,seg2] [--pace=0.85] [--step=10] [--no-video]
 //
 // 1. a fresh throwaway database in tools/guides/work/<guide>/, filled with the
 //    app's own sample data plus portraits, accounts and a few documents
@@ -26,7 +26,7 @@ function die(message) { console.error(`\n${message}\n`); process.exit(1); }
 
 if (!guideName) {
   const guides = fs.readdirSync(path.join(HERE, 'guides')).filter(f => f.endsWith('.js')).map(f => f.replace(/\.js$/, ''));
-  die(`Which guide? node tools/guides/run.js <${guides.join('|')}> [--only=segment,…] [--pace=0.85] [--no-video]`);
+  die(`Which guide? node tools/guides/run.js <${guides.join('|')}> [--only=segment,…] [--pace=0.85] [--step=10] [--no-video]`);
 }
 const guideFile = path.join(HERE, 'guides', `${path.basename(guideName)}.js`);
 if (!fs.existsSync(guideFile)) die(`There is no guide called "${guideName}" in tools/guides/guides/.`);
@@ -46,6 +46,8 @@ const { renderCards } = require('./lib/cards');
 
 const only = typeof flag('only') === 'string' ? flag('only').split(',') : null;
 const pace = Number(flag('pace') ?? guide.pace ?? 1);
+// The least time each caption stays up, in seconds (--step=10 or a guide's stepSeconds).
+const stepMs = 1000 * Number(flag('step') ?? guide.stepSeconds ?? 0);
 const segments = guide.segments.filter(s => !only || only.includes(s.name));
 if (!segments.length) die(`No segments match --only=${only}. This guide has: ${guide.segments.map(s => s.name).join(', ')}`);
 
@@ -115,7 +117,7 @@ const python = async (script, scriptArgs = []) => run(PYTHON, [path.join(HERE, s
     for (const seg of segments) {
       step(`Recording ${seg.name} (${seg.device || 'desktop'})`);
       const s = await openSegment(browser, {
-        base: portal.base, work, name: seg.name, device: seg.device, pace, start: seg.start || '/',
+        base: portal.base, work, name: seg.name, device: seg.device, pace, stepMs, start: seg.start || '/',
         storageState: seg.signInAs ? otherStates[seg.signInAs] : seg.signedIn === false ? undefined : storageState,
       });
       try {
