@@ -174,12 +174,18 @@ module.exports = {
         const emptySongs = order.locator('input[aria-label^="Song for"]');
         const others = facts.songs.others;
         if (await emptySongs.count()) {
-          await d.click(emptySongs.first(), { ms: 550 });
-          await d.type(others[0], 70);
+          const songBox = emptySongs.first();
+          const before = await emptySongs.count();
+          await d.click(songBox, { ms: 550 });
+          // Typed into the box itself, in case the pointer press didn't focus it.
+          await songBox.pressSequentially(others[0], { delay: 70 });
           const pick = page.getByRole('option').filter({ hasText: others[0] }).first();
           await pick.waitFor({ timeout: 10000 });
           await d.click(pick, { ms: 450 });
           await d.sleep(400);
+          // The picker answers mouse-down; if the pointer press missed, send it directly.
+          if (await emptySongs.count() >= before) await pick.dispatchEvent('mousedown').catch(() => {});
+          await d.sleep(300);
         }
         // Every song part needs a song before the service can be submitted:
         // the rest are filled in quickly while the caption is up.
