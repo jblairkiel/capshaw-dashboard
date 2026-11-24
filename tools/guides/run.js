@@ -80,13 +80,30 @@ const python = async (script, scriptArgs = []) => run(PYTHON, [path.join(HERE, s
     // and the requests `prepare` makes.
     const session = await browser.newContext({ viewport: null, baseURL: portal.base, extraHTTPHeaders: { Origin: portal.base } });
     const page = await session.newPage();
-    await page.goto('/');
-    await page.fill('input[type=email]', facts.login.email);
-    await page.fill('input[type=password]', facts.login.password);
-    await page.click('button[type=submit]');
-    await page.locator('input[type=password]').waitFor({ state: 'detached', timeout: 15000 });
+    const signIn = async (p, login) => {
+      await p.goto('/');
+      await p.fill('input[type=email]', login.email);
+      await p.fill('input[type=password]', login.password);
+      await p.click('button[type=submit]');
+      await p.locator('input[type=password]').waitFor({ state: 'detached', timeout: 15000 });
+    };
+    await signIn(page, facts.login);
     const storageState = path.join(work, 'session.json');
     await session.storageState({ path: storageState });
+
+    // A segment with `signInAs: '<fact>'` starts signed in as that sample
+    // account instead (facts[<fact>] holds its email and password), so a
+    // scene can open on what somebody else sees without signing in on camera.
+    const otherStates = {};
+    for (const seg of segments.filter(s => s.signInAs && !otherStates[s.signInAs])) {
+      const login = facts[seg.signInAs];
+      if (!login?.email || !login?.password) throw new Error(`${seg.name}: facts.${seg.signInAs} has no email and password to sign in with`);
+      const other = await browser.newContext({ viewport: null, baseURL: portal.base, extraHTTPHeaders: { Origin: portal.base } });
+      await signIn(await other.newPage(), login);
+      otherStates[seg.signInAs] = path.join(work, `session-${seg.signInAs}.json`);
+      await other.storageState({ path: otherStates[seg.signInAs] });
+      await other.close();
+    }
     if (guide.prepare) {
       step('Preparing what the scenes show');
       await guide.prepare({ request: session.request, work, facts, base: portal.base, python });
@@ -99,7 +116,7 @@ const python = async (script, scriptArgs = []) => run(PYTHON, [path.join(HERE, s
       step(`Recording ${seg.name} (${seg.device || 'desktop'})`);
       const s = await openSegment(browser, {
         base: portal.base, work, name: seg.name, device: seg.device, pace, start: seg.start || '/',
-        storageState: seg.signedIn === false ? undefined : storageState,
+        storageState: seg.signInAs ? otherStates[seg.signInAs] : seg.signedIn === false ? undefined : storageState,
       });
       try {
         await seg.ready({ page: s.page, phone: s.phone }).waitFor({ timeout: 20000 });

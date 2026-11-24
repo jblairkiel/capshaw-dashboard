@@ -27,6 +27,11 @@ const { hashPassword } = require(`${REPO}/server/lib/passwords`);
 // Local only: this account exists in the run's throwaway database and nowhere
 // else, and the servers it signs in to listen on localhost.
 const LOGIN = { email: 'guide@example.com', password: 'Guide-Sample-Password-2026' };
+// A made-up newcomer who has registered and is waiting for approval.
+const WAITING = { email: 'sam.newcomer@example.com', password: 'Guide-Waiting-Password-2026', name: 'Sam Newcomer' };
+// What the sign-up scene types. Nobody has this address until the scene
+// registers it.
+const NEWCOMER = { email: 'taylor.newcomer@example.com', password: 'Sunday-Morning-Hymns-26', name: 'Taylor Newcomer' };
 
 const surname = name => name.trim().split(/\s+/).pop();
 
@@ -95,6 +100,15 @@ const surname = name => name.trim().split(/\s+/).pop();
   });
   const pendingName = members[members.length - 1].name;
 
+  // Somebody new who registered with an email address and password and has
+  // opened the confirmation link, but is not approved yet: what the
+  // "create your account" guide signs in as to show the waiting page. Not in
+  // the directory, because pairing them with an entry is the admin's job.
+  db.prepare(`
+    INSERT INTO users (provider, provider_id, email, name, role, password_hash, email_verified_at)
+    VALUES ('local', ?, ?, ?, 'pending', ?, datetime('now'))
+  `).run(WAITING.email, WAITING.email, WAITING.name, await hashPassword(WAITING.password));
+
   // ── The newsletter ────────────────────────────────────────────────────────
   //
   // The bulletin sample data carries real-looking names (issue #95). Until the
@@ -135,6 +149,8 @@ const surname = name => name.trim().split(/\s+/).pop();
     guest: guest.name,
     volunteer: volunteer.name,
     pending: pendingName,
+    waiting: WAITING,
+    newcomer: NEWCOMER,
   };
   fs.writeFileSync(path.join(work, 'facts.json'), JSON.stringify(facts, null, 2));
   console.log(`  signed in as ${me.name}; featuring the ${family} family, guest ${guest.name}, meeting "${event.title}"`);

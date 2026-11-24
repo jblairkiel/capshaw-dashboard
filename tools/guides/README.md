@@ -9,6 +9,12 @@ a 1920×1080 MP4.
 node tools/guides/run.js tour          # → tools/guides/output/tour.mp4
 ```
 
+Guides so far: `tour` (three minutes across the portal), `create-account`
+(signing up with Google or Facebook, and the waiting page),
+`create-account-email` (signing up with an email address and password, for
+when the portal's real email is on) and `approve-member` (for admins: approving someone and pairing
+them with the directory).
+
 Nothing here touches the real database. The portal it starts can't scrape the
 church site or send email: `lib/servers.js` blanks those settings from `.env`.
 Everything a run writes goes in `tools/guides/work/<guide>/` and
@@ -56,6 +62,7 @@ module.exports = {
       device: 'desktop',            // or 'phone'
       signedIn: false,              // default true
       start: '/',                   // where the browser opens; ?page=<tab> works
+      // signInAs: 'waiting',     // start signed in as facts.waiting instead
       ready: ({ page }) => page.locator('input[type=email]'),
       async run({ d, page, phone, facts }) { ... },
     },
@@ -93,7 +100,9 @@ So scenes must never type a name or a date directly. Two ways around it:
   `work/<guide>/facts.json`: the account to sign in as (a group leader, with
   an upcoming meeting), a family to search for, a guest with a follow-up
   history, a member still waiting for approval, and the email that went out
-  about the meeting. If a new guide needs something else, add it there.
+  about the meeting. Two made-up newcomers too: `waiting`, who has
+  registered and is waiting for approval, and `newcomer`, whom the sign-up
+  scene types into the form. If a new guide needs something else, add it there.
 - **Position**: "the second service in the list"
   (`page.locator('main div.card.py-3 > button').nth(1)`), "the first open
   slot" (`tr` containing "Nobody yet"), and so on.
