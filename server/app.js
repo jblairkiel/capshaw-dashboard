@@ -162,7 +162,10 @@ function createApp() {
   // limitPending follows it, so it judges whoever the request is answered as:
   // an account still waiting for approval reaches only the sign-in routes and
   // the page that tells it who to contact.
-  app.use('/api', apiRateLimit, requireTrustedOrigin(allowedOrigins), requireSiteAuth, applyImpersonation, limitPending);
+  // Apple posts its sign-in answer from its own site (routes/auth.js), so that
+  // one origin may reach that one path.
+  const originExceptions = { '/auth/apple/callback': ['https://appleid.apple.com'] };
+  app.use('/api', apiRateLimit, requireTrustedOrigin(allowedOrigins, { exceptions: originExceptions }), requireSiteAuth, applyImpersonation, limitPending);
   // Who used the portal today, for the weekly reports (lib/portalUsage.js).
   app.use('/api', noteVisits);
   app.use('/api/usage', usageRoutes);

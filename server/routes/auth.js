@@ -18,6 +18,7 @@ const { rateLimit } = require('../middleware/rateLimit');
 const accountMail = require('../mail/accounts');
 const notices = require('../mail/notices');
 const displayPrefs = require('../lib/displayPrefs');
+const oidcProviders = require('../lib/oidcProviders');
 
 const isProd     = process.env.NODE_ENV === 'production';
 const CLIENT_URL = isProd ? 'https://capshaw.jblairkiel.com' : 'http://localhost:5173';
@@ -165,6 +166,12 @@ function requestLink(account, provider, profileId, { email, photo, isAdmin }) {
 // addresses). Such an address is never used to find an existing account, since
 // anybody could have typed it.
 function upsertUser(provider, profileId, email, name, photo, { emailVerified = true } = {}) {
+  // An address the provider will not vouch for belongs to nobody as far as
+  // this portal is concerned: it is not kept, matched to the directory or to
+  // an account, or allowed to make anybody the owner. The account is asked to
+  // add and confirm an address of its own instead, like a Facebook account
+  // that came without one.
+  if (!emailVerified) email = null;
   const adminEmail = process.env.ADMIN_EMAIL?.toLowerCase();
   const isAdmin = email && adminEmail && email.toLowerCase() === adminEmail;
 
@@ -182,14 +189,15 @@ function upsertUser(provider, profileId, email, name, photo, { emailVerified = t
       return refuse(identity.status === 'declined' ? 'link_declined' : 'link_pending');
     }
 
-    const sameAddress = email && emailVerified && anyAccountFor(normalizeEmail(email));
+    const sameAddress = email && anyAccountFor(normalizeEmail(email));
     if (sameAddress) return requestLink(sameAddress, provider, profileId, { email, photo, isAdmin });
   }
 
   if (existing) {
+    // Apple sends a name only the first time, so no name keeps the one on file.
     db.prepare(
       'UPDATE users SET email=?, name=?, photo=?, last_login=datetime(\'now\') WHERE id=?'
-    ).run(email || existing.email, name, photo || existing.photo, existing.id);
+    ).run(email || existing.email, name || existing.name, photo || existing.photo, existing.id);
     // Promote to admin if matched and not already
     if (isAdmin && existing.role !== 'admin') {
       db.prepare('UPDATE users SET role=\'admin\' WHERE id=?').run(existing.id);
@@ -206,7 +214,7 @@ function upsertUser(provider, profileId, email, name, photo, { emailVerified = t
   const role = isAdmin ? 'admin' : 'pending';
   const { lastInsertRowid: id } = db.prepare(
     'INSERT INTO users (provider, provider_id, email, name, photo, role, directory_id, last_login) VALUES (?,?,?,?,?,?,?,datetime(\'now\'))'
-  ).run(provider, profileId, email || null, name, photo || null, role, findPersonByEmail(email));
+  ).run(provider, profileId, email || null, name || 'New member', photo || null, role, findPersonByEmail(email));
   const created = db.prepare('SELECT * FROM users WHERE id=?').get(id);
   // Google or Facebook has already vouched for the address, so there is
   // something for an admin to decide straight away.
@@ -221,6 +229,8 @@ function upsertUser(provider, profileId, email, name, photo, { emailVerified = t
 const PROVIDERS = [
   process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && 'google',
   process.env.FACEBOOK_APP_ID && process.env.FACEBOOK_APP_SECRET && 'facebook',
+  // Yahoo, Microsoft and Apple (lib/oidcProviders.js) are added below, once
+  // their strategies have been built.
 ].filter(Boolean);
 
 // Google says whether the address on a profile has been confirmed; Facebook
@@ -279,6 +289,36 @@ if (PROVIDERS.includes('facebook')) {
       }
     }
   ));
+}
+
+// ─── Yahoo, Microsoft and Apple ───────────────────────────────────────────────────────
+//
+// Built in lib/oidcProviders.js, each only when all of its credentials are
+// set. They land in the same upsertUser as Google and Facebook, so an account
+// is found, joined or held for an admin in exactly the same way.
+
+for (const provider of oidcProviders.configured()) {
+  let identify;
+  const built = oidcProviders.build(provider, {
+    serverUrl: SERVER_URL,
+    secure: isProd,
+    verify: (req, accessToken, refreshToken, params, profile, done) => {
+      try {
+        const who  = identify({ params, profile, req });
+        const user = upsertUser(provider, who.id, who.email, who.name, who.photo, {
+          emailVerified: who.emailVerified,
+        });
+        if (user.refusal) return done(null, false, { code: user.refusal, message: user.message });
+        done(null, user);
+      } catch (err) {
+        done(err);
+      }
+    },
+  });
+  if (!built) continue;
+  identify = built.identify;
+  passport.use(built.strategy);
+  PROVIDERS.push(provider);
 }
 
 // ─── Email + password accounts ────────────────────────────────────────────────
@@ -791,57 +831,71 @@ function authErrorFor(provider, info) {
 const ifConfigured = provider => (req, res, next) =>
   PROVIDERS.includes(provider) ? next() : res.redirect(`${CLIENT_URL}/?auth_error=${provider}`);
 
-router.get('/google', ifConfigured('google'),
-  passport.authenticate('google', { scope: ['profile', 'email'] })
-);
+const PROVIDER_LABEL_FOR_LOG = {
+  google: 'Google', facebook: 'Facebook', yahoo: 'Yahoo', microsoft: 'Microsoft', apple: 'Apple',
+};
 
-router.get('/google/callback', ifConfigured('google'), (req, res, next) => {
-  passport.authenticate('google', (err, user, info) => {
+// What every provider's callback does with the outcome of its exchange: sign
+// in, or go back to the sign-in page saying why not.
+const finishSignIn = provider => (req, res, next) => {
+  const label = PROVIDER_LABEL_FOR_LOG[provider];
+  passport.authenticate(provider, (err, user, info) => {
     if (err) {
-      console.error('[auth] Google error:', err.message);
-      return res.redirect(`${CLIENT_URL}/?auth_error=google`);
+      console.error(`[auth] ${label} error:`, err.message);
+      return res.redirect(`${CLIENT_URL}/?auth_error=${provider}`);
     }
     if (!user) {
-      console.log('[auth] Google: no user —', info?.message ?? 'unknown reason');
-      return res.redirect(`${CLIENT_URL}/?auth_error=${authErrorFor('google', info)}`);
+      console.log(`[auth] ${label}: no user —`, info?.message ?? 'unknown reason');
+      return res.redirect(`${CLIENT_URL}/?auth_error=${authErrorFor(provider, info)}`);
     }
     req.logIn(user, loginErr => {
       if (loginErr) {
-        console.error('[auth] Google session error:', loginErr.message);
-        return res.redirect(`${CLIENT_URL}/?auth_error=google`);
+        console.error(`[auth] ${label} session error:`, loginErr.message);
+        return res.redirect(`${CLIENT_URL}/?auth_error=${provider}`);
       }
-      console.log('[auth] Google login OK — user', user.id, user.role);
+      console.log(`[auth] ${label} login OK — user`, user.id, user.role);
       res.redirect(CLIENT_URL);
     });
   })(req, res, next);
-});
+};
+
+router.get('/google', ifConfigured('google'),
+  passport.authenticate('google', { scope: ['profile', 'email'] })
+);
+router.get('/google/callback', ifConfigured('google'), finishSignIn('google'));
 
 // `rerequest` asks again for the email permission if somebody declined it last
 // time; without an address their account cannot be matched to the directory.
 router.get('/facebook', ifConfigured('facebook'),
   passport.authenticate('facebook', { scope: ['email'], authType: 'rerequest' })
 );
+router.get('/facebook/callback', ifConfigured('facebook'), finishSignIn('facebook'));
 
-router.get('/facebook/callback', ifConfigured('facebook'), (req, res, next) => {
-  passport.authenticate('facebook', (err, user, info) => {
-    if (err) {
-      console.error('[auth] Facebook error:', err.message);
-      return res.redirect(`${CLIENT_URL}/?auth_error=facebook`);
-    }
-    if (!user) {
-      console.log('[auth] Facebook: no user —', info?.message ?? 'unknown reason');
-      return res.redirect(`${CLIENT_URL}/?auth_error=${authErrorFor('facebook', info)}`);
-    }
-    req.logIn(user, loginErr => {
-      if (loginErr) {
-        console.error('[auth] Facebook session error:', loginErr.message);
-        return res.redirect(`${CLIENT_URL}/?auth_error=facebook`);
-      }
-      console.log('[auth] Facebook login OK — user', user.id, user.role);
-      res.redirect(CLIENT_URL);
-    });
-  })(req, res, next);
-});
+router.get('/yahoo', ifConfigured('yahoo'), passport.authenticate('yahoo'));
+router.get('/yahoo/callback', ifConfigured('yahoo'), finishSignIn('yahoo'));
+
+router.get('/microsoft', ifConfigured('microsoft'), passport.authenticate('microsoft'));
+router.get('/microsoft/callback', ifConfigured('microsoft'), finishSignIn('microsoft'));
+
+// Apple answers with a form POST from appleid.apple.com (app.js lets that one
+// origin through for this one path; the state cookie is what proves the
+// sign-in started here). Somebody who cancels on Apple's page is posted back
+// with an error and no code. passport-oauth2 only looks for an error in the
+// query string, and without a code it would send them straight back to Apple,
+// so that case is answered here.
+const appleForm = express.urlencoded({ extended: false, limit: '16kb' });
+
+router.get('/apple', ifConfigured('apple'), passport.authenticate('apple'));
+router.post('/apple/callback', ifConfigured('apple'), appleForm, (req, res, next) => {
+  if (req.body?.error === 'user_cancelled_authorize') return res.redirect(CLIENT_URL);
+  if (req.body?.error || !req.body?.code) {
+    console.log('[auth] Apple: no code —', req.body?.error || 'nothing posted');
+    return res.redirect(`${CLIENT_URL}/?auth_error=apple`);
+  }
+  next();
+}, finishSignIn('apple'));
+// A GET here is a bookmark or a stray link, never Apple itself.
+router.get('/apple/callback', (req, res) => res.redirect(`${CLIENT_URL}/?auth_error=apple`));
 
 router.get('/me', (req, res) => {
   if (!req.user) return res.status(401).json({ success: false });
@@ -1263,7 +1317,10 @@ router.patch('/users/:id/directory', requireAuth, requireAdmin, (req, res) => {
 // a decision for somebody other than the account holder: an admin can decline
 // a request on their own account, but never approve one.
 
-const PROVIDER_LABEL = { google: 'Google', facebook: 'Facebook', local: 'email and password' };
+const PROVIDER_LABEL = {
+  google: 'Google', facebook: 'Facebook', yahoo: 'Yahoo', microsoft: 'Microsoft', apple: 'Apple',
+  local: 'email and password',
+};
 
 function linkRequestRow(id) {
   return db.prepare(`

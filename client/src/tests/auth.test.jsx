@@ -37,6 +37,20 @@ describe('LoginPage', () => {
     expect(screen.getByText(/Signing in with Google is the safer choice: it checks/)).toBeInTheDocument();
   });
 
+  test('offers Yahoo, Microsoft and Apple too, in a fixed order, when they are set up', () => {
+    render(<LoginPage providers={['apple', 'google', 'microsoft', 'yahoo', 'facebook']} />);
+    const links = screen.getAllByRole('link', { name: /sign in with/i });
+    expect(links.map(a => a.getAttribute('href'))).toEqual([
+      '/api/auth/google', '/api/auth/facebook', '/api/auth/yahoo', '/api/auth/microsoft', '/api/auth/apple',
+    ]);
+    expect(screen.getByText(/Signing in with Google, Facebook, Yahoo, Microsoft or Apple is the safer choice: they check/)).toBeInTheDocument();
+  });
+
+  test('ignores a provider it has no button for', () => {
+    render(<LoginPage providers={['google', 'myspace']} />);
+    expect(screen.getAllByRole('link', { name: /sign in with/i })).toHaveLength(1);
+  });
+
   test('with no provider set up, offers just the email and password form', () => {
     render(<LoginPage providers={[]} />);
     expect(screen.queryByRole('link', { name: /sign in with/i })).not.toBeInTheDocument();

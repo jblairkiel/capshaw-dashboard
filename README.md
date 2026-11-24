@@ -86,15 +86,128 @@ Sessions are kept in the database (the `sessions` table, through
 deploy leaves everybody signed in. Signing out deletes the row; an expired
 row is never read and is swept out hourly.
 
-There are three ways in: Google, Facebook, and an email address with a
-password. The first two are unchanged. The third is described below.
+The ways in are Google, Facebook, Yahoo, Microsoft, Apple, and an email
+address with a password. Yahoo, Microsoft and Apple are set up as described
+in [Yahoo, Microsoft and Apple](#yahoo-microsoft-and-apple) below; the
+password way in is described after that.
 
-The sign-in page shows the Google and Facebook buttons first, as the
-recommended way in, but only for a provider whose credentials are set
-(`GET /api/auth/providers` lists them). With neither configured, the page
+The sign-in page shows the provider buttons first, as the recommended way in,
+in that order, but only for a provider whose credentials are set
+(`GET /api/auth/providers` lists them). With none configured, the page
 offers just the email and password form, and an old link to
-`/api/auth/google` or `/api/auth/facebook` goes back to the sign-in page with
-that provider's error.
+`/api/auth/<provider>` goes back to the sign-in page with that provider's
+error.
+
+### Yahoo, Microsoft and Apple
+
+These three are OpenID Connect providers, built in `server/lib/oidcProviders.js`
+on `passport-oauth2` (already installed underneath the Google strategy), so
+there is no new package. Each one is only switched on when **every** one of its
+variables is set; until then its button does not appear and nothing else
+changes. They land in the same `upsertUser` as Google and Facebook, so a new
+account still waits for an admin, and a matching address is still only a
+request to join (see [One person, one account](#one-person-one-account)).
+
+- **Who signed in** is read from the `id_token` the provider's token endpoint
+  returns, after checking its issuer, audience and expiry.
+- **`state`** is kept in a ten-minute cookie of its own (`oauth_state_<provider>`,
+  path `/api/auth`) and checked on the way back, so a callback this site did not
+  start is refused.
+- **Yahoo** also signs in AOL accounts. Its address counts as confirmed when
+  Yahoo says so, or when it is a mailbox Yahoo runs (yahoo.*, ymail, rocketmail,
+  aol.*, aim.com). AT&T and BellSouth addresses are run on Yahoo's systems too,
+  but those people sign in through AT&T, not Yahoo, so they may not be able to
+  use this button; they can still use email and password.
+- **Microsoft** takes personal accounts (Outlook, Hotmail, MSN, Live) and work
+  or school ones. A personal account's address is trusted. A work or school
+  account's `email` is whatever that organization typed in, for any domain, so
+  it is **not** trusted unless Microsoft says the organization owns the domain
+  (the optional `xms_edov` claim, below). Otherwise the account arrives with no
+  address and is asked to add and confirm one on the waiting page, like a
+  Facebook account without one. This is what stops somebody with their own
+  Microsoft tenant from claiming another member's address, or `ADMIN_EMAIL`.
+- **Apple** answers with a form POST from `appleid.apple.com`, so
+  `/api/auth/apple/callback` is a POST, its state cookie is `SameSite=None`, and
+  `app.js` lets that one origin past the origin check for that one path. Apple
+  sends the person's name only on their **first** sign-in, so later sign-ins
+  keep the name on file. People can hide their address behind an
+  `@privaterelay.appleid.com` one: it will not match the directory, so pick their
+  entry by hand when approving, and mail reaches it only once the portal's
+  sending address is registered with Apple (step 5 below).
+
+An address any provider will not vouch for (Google can say so; Yahoo, Microsoft
+and Apple as above) is now dropped rather than kept: the account is asked to add
+one it can confirm, and such an address can no longer make anybody the owner.
+
+#### Setting them up
+
+Each provider needs a developer app with the portal's callback address on it.
+The callback addresses come from `SERVER_URL` in `server/routes/auth.js`, which
+is `https://capshaw.jblairkiel.com` today:
+
+| Provider  | Callback (redirect) URL |
+|---|---|
+| Yahoo     | `https://capshaw.jblairkiel.com/api/auth/yahoo/callback` |
+| Microsoft | `https://capshaw.jblairkiel.com/api/auth/microsoft/callback` |
+| Apple     | `https://capshaw.jblairkiel.com/api/auth/apple/callback` |
+
+**If the portal moves to `members.capshaw.org`**, change the address in
+`server/routes/auth.js`, `server/app.js`, `server/mail/accounts.js` and
+`server/mail/notify.js`, and add the `members.capshaw.org` callback URLs to every
+provider's app (Google and Facebook included). All three accept more than one,
+so add both while you switch over.
+
+Put the values in the droplet's `.env` (never in the repo), then restart the
+container. The button appears once all of a provider's variables are set.
+
+**Yahoo** (free)
+1. Sign in at the Yahoo Developer Network and create an app
+   (developer.yahoo.com → My Apps → Create an App).
+2. Type: web application. Redirect URI: the Yahoo callback above.
+3. Under **OpenID Connect Permissions**, tick **Email** and **Profile**.
+4. Copy the Client ID and Client Secret into `YAHOO_CLIENT_ID` and
+   `YAHOO_CLIENT_SECRET`.
+
+**Microsoft** (free)
+1. In the Microsoft Entra admin center (entra.microsoft.com) or the Azure
+   portal, open **App registrations → New registration**. Any Microsoft account
+   can do this.
+2. Supported account types: **Accounts in any organizational directory and
+   personal Microsoft accounts**. This is what lets Hotmail, Outlook and MSN in.
+3. Redirect URI: platform **Web**, the Microsoft callback above.
+4. **Certificates & secrets → New client secret.** Copy its **Value** (not its
+   ID) into `MICROSOFT_CLIENT_SECRET`, and the app's **Application (client) ID**
+   into `MICROSOFT_CLIENT_ID`. The secret expires (24 months at most), so put a
+   reminder on the calendar to make a new one.
+5. Optional, for work and school addresses: **Token configuration → Add
+   optional claim → ID → `xms_edov`**. Without it those accounts still sign in,
+   but are asked to add and confirm an address.
+6. Until the app's publisher is verified (which needs a Microsoft partner
+   account), Microsoft labels it "unverified" when people sign in, and some
+   organizations only allow apps from verified publishers, so a few work or
+   school accounts may be turned away. Personal accounts are not affected.
+
+**Apple** (needs a paid Apple Developer Program membership, $99 a year)
+1. In Certificates, Identifiers & Profiles → **Identifiers**, create an **App
+   ID** with **Sign in with Apple** enabled. Note the **Team ID** (top right of
+   the page) for `APPLE_TEAM_ID`.
+2. Create a **Services ID** (e.g. `org.capshaw.members`). This is
+   `APPLE_CLIENT_ID`. Enable Sign in with Apple on it, choose the App ID from
+   step 1 as primary, and add the domain `capshaw.jblairkiel.com` and the Apple
+   callback above as a **Return URL**.
+3. **Keys → new key** with Sign in with Apple enabled, for that App ID. Download
+   the `.p8` file (it can only be downloaded once) and note the **Key ID** for
+   `APPLE_KEY_ID`.
+4. Put the `.p8` file's contents in `APPLE_PRIVATE_KEY` on one line, with each
+   line break written as `\n`:
+   ```bash
+   awk 'NF {printf "%s\\n", $0}' AuthKey_XXXXXXXXXX.p8
+   ```
+   If the key will not parse, the server logs it and leaves only the Apple
+   button off.
+5. So mail reaches people who hide their address: **Services → Sign in with
+   Apple for Email Communication**, register the portal's sending address
+   (`MAIL_FROM`) or its domain. Apple checks that the domain has SPF set up.
 
 ### Registering with an email address and a password
 
@@ -2282,6 +2395,9 @@ pm2 restart capshaw-dashboard
 | `MAIL_FROM` | No | From address on outgoing mail |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | For Google sign-in | Google OAuth credentials. The Google button only appears when both are set |
 | `FACEBOOK_APP_ID` / `FACEBOOK_APP_SECRET` | For Facebook sign-in | Facebook OAuth credentials. The Facebook button only appears when both are set |
+| `YAHOO_CLIENT_ID` / `YAHOO_CLIENT_SECRET` | For Yahoo sign-in | Yahoo app credentials. The Yahoo button only appears when both are set |
+| `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` | For Microsoft sign-in | Microsoft app registration's client ID and secret value. The Microsoft button only appears when both are set |
+| `APPLE_CLIENT_ID` / `APPLE_TEAM_ID` / `APPLE_KEY_ID` / `APPLE_PRIVATE_KEY` | For Apple sign-in | Services ID, Team ID, key ID and the `.p8` key (line breaks as `\n`). The Apple button only appears when all four are set |
 | `YOUTUBE_CHANNEL` | No | Channel handle for the Livestreams tab (default `@CapshawChurch`) |
 | `YOUTUBE_CHANNEL_ID` | No | Skips the handle lookup by giving the `UC…` channel id outright |
 | `NODE_ENV` | Production only | Set to `production` to serve the React build |
