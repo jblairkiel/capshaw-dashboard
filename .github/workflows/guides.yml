@@ -1,0 +1,76 @@
+# Records the how-to video guides in tools/guides on GitHub's own machines,
+# so nobody needs to set up Playwright locally, and attaches the videos and
+# their contact sheets to the run as a download.
+#
+# Each run builds a throwaway copy of the portal from the app's sample data
+# (tools/guides/setup), so it uses no secrets and touches no real data, and
+# the portal it starts can neither scrape the church site nor send email
+# (tools/guides/lib/servers.js).
+name: Video guides
+
+on:
+  push:
+    branches: ['claude/how-to-videos**']
+    paths: ['tools/guides/**', '.github/workflows/guides.yml']
+  workflow_dispatch:
+    inputs:
+      guides:
+        description: Guides to record, separated by spaces
+        default: create-account approve-member
+
+permissions:
+  contents: read
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install the app
+        run: |
+          npm ci
+          (cd client && npm ci)
+
+      - name: Install the guide recorder
+        run: |
+          cd tools/guides
+          npm ci
+          npx playwright install --with-deps chromium
+          pip install -r requirements.txt
+
+      - name: Record
+        env:
+          GUIDES: ${{ inputs.guides || 'create-account approve-member' }}
+        run: |
+          status=0
+          for guide in $GUIDES; do
+            echo "::group::$guide"
+            node tools/guides/run.js "$guide" || status=1
+            echo "::endgroup::"
+          done
+          exit $status
+
+      - name: Attach the videos
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: video-guides
+          path: |
+            tools/guides/output/
+            tools/guides/work/*/failed-*.png
+            tools/guides/work/*/*.log
+          if-no-files-found: warn
+          retention-days: 14
