@@ -69,6 +69,7 @@ const BASE_GROUPS = [
     items: [
       { id: 'announcements', label: 'Announcements' },
       { id: 'calendar',      label: 'Church Calendar' },
+      { id: 'directory',     label: 'Member Directory' },
       { id: 'groups',        label: 'Church Groups' },
       { id: 'signups',       label: 'Sign-Ups' },
       { id: 'rotations',     label: 'Rotations' },
@@ -110,7 +111,6 @@ const PROFILE_GROUP = {
 const REPORT_AREAS = ['records', 'summary-report', 'analytical-report'];
 
 const OFFICE_ITEMS = [
-  { id: 'directory',         label: 'Member Directory',  when: user => hasArea(user, 'directory') },
   { id: 'member-attendance', label: 'Member Attendance', when: user => hasArea(user, 'member-attendance') },
   { id: 'record-keeping',    label: 'Reports & Record Keeping', when: user => REPORT_AREAS.some(a => hasArea(user, a)) },
   { id: 'bulletin',          label: 'Weekly Newsletter', when: user => hasArea(user, 'bulletin') },
@@ -619,9 +619,11 @@ function MainApp({ user, impersonatedBy, onStoppedImpersonating, onLogout }) {
           <MemberAttendanceView />
         </main>
       )}
-      {!updating && activeTab === 'directory' && hasArea(user, 'directory') && (
+      {/* Every member may look people up; whoever holds the Member Directory
+          area (and admins) may also add, edit and remove them. */}
+      {!updating && activeTab === 'directory' && (
         <main className="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6 flex-1">
-          <DirectoryView canSync={admin} />
+          <DirectoryView canEdit={hasArea(user, 'directory')} canSync={admin} />
         </main>
       )}
       {!updating && activeTab === 'bulletin' && hasArea(user, 'bulletin') && (

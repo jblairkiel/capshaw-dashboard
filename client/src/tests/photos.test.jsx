@@ -64,7 +64,7 @@ describe('DirectoryView photos', () => {
       }
       return { success: true, rows: [row({ id: 3, name: 'Tom Nelson', address: '2 Elm St', zip: '35750' })] };
     });
-    render(<DirectoryView />);
+    render(<DirectoryView canEdit />);
 
     fireEvent.click(await screen.findByTitle('Add a family photo'));
     const dialog = screen.getByRole('region', { name: 'Family photo' });

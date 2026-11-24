@@ -138,6 +138,12 @@ const TABLES = {
     // or an upload through /api/profile, not from typing a filename.
     columns:  ['id', 'name', 'address', 'city', 'state', 'zip', 'phone', 'cell', 'email', 'notes', 'gender', 'photo', 'own_photo'],
     writable: ['name', 'address', 'city', 'state', 'zip', 'phone', 'cell', 'email', 'notes', 'gender'],
+    // Every member may read the directory (it is the same list "Add the
+    // directory to my phone" hands them), but only once approved, and the
+    // notes are the directory keepers' own: the scrape never fills them, and
+    // the phone export leaves them out too.
+    readRole:   'approved',
+    keeperOnly: ['notes'],
     search:   'name',
     order:    'name ASC',
     describe: r => r.name || 'a member',
