@@ -29,6 +29,71 @@ async function send(url, options = {}) {
   return json;
 }
 
+// Whether a man is rostered for the worship jobs. By default that is a man who
+// is a baptized member; the keeper records the membership here, and can say
+// "always" or "never" for one person when the default is wrong for him.
+
+const MEMBERSHIP_OPTIONS = [
+  { value: '',           label: 'Not recorded' },
+  { value: 'member',     label: 'Baptized member' },
+  { value: 'not-member', label: 'Not a member' },
+];
+
+const OVERRIDE_OPTIONS = [
+  { value: '',    label: 'Follow the default' },
+  { value: 'yes', label: 'Always roster' },
+  { value: 'no',  label: 'Never roster' },
+];
+
+function Participation({ member, onSaved }) {
+  const p = member.participation ?? { membership: '', override: '', participates: false, reason: '' };
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  async function change(field, value) {
+    setSaving(true);
+    setError('');
+    try {
+      const json = await send(`${API}/members/${member.id}/participation`, {
+        method:  'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ [field]: value }),
+      });
+      onSaved(json.member);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const control = 'border border-gray-200 rounded-lg px-2 py-1.5 text-sm bg-white';
+  return (
+    <div className="space-y-2">
+      <h4 className="text-sm font-semibold text-church-navy">Worship jobs</h4>
+      <div className="flex flex-wrap gap-3">
+        <label className="text-xs text-gray-500 flex flex-col gap-1">
+          Membership
+          <select value={p.membership} disabled={saving} onChange={e => change('membership', e.target.value)} className={control}>
+            {MEMBERSHIP_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+        <label className="text-xs text-gray-500 flex flex-col gap-1">
+          Rostered
+          <select value={p.override} disabled={saving} onChange={e => change('override', e.target.value)} className={control}>
+            {OVERRIDE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+      </div>
+      <p className={`text-xs ${p.participates ? 'text-emerald-700' : 'text-amber-800'}`}>
+        {p.participates ? 'Rostered for the worship jobs' : 'Not rostered for the worship jobs'}{p.reason ? ` (${p.reason.replace(/^Not rostered( yet)?: /, '')})` : ''}.
+        {' '}By default the worship jobs go to men who are baptized members.
+      </p>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+    </div>
+  );
+}
+
 // A man, opened from the Preferences tab: what he has said he will do, and his
 // time away — both his own to keep, and the keeper's to record for him when he
 // says it in the foyer instead.
@@ -65,12 +130,14 @@ function ManDialog({ member, onClose, onSaved, onTimeAwayChanged, onRecord }) {
       width="max-w-lg"
     >
       <div className="space-y-4">
-        {member.gender !== 'male' && (
+        {member.gender !== 'male' && member.participation?.override !== 'yes' && (
           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-            This congregation rosters the worship jobs among its men, so nothing recorded here lets
-            them sign up until their directory entry says so.
+            This congregation rosters the worship jobs among its men, so nothing recorded here puts
+            them on the roster until their directory entry says so.
           </p>
         )}
+
+        <Participation member={member} onSaved={onSaved} />
 
         <WorshipPreferences
           // Remounted whenever what is on file changes, so the editor is

@@ -33,6 +33,9 @@ module.exports = {
           cell:    random.chance(0.6) ? who.phone : '',
           email:   who.email,
           gender:  m === 0 ? 'male' : who.gender,
+          // Sample people are all recorded as baptized members, so the sample
+          // men are rostered for the worship jobs (lib/people.js).
+          membership: 'member',
           notes:   MARK,
         }, who.name);
       }

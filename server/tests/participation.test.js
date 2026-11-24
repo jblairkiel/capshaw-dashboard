@@ -24,7 +24,8 @@ function buildApp(user) {
 
 const slot = (date, service, job, name, month = 'September 2026') =>
   db.prepare('INSERT INTO job_assignments (month, date, service, job, name) VALUES (?, ?, ?, ?, ?)').run(month, date, service, job, name);
-const man = (name, gender = 'male') => db.prepare('INSERT INTO directory (name, gender) VALUES (?, ?)').run(name, gender).lastInsertRowid;
+const man = (name, gender = 'male', membership = gender === 'male' ? 'member' : '') =>
+  db.prepare('INSERT INTO directory (name, gender, membership) VALUES (?, ?, ?)').run(name, gender, membership).lastInsertRowid;
 const prefer = (personId, role, level) =>
   db.prepare('INSERT INTO worship_preferences (directory_id, role, level) VALUES (?, ?, ?)').run(personId, role, level);
 
@@ -152,6 +153,6 @@ describe('what each man has said', () => {
     const p = participation.preferences({ weeks: 4, today: TODAY });
     expect(p.coverage.find(c => c.role === 'Song Leader')).toEqual({ role: 'Song Leader', glad: 1, willing: 1, unavailable: 0, unsaid: 1 });
     expect(p.coverage.find(c => c.role === 'Communion')).toEqual({ role: 'Communion', glad: 0, willing: 0, unavailable: 1, unsaid: 2 });
-    expect(p.summary).toEqual({ men: 3, said: 2, unsaid: 1 });
+    expect(p.summary).toEqual({ men: 3, said: 2, unsaid: 1, notRostered: 0 });
   });
 });

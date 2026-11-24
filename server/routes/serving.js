@@ -19,7 +19,10 @@ const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
 const { requireAuth, requireApproved, requireArea, holdsArea } = require('../middleware/auth');
-const { WORSHIP_ROLES, PREFERENCE_LEVELS } = require('../lib/people');
+const {
+  WORSHIP_ROLES, PREFERENCE_LEVELS, MEMBERSHIPS, PARTICIPATION_OVERRIDES,
+  isMembership, isParticipationOverride, isWorshipParticipant, participatesByDefault, participationReason,
+} = require('../lib/people');
 const worship = require('../lib/worship');
 const { SERVICES, MONTHS, parseMonth, servicesIn, serviceRank } = require('../workflows/scheduling');
 const serviceJobs = require('../lib/serviceJobs');
@@ -803,9 +806,21 @@ router.delete('/blackouts/:id', requireApproved, (req, res) => {
 // What the Service Roster page is built from: every member, whether they are
 // down as a man, and what they have said they will volunteer for.
 
+// Whether somebody is rostered for the worship jobs, and why, as the Service
+// Roster shows it (lib/people.js has the rule).
+function participationOf(person) {
+  return {
+    membership:          person.membership || '',
+    override:            person.worship_participant || '',
+    participates:        isWorshipParticipant(person),
+    byDefault:           participatesByDefault(person),
+    reason:              participationReason(person),
+  };
+}
+
 function rosterMembers() {
   const people = db.prepare(`
-    SELECT d.id, d.name, d.gender, d.email,
+    SELECT d.id, d.name, d.gender, d.email, d.membership, d.worship_participant,
            (SELECT COUNT(*) FROM job_assignments j WHERE lower(trim(j.name)) = lower(trim(d.name))) AS assignments
       FROM directory d ORDER BY d.name ASC
   `).all();
@@ -814,8 +829,9 @@ function rosterMembers() {
   const notes       = worship.allNotes();
   const away        = blackouts.byPerson();
 
-  return people.map(p => ({
+  return people.map(({ membership, worship_participant, ...p }) => ({
     ...p,
+    participation: participationOf({ ...p, membership, worship_participant }),
     preferences: preferences.get(p.id) ?? {},
     notes:       notes.get(p.id) ?? '',
     blackouts:   away.get(p.id) ?? [],
@@ -828,7 +844,64 @@ router.get('/members', requireApproved, manageOnly, (req, res) => {
     members: rosterMembers(),
     jobs:    WORSHIP_ROLES,
     levels:  PREFERENCE_LEVELS,
+    memberships: MEMBERSHIPS.filter(Boolean),
+    overrides:   PARTICIPATION_OVERRIDES.filter(Boolean),
   });
+});
+
+// ─── PUT /api/serving/members/:id/participation  { membership?, override? } ──
+// Whether a person is rostered for the worship jobs. By default that is a man
+// who is a baptized member; the keeper records the membership, and can say
+// "always" or "never" for one person when the default is wrong for them. Kept
+// here, with the roster, rather than on the directory, because it is the
+// schedule keeper's to decide and nobody else's to see.
+
+const MEMBERSHIP_WORDS = { member: 'a baptized member', 'not-member': 'not a member', '': 'membership not recorded' };
+const OVERRIDE_WORDS   = { yes: 'always rostered', no: 'never rostered', '': 'following the default' };
+
+router.put('/members/:id/participation', requireApproved, manageOnly, (req, res) => {
+  const person = db.prepare('SELECT id, name, gender, membership, worship_participant FROM directory WHERE id = ?').get(req.params.id);
+  if (!person) return res.status(404).json({ success: false, error: 'No such member' });
+
+  const body = req.body || {};
+  const next = { membership: person.membership || '', worship_participant: person.worship_participant || '' };
+  if (body.membership !== undefined) {
+    const value = String(body.membership ?? '').trim().toLowerCase();
+    if (!isMembership(value)) {
+      return res.status(400).json({ success: false, error: `Membership must be one of: ${MEMBERSHIPS.filter(Boolean).join(', ')}, or blank` });
+    }
+    next.membership = value;
+  }
+  if (body.override !== undefined) {
+    const value = String(body.override ?? '').trim().toLowerCase();
+    if (!isParticipationOverride(value)) {
+      return res.status(400).json({ success: false, error: `Override must be one of: ${PARTICIPATION_OVERRIDES.filter(Boolean).join(', ')}, or blank` });
+    }
+    next.worship_participant = value;
+  }
+
+  const changes = [];
+  if (next.membership !== (person.membership || '')) changes.push(MEMBERSHIP_WORDS[next.membership]);
+  if (next.worship_participant !== (person.worship_participant || '')) changes.push(OVERRIDE_WORDS[next.worship_participant]);
+
+  if (changes.length) {
+    db.prepare('UPDATE directory SET membership = ?, worship_participant = ? WHERE id = ?')
+      .run(next.membership, next.worship_participant, person.id);
+  }
+
+  const after = { ...person, ...next };
+  actionLog.record(req.user, {
+    area:     AREA,
+    action:   'update',
+    entity:   'worship participation',
+    entityId: person.id,
+    summary:  changes.length
+      ? `Recorded ${person.name} as ${changes.join(' and ')} for the worship jobs`
+      : `Reviewed whether ${person.name} is rostered for the worship jobs — nothing changed`,
+    details:  { before: participationOf(person), after: participationOf(after) },
+  });
+
+  res.json({ success: true, member: { id: person.id, name: person.name, participation: participationOf(after) } });
 });
 
 // A man tells the portal himself on My Household & Preferences — but plenty of
