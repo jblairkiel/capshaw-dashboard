@@ -7,7 +7,10 @@
 // database editor.
 //
 // Reading is open to anybody signed in — the portal is members-only already,
-// and these are the same rows the pages have always rendered.
+// and these are the same rows the pages have always rendered. A table can ask
+// for more: the directory is read only by approved members, and its notes
+// only by whoever looks after it (see `readRole` and `keeperOnly` in
+// lib/recordTables.js).
 const express = require('express');
 const router  = express.Router();
 const { requireAuth, requireApproved, holdsArea, hasRole, areaLabel } = require('../middleware/auth');
@@ -57,9 +60,20 @@ function guard(req, res, next) {
 }
 
 router.get('/:table', (req, res) => {
+  const def = tableDef(req.params.table);
+  if (def?.readRole && !hasRole(req.user, def.readRole)) {
+    return res.status(403).json({ success: false, error: 'Account pending approval' });
+  }
   const result = store.list(req.params.table, req.query);
   if (!result) return res.status(404).json({ success: false, error: 'Unknown table' });
-  res.json({ success: true, ...result, canWrite: canWrite(req.user, req.params.table) });
+  const writable = canWrite(req.user, req.params.table);
+  // Columns kept for whoever looks after the table (the directory's notes)
+  // are left off for everybody else.
+  const hidden = writable ? [] : (def?.keeperOnly || []);
+  const rows = hidden.length
+    ? result.rows.map(row => Object.fromEntries(Object.entries(row).filter(([key]) => !hidden.includes(key))))
+    : result.rows;
+  res.json({ success: true, ...result, rows, canWrite: writable });
 });
 
 router.post('/:table', requireApproved, guard, (req, res) => {

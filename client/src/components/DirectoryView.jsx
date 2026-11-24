@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import WorshipPreferences from './WorshipPreferences';
 import PersonPhoto from './PersonPhoto';
 import { OwnPhotoEditor, FamilyPhoto, FamilyPhotoEditor } from './PhotoEditor';
+import { telHref } from '../lib/phone';
 
 // Adding somebody to the directory and removing them go through /api/records,
 // which is gated on the Member Directory area rather than on being an admin.
@@ -9,6 +10,16 @@ import { OwnPhotoEditor, FamilyPhoto, FamilyPhotoEditor } from './PhotoEditor';
 // marked as hand-edited and survive the next sync.
 const API = '/api/records';
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+
+function PhoneLink({ number, icon, label }) {
+  const href = telHref(number);
+  if (!href) return <p className="text-xs text-gray-500">{icon} {number}</p>;
+  return (
+    <a href={href} className="text-xs text-church-navy hover:underline block" aria-label={`Call ${label} ${number}`}>
+      {icon} {number}
+    </a>
+  );
+}
 
 function getLastName(fullName) {
   const parts = fullName.trim().split(/\s+/);
@@ -204,7 +215,9 @@ const CameraIcon = () => (
   </svg>
 );
 
-function FamilyCard({ family, onEdit, onDelete, onFamilyPhoto }) {
+// Without canEdit the card is for looking people up: names, photos, address,
+// tap-to-call numbers and email, with no edit, remove or photo buttons.
+function FamilyCard({ family, canEdit = false, onEdit, onDelete, onFamilyPhoto }) {
   const { familyName, address, city, state, zip, members } = family;
   const location = [address, city, state, zip].filter(Boolean).join(', ');
   // Everybody at an address shares the family photo, so any one of them shows it.
@@ -222,14 +235,16 @@ function FamilyCard({ family, onEdit, onDelete, onFamilyPhoto }) {
           <h3 className="font-semibold text-church-navy text-sm leading-snug">{familyName} Family</h3>
           {location && <p className="text-xs text-gray-400 mt-0.5 leading-tight">{location}</p>}
         </div>
-        <button
-          onClick={() => onFamilyPhoto(family)}
-          className="shrink-0 flex items-center gap-1 text-xs text-gray-400 hover:text-church-navy px-1.5 py-1 rounded"
-          title={withFamilyPhoto ? 'Change the family photo' : 'Add a family photo'}
-        >
-          <CameraIcon />
-          <span className="sr-only sm:not-sr-only">{withFamilyPhoto ? 'Change' : 'Add photo'}</span>
-        </button>
+        {canEdit && (
+          <button
+            onClick={() => onFamilyPhoto(family)}
+            className="shrink-0 flex items-center gap-1 text-xs text-gray-400 hover:text-church-navy px-1.5 py-1 rounded"
+            title={withFamilyPhoto ? 'Change the family photo' : 'Add a family photo'}
+          >
+            <CameraIcon />
+            <span className="sr-only sm:not-sr-only">{withFamilyPhoto ? 'Change' : 'Add photo'}</span>
+          </button>
+        )}
       </div>
 
       {/* Member rows */}
@@ -241,16 +256,17 @@ function FamilyCard({ family, onEdit, onDelete, onFamilyPhoto }) {
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-800 leading-snug">{m.name}</p>
               <div className="mt-0.5 space-y-0.5">
-                {m.cell  && <p className="text-xs text-gray-500">📱 {m.cell}</p>}
-                {m.phone && <p className="text-xs text-gray-500">📞 {m.phone}</p>}
+                {m.cell  && <PhoneLink number={m.cell}  icon="📱" label={`${m.name}'s cell`} />}
+                {m.phone && <PhoneLink number={m.phone} icon="📞" label={`${m.name}'s home phone`} />}
                 {m.email && (
                   <a href={`mailto:${m.email}`} className="text-xs text-church-navy hover:underline block truncate">
                     ✉ {m.email}
                   </a>
                 )}
-                {m.notes && <p className="text-xs text-gray-400 italic">{m.notes}</p>}
+                {canEdit && m.notes && <p className="text-xs text-gray-400 italic">{m.notes}</p>}
               </div>
             </div>
+            {canEdit && (
             <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-0.5">
               <button onClick={() => onEdit(m)} className="p-1 text-gray-400 hover:text-church-navy rounded" title="Edit">
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
@@ -259,6 +275,7 @@ function FamilyCard({ family, onEdit, onDelete, onFamilyPhoto }) {
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
               </button>
             </div>
+            )}
           </div>
         ))}
       </div>
@@ -268,9 +285,12 @@ function FamilyCard({ family, onEdit, onDelete, onFamilyPhoto }) {
 
 // ─── Main view ────────────────────────────────────────────────────────────────
 
+// Every approved member may look the directory up. Adding, editing and removing
+// people, and family photos, are for whoever holds the Member Directory area
+// (canEdit); the server refuses those writes to anybody else either way.
 // Sync from Site runs the same capshawchurch.org refresh as the header's
 // Refresh button, which only admins may start, so only admins see it.
-export default function DirectoryView({ canSync = false }) {
+export default function DirectoryView({ canEdit = false, canSync = false }) {
   const [allMembers, setAllMembers] = useState([]);
   const [families,   setFamilies]   = useState([]);
   const [loading,    setLoading]    = useState(true);
@@ -385,10 +405,12 @@ export default function DirectoryView({ canSync = false }) {
               {syncing ? 'Syncing…' : 'Sync from Site'}
             </button>
           )}
-          <button onClick={() => setModal('new')} className="btn-primary text-sm flex items-center gap-1.5">
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-            Add Member
-          </button>
+          {canEdit && (
+            <button onClick={() => setModal('new')} className="btn-primary text-sm flex items-center gap-1.5">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+              Add Member
+            </button>
+          )}
         </div>
       </div>
 
@@ -447,6 +469,7 @@ export default function DirectoryView({ canSync = false }) {
             <FamilyCard
               key={`${fam.familyName}|${fam.address || fam.members[0]?.id}`}
               family={fam}
+              canEdit={canEdit}
               onEdit={setModal}
               onDelete={handleDelete}
               onFamilyPhoto={setFamilyPhoto}
@@ -455,7 +478,7 @@ export default function DirectoryView({ canSync = false }) {
         </div>
       )}
 
-      {modal !== null && (
+      {canEdit && modal !== null && (
         <MemberModal
           member={modal === 'new' ? null : modal}
           onSave={handleSaved}
@@ -464,7 +487,7 @@ export default function DirectoryView({ canSync = false }) {
         />
       )}
 
-      {familyPhoto && (
+      {canEdit && familyPhoto && (
         <FamilyPhotoModal
           family={familyPhoto}
           onSaved={json => {

@@ -1,6 +1,7 @@
 import { render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import DirectoryView from '../components/DirectoryView';
+import { telHref } from '../lib/phone';
 
 // The member directory groups people into households by shared address, which
 // is the part worth pinning down: the scrape produces a flat list of people and
@@ -132,10 +133,68 @@ describe('DirectoryView', () => {
     expect(within(harris).getAllByText(/📱/)).toHaveLength(1);
   });
 
-  test('shows a note when somebody has one', async () => {
+  test('shows a note to whoever looks after the directory', async () => {
+    mockApi({ rows: [person({ notes: 'Prefers texts' })] });
+    render(<DirectoryView canEdit />);
+    expect(await screen.findByText('Prefers texts')).toBeInTheDocument();
+  });
+
+  test('phone numbers dial with a tap', async () => {
+    mockApi();
+    render(<DirectoryView />);
+
+    const harris = (await screen.findByText('Harris Family')).closest('div.bg-white');
+    expect(within(harris).getByRole('link', { name: /Ray Harris's cell/ })).toHaveAttribute('href', 'tel:2565550101');
+    expect(within(harris).getByRole('link', { name: /Ray Harris's home phone/ })).toHaveAttribute('href', 'tel:2565550100');
+  });
+
+  test('a number with nothing to dial is shown as plain text', async () => {
+    mockApi({ rows: [person({ cell: 'ask the office', phone: '' })] });
+    render(<DirectoryView />);
+    expect(await screen.findByText('📱 ask the office')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /cell/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('telHref', () => {
+  test('keeps only the digits, and a leading + for an international number', () => {
+    expect(telHref('(256) 555-0100')).toBe('tel:2565550100');
+    expect(telHref('256.555.0100')).toBe('tel:2565550100');
+    expect(telHref(' +44 20 7946 0958 ')).toBe('tel:+442079460958');
+    expect(telHref('')).toBeNull();
+    expect(telHref('none')).toBeNull();
+  });
+});
+
+// ─── What a member who does not keep the directory sees ──────────────────────
+
+describe('DirectoryView — looking somebody up', () => {
+  test('a member gets no Add, Edit, Remove or photo buttons', async () => {
+    mockApi();
+    render(<DirectoryView />);
+    await screen.findByText('Harris Family');
+
+    expect(screen.queryByRole('button', { name: /Add Member/i })).not.toBeInTheDocument();
+    expect(screen.queryAllByTitle('Edit')).toHaveLength(0);
+    expect(screen.queryAllByTitle('Remove')).toHaveLength(0);
+    expect(screen.queryByTitle(/family photo/i)).not.toBeInTheDocument();
+  });
+
+  test('a member does not see the keepers\' notes, even if one were sent', async () => {
     mockApi({ rows: [person({ notes: 'Prefers texts' })] });
     render(<DirectoryView />);
-    expect(await screen.findByText('Prefers texts')).toBeInTheDocument();
+    await screen.findByText('Harris Family');
+    expect(screen.queryByText('Prefers texts')).not.toBeInTheDocument();
+  });
+
+  test('whoever looks after the directory gets the buttons', async () => {
+    mockApi();
+    render(<DirectoryView canEdit />);
+    await screen.findByText('Harris Family');
+
+    expect(screen.getByRole('button', { name: /Add Member/i })).toBeInTheDocument();
+    expect(screen.getAllByTitle('Edit').length).toBeGreaterThan(0);
+    expect(screen.getAllByTitle('Remove').length).toBeGreaterThan(0);
   });
 
   test('reports a directory that could not be loaded', async () => {
@@ -236,7 +295,7 @@ describe('DirectoryView — finding somebody', () => {
 describe('DirectoryView — changing the directory', () => {
   async function openLoaded(routes) {
     mockApi(routes);
-    render(<DirectoryView />);
+    render(<DirectoryView canEdit />);
     await screen.findByText('Harris Family');
   }
 
@@ -259,7 +318,7 @@ describe('DirectoryView — changing the directory', () => {
 
   test('a new member is created through the directory table', async () => {
     const fetchMock = mockApi();
-    render(<DirectoryView />);
+    render(<DirectoryView canEdit />);
     await screen.findByText('Harris Family');
 
     fireEvent.click(screen.getByRole('button', { name: /Add Member/i }));
@@ -274,7 +333,7 @@ describe('DirectoryView — changing the directory', () => {
 
   test('an edit goes through the profile API, so the scraper leaves it alone', async () => {
     const fetchMock = mockApi({ save: { success: true, person: person({ id: 1, name: 'Raymond Harris' }) } });
-    render(<DirectoryView />);
+    render(<DirectoryView canEdit />);
     await screen.findByText('Harris Family');
 
     fireEvent.click(screen.getAllByTitle('Edit')[0]);
@@ -308,7 +367,7 @@ describe('DirectoryView — changing the directory', () => {
 
   test('removing somebody asks first, then takes them off the page', async () => {
     const fetchMock = mockApi();
-    render(<DirectoryView />);
+    render(<DirectoryView canEdit />);
     await screen.findByText('Harris Family');
 
     fireEvent.click(screen.getAllByTitle('Remove')[0]);
@@ -323,7 +382,7 @@ describe('DirectoryView — changing the directory', () => {
   test('saying no to the prompt removes nobody', async () => {
     vi.stubGlobal('confirm', vi.fn(() => false));
     const fetchMock = mockApi();
-    render(<DirectoryView />);
+    render(<DirectoryView canEdit />);
     await screen.findByText('Harris Family');
 
     fireEvent.click(screen.getAllByTitle('Remove')[0]);
@@ -345,7 +404,7 @@ describe('DirectoryView — changing the directory', () => {
 describe('DirectoryView — syncing from the church site', () => {
   test('members who are not admins get no Sync button', async () => {
     mockApi();
-    render(<DirectoryView />);
+    render(<DirectoryView canEdit />);
     await screen.findByText('Harris Family');
     expect(screen.queryByRole('button', { name: /Sync from Site/i })).toBeNull();
   });

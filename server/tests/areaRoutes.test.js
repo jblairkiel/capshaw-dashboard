@@ -709,3 +709,50 @@ describe('a guest\'s follow-up', () => {
     expect(startFollowUp(guest, person)).toMatchObject({ status: 400 });
   });
 });
+
+// ─── The member directory ─────────────────────────────────────────────────────
+// Every approved member may read it, the way "Add the directory to my phone"
+// already hands it to them. The notes are the directory keepers' own.
+
+describe('/api/records/directory', () => {
+  const KEEPER = { id: 8, role: 'approved', name: 'Kay', areas: ['directory'] };
+
+  beforeEach(() => {
+    db.prepare('DELETE FROM directory').run();
+    db.prepare(
+      `INSERT INTO directory (name, address, city, state, zip, phone, cell, email, notes)
+       VALUES ('Ray Harris', '1 Oak St', 'Harvest', 'AL', '35749', '(256) 555-0100', '(256) 555-0101', 'ray@example.com', 'Keeper note')`
+    ).run();
+  });
+
+  test('an approved member sees everybody, without the keepers\' notes', async () => {
+    const res = await request(buildApp(MEMBER)).get('/api/records/directory');
+    expect(res.status).toBe(200);
+    expect(res.body.canWrite).toBe(false);
+    expect(res.body.rows[0]).toMatchObject({
+      name: 'Ray Harris', address: '1 Oak St', phone: '(256) 555-0100', cell: '(256) 555-0101', email: 'ray@example.com',
+    });
+    expect(res.body.rows[0]).not.toHaveProperty('notes');
+  });
+
+  test('whoever looks after the directory, and an admin, see the notes too', async () => {
+    for (const user of [KEEPER, ADMIN]) {
+      const res = await request(buildApp(user)).get('/api/records/directory');
+      expect(res.status).toBe(200);
+      expect(res.body.canWrite).toBe(true);
+      expect(res.body.rows[0].notes).toBe('Keeper note');
+    }
+  });
+
+  test('an account still waiting to be approved may not read it', async () => {
+    const res = await request(buildApp(PENDING)).get('/api/records/directory');
+    expect(res.status).toBe(403);
+    expect(res.body.rows).toBeUndefined();
+  });
+
+  test('a member without the area may still not change it', async () => {
+    const res = await request(buildApp(MEMBER)).post('/api/records/directory').send({ name: 'Somebody New' });
+    expect(res.status).toBe(403);
+    expect(db.prepare('SELECT COUNT(*) n FROM directory').get().n).toBe(1);
+  });
+});
