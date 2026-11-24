@@ -122,7 +122,7 @@ module.exports = {
         await d.hold(2400);
         await d.click(form.getByLabel('Song to request'));
         await d.type(facts.songs.request, 70);
-        const option = page.getByRole('option').filter({ hasText: facts.songs.request }).first();
+        const option = page.getByRole('listbox').getByRole('option').filter({ hasText: facts.songs.request }).first();
         await option.waitFor({ timeout: 10000 });
         await d.click(option, { ms: 500 });
         await d.sleep(400);
@@ -179,7 +179,7 @@ module.exports = {
           await d.click(songBox, { ms: 550 });
           // Typed into the box itself, in case the pointer press didn't focus it.
           await songBox.pressSequentially(others[0], { delay: 70 });
-          const pick = page.getByRole('option').filter({ hasText: others[0] }).first();
+          const pick = page.getByRole('listbox').getByRole('option').filter({ hasText: others[0] }).first();
           await pick.waitFor({ timeout: 10000 });
           await d.click(pick, { ms: 450 });
           await d.sleep(400);
@@ -189,9 +189,10 @@ module.exports = {
         }
         // Every song part needs a song before the service can be submitted:
         // the rest are filled in quickly while the caption is up.
+        // Scoped to the song list: the service dropdown's own <option>s match role option too.
         for (let n = 1; n < 20 && await emptySongs.count(); n++) {
           await emptySongs.first().fill(others[n % others.length]);
-          const next = page.getByRole('option').first();
+          const next = page.getByRole('listbox').getByRole('option').first();
           await next.waitFor({ timeout: 10000 });
           await next.click();
           await d.sleep(250);

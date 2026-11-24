@@ -70,15 +70,25 @@ module.exports = {
     // has taken yet.
     const { lists } = await api('get', '/api/signups');
     const train = lists.find(l => l.title === 'Meal train') || lists.find(l => !l.past && !l.closed);
-    if (train) {
-      const { list } = await api('get', `/api/signups/${train.id}`);
+    const takeOpen = async id => {
+      const { list } = await api('get', `/api/signups/${id}`);
       const last = addDays(today, 13);
       for (const date of list.dates.filter(dt => dt.date >= today && dt.date <= last)) {
         const open = date.items.find(i => !i.full);
         if (!open) continue;
         await api('post', `/api/signups/${list.id}/entries`, { dateId: date.id, itemId: open.itemId });
-        break;
+        return true;
       }
+      return false;
+    };
+    // The sample meal train is sometimes full, or outside the two weeks: then
+    // a sample fellowship meal six days out, so the sign-up step always shows.
+    if (!(train && await takeOpen(train.id))) {
+      const made = await api('post', '/api/signups', {
+        title: 'Fellowship meal', description: 'A sample sign-up for the guide.', kind: 'one-date',
+        dates: [{ date: addDays(today, 6), time: '17:30' }], items: [{ label: 'Side dish', needed: 6 }],
+      });
+      await takeOpen(made.list.id);
     }
 
     // Two meetings of the member's own group: one they have not answered, and

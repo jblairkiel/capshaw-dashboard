@@ -74,7 +74,7 @@ module.exports = {
         await d.hold(4400);
         await d.clear();
         const suggestion = dialog.getByText('Suggested because it matches this account', { exact: false });
-        if (await suggestion.isVisible().catch(() => false)) {
+        if (await suggestion.waitFor({ timeout: 5000 }).then(() => true, () => false)) {
           await d.callout(dialog.getByRole('combobox', { name: 'Member directory entry' }), 'Matched by email address', { where: 'below' });
           await d.caption({ chip: 'APPROVE', title: 'Check the suggestion', text: 'If their email address matches someone in the directory, that entry is picked for you. Make sure it is the right person.' });
           await d.hold(4400);
