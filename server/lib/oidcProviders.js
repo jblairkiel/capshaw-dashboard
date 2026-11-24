@@ -156,13 +156,14 @@ class YahooStrategy extends OAuth2Strategy {
       passReqToCallback: true,
     }, verify);
     this.name = 'yahoo';
+    this._userInfoURL = YAHOO.userInfoURL;
     this._oauth2.useAuthorizationHeaderforGET(true);
   }
 
   // Not being able to reach userinfo is no reason to fail the sign-in: the
   // id_token may well say enough on its own.
   userProfile(accessToken, done) {
-    this._oauth2.get(YAHOO.userInfoURL, accessToken, (err, body) => {
+    this._oauth2.get(this._userInfoURL, accessToken, (err, body) => {
       if (err) return done(null, {});
       try { done(null, { _json: JSON.parse(body) }); } catch { done(null, {}); }
     });
